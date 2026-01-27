@@ -1,70 +1,77 @@
-# Court Simulator
+# Prompt Playground - Legal Brief Analysis
 
-A court hearing simulator that analyzes and compares legal briefs using AI. Built with React + TypeScript (Bun) and Python FastAPI.
+A frontend-only prompting playground for testing and refining Gemini prompts for legal brief comparison. Designed for teams to experiment with prompt engineering without needing backend infrastructure.
 
 ## Features
 
-- **Brief Comparison**: Upload two legal briefs and get AI-powered semantic analysis
-- **Difference Detection**: Identifies key differences in legal arguments, facts, precedents, and conclusions
-- **Significance Rating**: Each difference is rated by legal significance (High/Medium/Low)
-- **Common Ground**: Shows where both briefs align
+- **Editable System Prompt**: Modify the prompt template in real-time
+- **Prompt Preview**: See exactly what gets sent to Gemini before running
+- **Multiple Models**: Choose between Gemini 1.5 Flash, 1.5 Pro, 2.0 Flash, etc.
+- **Structured Output**: Parses JSON responses and displays them nicely
+- **Raw Response View**: Always see the raw API response for debugging
+- **Pre-configured API Key**: Set once in GitHub Secrets, works for all users
 
-## Project Structure
+## Deployment to GitHub Pages
 
-```
-├── frontend/              # React + TypeScript (Bun + Vite)
-│   ├── src/
-│   │   ├── App.tsx        # Main comparison UI
-│   │   ├── main.tsx       # Entry point
-│   │   └── index.css      # Styles
-│   ├── package.json
-│   └── vite.config.ts
-├── backend/               # Python FastAPI
-│   ├── main.py            # API with Gemini integration
-│   ├── requirements.txt
-│   └── .env               # API keys (not in git)
-└── README.md
-```
+### Step 1: Add Your Gemini API Key to GitHub Secrets
 
-## Prerequisites
+1. Go to your repository on GitHub
+2. Navigate to **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret**
+4. Set the name to: `GEMINI_API_KEY`
+5. Paste your Gemini API key as the value
+6. Click **Add secret**
 
-- [Docker](https://www.docker.com/) (recommended)
-- Or: [Bun](https://bun.sh/) + [Python 3.10+](https://www.python.org/)
-- Gemini API key
+![GitHub Secrets Location](https://docs.github.com/assets/cb-28266/images/help/repository/repo-settings-secrets-and-variables.png)
 
-## Quick Start (Docker)
+### Step 2: Enable GitHub Pages
+
+1. Still in repository **Settings**, go to **Pages**
+2. Under "Build and deployment", set **Source** to **"GitHub Actions"**
+
+### Step 3: Push to Main
 
 ```bash
-docker compose up --build
+git add .
+git commit -m "Deploy prompt playground"
+git push origin main
 ```
 
-That's it! Open `http://localhost:3000`
+GitHub Actions will automatically:
+- Build the frontend with your API key embedded
+- Deploy to GitHub Pages
 
-To run in background:
-```bash
-docker compose up -d --build
+Your site will be available at:
+```
+https://YOUR_USERNAME.github.io/YOUR_REPO_NAME/
 ```
 
-To stop:
-```bash
-docker compose down
-```
+### Step 4: Share with Your Team
 
-## Manual Setup (without Docker)
+Just share the URL! The API key is already configured, so your team can immediately start experimenting with prompts.
 
-### Backend
+## Getting a Gemini API Key
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
+1. Go to [Google AI Studio](https://aistudio.google.com/apikey)
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the key
 
-API runs at `http://localhost:8000`
+## Security Note
 
-### Frontend
+Since GitHub Pages serves static files, the API key gets embedded in the JavaScript bundle during build. This means:
+
+- Anyone who can access your site URL can technically extract the key from network requests
+- **For internal team use**, this is usually acceptable
+- **For public access**, consider using API key restrictions in Google Cloud Console:
+  - Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+  - Click on your API key
+  - Under "Application restrictions", select "HTTP referrers"
+  - Add your GitHub Pages URL (e.g., `https://yourname.github.io/*`)
+
+This ensures the key only works when called from your specific domain.
+
+## Local Development
 
 ```bash
 cd frontend
@@ -72,17 +79,33 @@ bun install
 bun run dev
 ```
 
-App runs at `http://localhost:3000`
+Then open http://localhost:3000
 
-## API Endpoints
+For local development with an API key, create a `.env` file in the `frontend` folder:
+```
+VITE_GEMINI_API_KEY=your_api_key_here
+```
 
-- `GET /api/health` - Health check
-- `POST /api/compare-briefs` - Compare two briefs
-  - Body: `{ "brief_a": "...", "brief_b": "..." }`
-  - Returns: Summary, differences, and common ground
+## How It Works
 
-## Future Features
+1. **API key is pre-configured** - Set via GitHub Secrets during deployment
+2. **Edit the system prompt** - Use `{{BRIEF_A}}` and `{{BRIEF_B}}` as placeholders
+3. **Paste your briefs** - Add content to Brief A and Brief B
+4. **Preview** - Check the "Prompt Preview" tab to see the full prompt
+5. **Run Analysis** - Calls Gemini directly from the browser
+6. **View Results** - See both raw and parsed responses
 
-- Virtual judge that asks questions about your brief
-- Interactive Q&A sessions
-- Case law reference checking
+## Prompt Template Variables
+
+The system prompt supports these placeholders:
+- `{{BRIEF_A}}` - Replaced with Brief A content
+- `{{BRIEF_B}}` - Replaced with Brief B content
+
+## Updating the API Key
+
+To rotate or change the API key:
+1. Go to **Settings** → **Secrets and variables** → **Actions**
+2. Click on `GEMINI_API_KEY`
+3. Click **Update secret**
+4. Enter the new key
+5. Go to **Actions** tab and re-run the latest deployment (or push any change)
