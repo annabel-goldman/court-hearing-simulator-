@@ -101,6 +101,7 @@ export default function Playground() {
   const [provider, setProvider] = useState<Provider>(OPENAI_API_KEY ? 'openai' : 'gemini')
   const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini')
+  const [temperature, setTemperature] = useState(0.7)
   const [result, setResult] = useState<ComparisonResult | null>(null)
   const [rawResponse, setRawResponse] = useState('')
   const [loading, setLoading] = useState(false)
@@ -224,7 +225,7 @@ export default function Playground() {
           body: JSON.stringify({
             model: openaiModel,
             messages: [{ role: 'user', content: fullPrompt }],
-            temperature: 0.7,
+            temperature: temperature,
             max_tokens: 8192,
           }),
         })
@@ -245,7 +246,7 @@ export default function Playground() {
             body: JSON.stringify({
               contents: [{ parts: [{ text: fullPrompt }] }],
               generationConfig: {
-                temperature: 0.7,
+                temperature: temperature,
                 maxOutputTokens: 8192,
               },
             }),
@@ -342,6 +343,18 @@ export default function Playground() {
               PDF
             </button>
           </div>
+        </div>
+
+        <div className="temperature-control">
+          <label>Temperature: {temperature.toFixed(1)}</label>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={temperature}
+            onChange={(e) => setTemperature(parseFloat(e.target.value))}
+          />
         </div>
 
         <div className="api-status">

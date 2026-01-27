@@ -524,6 +524,54 @@ body {
   gap: 0.75rem;
 }
 
+/* Temperature Control */
+.temperature-control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.temperature-control label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  min-width: 110px;
+}
+
+.temperature-control input[type="range"] {
+  width: 100px;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-muted);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.temperature-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.temperature-control input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.temperature-control input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--primary);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
 /* Action Row */
 .action-row {
   display: flex;
