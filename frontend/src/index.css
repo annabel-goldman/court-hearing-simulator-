@@ -678,6 +678,32 @@ body {
   font-size: 0.9375rem;
 }
 
+/* Response Output */
+.response-output {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  animation: fadeUp 0.4s ease-out;
+}
+
+.response-output h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.response-text {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Results Section */
 .results-section {
   animation: fadeUp 0.4s ease-out;

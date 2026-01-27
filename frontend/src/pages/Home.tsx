@@ -6,26 +6,12 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 // Set up PDF.js worker
 GlobalWorkerOptions.workerSrc = workerSrc
 
-interface SemanticDifference {
-  category: string
-  brief_a_position: string
-  brief_b_position: string
-  significance: 'High' | 'Medium' | 'Low'
-  explanation: string
-}
-
-interface ComparisonResult {
-  summary: string
-  differences: SemanticDifference[]
-  common_ground: string[]
-}
-
 interface UploadedFile {
   name: string
   text: string
 }
 
-const SYSTEM_PROMPT = `You are a legal analyst comparing two court briefs. Analyze the semantic differences between them.
+const SYSTEM_PROMPT = `You are a legal analyst. Analyze the following two court briefs and generate thoughtful questions that would help understand the key issues, arguments, and potential weaknesses in each position.
 
 BRIEF A:
 {{BRIEF_A}}
@@ -33,22 +19,13 @@ BRIEF A:
 BRIEF B:
 {{BRIEF_B}}
 
-Provide your analysis in the following JSON format (respond ONLY with valid JSON, no markdown):
-{
-    "summary": "A 2-3 sentence overview of the key differences between the briefs",
-    "differences": [
-        {
-            "category": "Category of difference (e.g., 'Legal Argument', 'Facts Presented', 'Relief Sought', 'Precedent Cited', 'Burden of Proof')",
-            "brief_a_position": "What Brief A argues or states on this point",
-            "brief_b_position": "What Brief B argues or states on this point",
-            "significance": "High/Medium/Low - how significant is this difference",
-            "explanation": "Why this difference matters legally"
-        }
-    ],
-    "common_ground": ["List of points where both briefs agree or align"]
-}
+Please provide:
+1. Key questions that a judge might ask about Brief A's arguments
+2. Key questions that a judge might ask about Brief B's arguments  
+3. Questions that highlight the main points of contention between the two briefs
+4. Questions that could expose weaknesses or gaps in either argument
 
-Focus on substantive semantic differences in legal arguments, facts, interpretations, and conclusions. Identify at least 3 differences if they exist.`
+Format your response in a clear, readable way.`
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
@@ -79,7 +56,7 @@ export default function Home() {
   const [loadingB, setLoadingB] = useState(false)
   const [dragOverA, setDragOverA] = useState(false)
   const [dragOverB, setDragOverB] = useState(false)
-  const [result, setResult] = useState<ComparisonResult | null>(null)
+  const [response, setResponse] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [provider, setProvider] = useState<Provider>(OPENAI_API_KEY ? 'openai' : 'gemini')
@@ -138,7 +115,7 @@ export default function Home() {
     }
   }
 
-  const compareBriefs = async () => {
+  const analyzeBriefs = async () => {
     if (!fileA?.text || !fileB?.text) {
       setError('Please upload both PDFs')
       return
@@ -152,7 +129,7 @@ export default function Home() {
 
     setLoading(true)
     setError('')
-    setResult(null)
+    setResponse('')
 
     const fullPrompt = SYSTEM_PROMPT
       .replace('{{BRIEF_A}}', fileA.text)
@@ -162,7 +139,7 @@ export default function Home() {
       let responseText = ''
 
       if (provider === 'openai') {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -176,15 +153,15 @@ export default function Home() {
           }),
         })
 
-        const data = await response.json()
+        const data = await res.json()
 
-        if (!response.ok) {
+        if (!res.ok) {
           throw new Error(data.error?.message || 'API request failed')
         }
 
         responseText = data.choices?.[0]?.message?.content || ''
       } else {
-        const response = await fetch(
+        const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
           {
             method: 'POST',
@@ -199,22 +176,16 @@ export default function Home() {
           }
         )
 
-        const data = await response.json()
+        const data = await res.json()
 
-        if (!response.ok) {
+        if (!res.ok) {
           throw new Error(data.error?.message || 'API request failed')
         }
 
         responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
       }
 
-      let cleanedText = responseText.trim()
-      if (cleanedText.startsWith('```')) {
-        const lines = cleanedText.split('\n')
-        cleanedText = lines.slice(1, -1).join('\n')
-      }
-      const parsed = JSON.parse(cleanedText)
-      setResult(parsed)
+      setResponse(responseText)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -225,7 +196,7 @@ export default function Home() {
   const clearAll = () => {
     setFileA(null)
     setFileB(null)
-    setResult(null)
+    setResponse('')
     setError('')
     if (inputRefA.current) inputRefA.current.value = ''
     if (inputRefB.current) inputRefB.current.value = ''
@@ -252,8 +223,8 @@ export default function Home() {
 
       <main className="home-main">
         <div className="hero">
-          <h1>Brief Comparison</h1>
-          <p>Upload two legal briefs to analyze their semantic differences</p>
+          <h1>Brief Analysis</h1>
+          <p>Upload two legal briefs to generate questions and insights</p>
         </div>
 
         <div className="provider-toggle">
@@ -385,7 +356,7 @@ export default function Home() {
         <div className="action-row">
           <button
             className="btn-primary-large"
-            onClick={compareBriefs}
+            onClick={analyzeBriefs}
             disabled={loading || !fileA || !fileB}
           >
             {loading ? (
@@ -394,10 +365,10 @@ export default function Home() {
                 Analyzing...
               </>
             ) : (
-              'Compare Briefs'
+              'Generate Questions'
             )}
           </button>
-          {(fileA || fileB || result) && (
+          {(fileA || fileB || response) && (
             <button className="btn-ghost" onClick={clearAll} disabled={loading}>
               Clear All
             </button>
@@ -406,58 +377,10 @@ export default function Home() {
 
         {error && <div className="error-banner">{error}</div>}
 
-        {result && (
-          <div className="results-section">
-            <div className="result-card summary-card">
-              <h2>Summary</h2>
-              <p>{result.summary}</p>
-            </div>
-
-            {result.differences && result.differences.length > 0 && (
-              <div className="differences-container">
-                <h2>Key Differences</h2>
-                <div className="differences-list">
-                  {result.differences.map((diff, index) => (
-                    <div key={index} className="diff-card">
-                      <div className="diff-header">
-                        <span className="diff-category">{diff.category}</span>
-                        <span className={`diff-badge diff-badge-${diff.significance.toLowerCase()}`}>
-                          {diff.significance}
-                        </span>
-                      </div>
-
-                      <div className="diff-comparison">
-                        <div className="diff-side diff-side-a">
-                          <span className="diff-label">Brief A</span>
-                          <p>{diff.brief_a_position}</p>
-                        </div>
-                        <div className="diff-divider" />
-                        <div className="diff-side diff-side-b">
-                          <span className="diff-label">Brief B</span>
-                          <p>{diff.brief_b_position}</p>
-                        </div>
-                      </div>
-
-                      <div className="diff-explanation">
-                        <span className="diff-explanation-label">Why it matters</span>
-                        <p>{diff.explanation}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {result.common_ground && result.common_ground.length > 0 && (
-              <div className="result-card common-card">
-                <h2>Common Ground</h2>
-                <ul>
-                  {result.common_ground.map((point, index) => (
-                    <li key={index}>{point}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        {response && (
+          <div className="response-output">
+            <h2>Analysis</h2>
+            <div className="response-text">{response}</div>
           </div>
         )}
       </main>
