@@ -450,6 +450,80 @@ body {
   color: var(--error);
 }
 
+/* Compact upload for playground */
+.upload-zone-compact {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 120px;
+  padding: 1rem;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.upload-zone-compact:hover {
+  border-color: var(--primary);
+  background: var(--primary-subtle);
+}
+
+.upload-zone-compact.drag-over {
+  border-color: var(--primary);
+  background: var(--primary-subtle);
+  border-style: solid;
+}
+
+.upload-zone-compact.loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.upload-zone-compact input {
+  display: none;
+}
+
+.file-preview-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 120px;
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.file-preview-compact .file-icon {
+  width: 40px;
+  height: 40px;
+  font-size: 0.7rem;
+}
+
+.file-preview-compact .file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-preview-compact .file-name {
+  font-size: 0.875rem;
+}
+
+.file-preview-compact .file-meta {
+  font-size: 0.75rem;
+}
+
+.input-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 /* Action Row */
 .action-row {
   display: flex;
@@ -766,10 +840,16 @@ body {
 .playground-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 1.5rem;
   padding: 1rem 2rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-subtle);
+  flex-wrap: wrap;
+}
+
+.playground-header .api-status {
+  margin-left: auto;
 }
 
 .model-selector {
