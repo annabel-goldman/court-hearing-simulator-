@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import threading
 import time
 from collections.abc import Generator
@@ -61,7 +62,12 @@ class WebcamCapture:
         if self._cap is not None:
             return True
 
-        self._cap = cv2.VideoCapture(self.config.device_id)
+        # Use AVFoundation backend on macOS (required for M1/Apple Silicon)
+        if platform.system() == "Darwin":
+            self._cap = cv2.VideoCapture(self.config.device_id, cv2.CAP_AVFOUNDATION)
+        else:
+            self._cap = cv2.VideoCapture(self.config.device_id)
+
         if not self._cap.isOpened():
             self._cap = None
             return False
