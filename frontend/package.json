@@ -10,10 +10,15 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@react-three/drei": "^9.92.7",
+    "@react-three/fiber": "^8.15.19",
+    "@types/three": "^0.182.0",
     "pdfjs-dist": "^5.4.530",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^7.13.0"
+    "react-router-dom": "^7.13.0",
+    "three": "^0.160.0",
+    "wawa-lipsync": "^0.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

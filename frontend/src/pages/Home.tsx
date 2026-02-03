@@ -216,9 +216,10 @@ export default function Home() {
     <div className="home">
       <nav className="nav">
         <div className="nav-brand">Court Simulator</div>
-        <Link to="/playground" className="nav-link">
-          Prompt Playground →
-        </Link>
+        <div className="nav-links">
+          <Link to="/avatar" className="nav-link">Avatar</Link>
+          <Link to="/playground" className="nav-link">Playground</Link>
+        </div>
       </nav>
 
       <main className="home-main">

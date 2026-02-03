@@ -6,7 +6,7 @@ import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 // Set up PDF.js worker
 GlobalWorkerOptions.workerSrc = workerSrc
 
-const DEFAULT_SYSTEM_PROMPT = `You are a legal analyst comparing two court briefs. Analyze the semantic differences between them.
+const DEFAULT_SYSTEM_PROMPT = `You are a legal analyst. Analyze the following two court briefs and generate thoughtful questions that would help understand the key issues, arguments, and potential weaknesses in each position.
 
 BRIEF A:
 {{BRIEF_A}}
@@ -14,36 +14,13 @@ BRIEF A:
 BRIEF B:
 {{BRIEF_B}}
 
-Provide your analysis in the following JSON format (respond ONLY with valid JSON, no markdown):
-{
-    "summary": "A 2-3 sentence overview of the key differences between the briefs",
-    "differences": [
-        {
-            "category": "Category of difference (e.g., 'Legal Argument', 'Facts Presented', 'Relief Sought', 'Precedent Cited', 'Burden of Proof')",
-            "brief_a_position": "What Brief A argues or states on this point",
-            "brief_b_position": "What Brief B argues or states on this point",
-            "significance": "High/Medium/Low - how significant is this difference",
-            "explanation": "Why this difference matters legally"
-        }
-    ],
-    "common_ground": ["List of points where both briefs agree or align"]
-}
+Please provide:
+1. Key questions that a judge might ask about Brief A's arguments
+2. Key questions that a judge might ask about Brief B's arguments  
+3. Questions that highlight the main points of contention between the two briefs
+4. Questions that could expose weaknesses or gaps in either argument
 
-Focus on substantive semantic differences in legal arguments, facts, interpretations, and conclusions. Identify at least 3 differences if they exist.`
-
-interface SemanticDifference {
-  category: string
-  brief_a_position: string
-  brief_b_position: string
-  significance: 'High' | 'Medium' | 'Low'
-  explanation: string
-}
-
-interface ComparisonResult {
-  summary: string
-  differences: SemanticDifference[]
-  common_ground: string[]
-}
+Format your response in a clear, readable way.`
 
 interface UploadedFile {
   name: string
@@ -102,7 +79,6 @@ export default function Playground() {
   const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
   const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini')
   const [temperature, setTemperature] = useState(0.7)
-  const [result, setResult] = useState<ComparisonResult | null>(null)
   const [rawResponse, setRawResponse] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -205,7 +181,6 @@ export default function Playground() {
 
     setLoading(true)
     setError('')
-    setResult(null)
     setRawResponse('')
 
     const fullPrompt = systemPrompt
@@ -263,18 +238,6 @@ export default function Playground() {
       }
 
       setRawResponse(responseText)
-
-      try {
-        let cleanedText = responseText.trim()
-        if (cleanedText.startsWith('```')) {
-          const lines = cleanedText.split('\n')
-          cleanedText = lines.slice(1, -1).join('\n')
-        }
-        const parsed = JSON.parse(cleanedText)
-        setResult(parsed)
-      } catch {
-        // Not valid JSON, that's fine
-      }
       setActiveTab('response')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -292,9 +255,9 @@ export default function Playground() {
   return (
     <div className="playground">
       <nav className="nav">
-        <Link to="/" className="nav-link">← Back to Home</Link>
+        <Link to="/" className="nav-link">← Home</Link>
         <div className="nav-brand">Prompt Playground</div>
-        <div className="nav-spacer" />
+        <Link to="/avatar" className="nav-link">Avatar →</Link>
       </nav>
 
       <div className="playground-header">
@@ -524,15 +487,9 @@ export default function Playground() {
         {activeTab === 'response' && (
           <div className="response-panel">
             <div className="raw-response">
-              <h3>Raw Response</h3>
-              <pre>{rawResponse}</pre>
+              <h3>Response</h3>
+              <div className="response-text">{rawResponse}</div>
             </div>
-            {result && (
-              <div className="parsed-response">
-                <h3>Parsed Result</h3>
-                <pre>{JSON.stringify(result, null, 2)}</pre>
-              </div>
-            )}
           </div>
         )}
 
