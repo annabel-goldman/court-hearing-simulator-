@@ -1,0 +1,26 @@
+{
+    "case_name": "Example v. Example",
+    "court_level": "federal_appellate",
+    "legal_issues": [
+        "standing",
+        "first_amendment",
+        "prior_restraint"
+    ],
+    "user_role": "petitioner",
+    "case_facts": {
+        "summary": "A case involving a First Amendment challenge to a government regulation",
+        "plaintiff": "Example Organization",
+        "defendant": "Government Agency",
+        "key_events": [
+            "Regulation was enacted",
+            "Plaintiff challenged regulation",
+            "Lower court ruled for defendant"
+        ]
+    },
+    "key_precedents": [
+        "Case Name 1 (Year)",
+        "Case Name 2 (Year)"
+    ],
+    "additional_context": "Any additional context about the case, legal standards, etc."
+}
+

@@ -1,0 +1,9 @@
+{
+    "judge_personality": "strict",
+    "interruption_frequency": "medium",
+    "question_style": "probing",
+    "min_seconds_between_interruptions": 10,
+    "max_interruptions_per_minute": 2,
+    "notes": "Configuration for judge behavior. Copy this to judge_config.json and modify as needed."
+}
+
