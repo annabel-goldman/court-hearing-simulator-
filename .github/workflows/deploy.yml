@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [court-hearing]
   workflow_dispatch:
 
 permissions:
@@ -38,6 +38,9 @@ jobs:
           # API keys from GitHub Secrets
           VITE_GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VITE_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Production backend (set in repo Secrets for deploy)
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
         run: bun run build
 
       - name: Setup Pages

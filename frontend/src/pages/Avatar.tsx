@@ -19,8 +19,8 @@ import { JudgeQuestionOverlay } from '../components/overlays/JudgeQuestionOverla
 import { CourtroomHUD } from '../components/overlays/CourtroomHUD'
 import type { SpeakingRole, SimulationPhase, SessionConfig } from '../components/courtroom/types'
 
-// TTS endpoint
-const TTS_ENDPOINT = 'http://localhost:8000/api/tts'
+// TTS endpoint (set VITE_API_URL in production, e.g. https://your-backend.onrender.com)
+const TTS_ENDPOINT = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api/tts'
 
 export default function Avatar() {
   // ========== STATE ==========

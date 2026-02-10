@@ -82,10 +82,13 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for frontend
+# CORS for frontend (add production origins via CORS_ORIGINS env, e.g. https://user.github.io,https://your-app.pages.dev)
+_cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+if os.getenv("CORS_ORIGINS"):
+    _cors_origins.extend(o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip())
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
