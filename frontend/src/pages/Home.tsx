@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -10,25 +10,6 @@ interface UploadedFile {
   name: string
   text: string
 }
-
-const SYSTEM_PROMPT = `You are a legal analyst. Analyze the following two court briefs and generate thoughtful questions that would help understand the key issues, arguments, and potential weaknesses in each position.
-
-BRIEF A:
-{{BRIEF_A}}
-
-BRIEF B:
-{{BRIEF_B}}
-
-Please provide:
-1. Key questions that a judge might ask about Brief A's arguments
-2. Key questions that a judge might ask about Brief B's arguments  
-3. Questions that highlight the main points of contention between the two briefs
-4. Questions that could expose weaknesses or gaps in either argument
-
-Format your response in a clear, readable way.`
-
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
 
 async function extractTextFromPdf(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer()
@@ -47,19 +28,15 @@ async function extractTextFromPdf(file: File): Promise<string> {
   return fullText.trim()
 }
 
-type Provider = 'openai' | 'gemini'
-
 export default function Home() {
+  const navigate = useNavigate()
   const [fileA, setFileA] = useState<UploadedFile | null>(null)
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
   const [loadingA, setLoadingA] = useState(false)
   const [loadingB, setLoadingB] = useState(false)
   const [dragOverA, setDragOverA] = useState(false)
   const [dragOverB, setDragOverB] = useState(false)
-  const [response, setResponse] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [provider, setProvider] = useState<Provider>(OPENAI_API_KEY ? 'openai' : 'gemini')
   
   const inputRefA = useRef<HTMLInputElement>(null)
   const inputRefB = useRef<HTMLInputElement>(null)
@@ -115,88 +92,28 @@ export default function Home() {
     }
   }
 
-  const analyzeBriefs = async () => {
+  const enterCourtroom = () => {
     if (!fileA?.text || !fileB?.text) {
-      setError('Please upload both PDFs')
+      setError('Please upload both briefs before entering the courtroom')
       return
     }
 
-    const apiKey = provider === 'openai' ? OPENAI_API_KEY : GEMINI_API_KEY
-    if (!apiKey) {
-      setError(`${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key not configured`)
-      return
+    // Store session config with demo mode and attorney role
+    const sessionConfig = {
+      proceedingType: 'demo',
+      userRole: 'attorney',
+      materials: [
+        { name: fileA.name, text: fileA.text, role: 'appellant' },
+        { name: fileB.name, text: fileB.text, role: 'appellee' }
+      ]
     }
-
-    setLoading(true)
-    setError('')
-    setResponse('')
-
-    const fullPrompt = SYSTEM_PROMPT
-      .replace('{{BRIEF_A}}', fileA.text)
-      .replace('{{BRIEF_B}}', fileB.text)
-
-    try {
-      let responseText = ''
-
-      if (provider === 'openai') {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: fullPrompt }],
-            temperature: 0.7,
-            max_tokens: 8192,
-          }),
-        })
-
-        const data = await res.json()
-
-        if (!res.ok) {
-          throw new Error(data.error?.message || 'API request failed')
-        }
-
-        responseText = data.choices?.[0]?.message?.content || ''
-      } else {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: fullPrompt }] }],
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 8192,
-              },
-            }),
-          }
-        )
-
-        const data = await res.json()
-
-        if (!res.ok) {
-          throw new Error(data.error?.message || 'API request failed')
-        }
-
-        responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      }
-
-      setResponse(responseText)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
-    } finally {
-      setLoading(false)
-    }
+    sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
+    navigate('/courtroom')
   }
 
   const clearAll = () => {
     setFileA(null)
     setFileB(null)
-    setResponse('')
     setError('')
     if (inputRefA.current) inputRefA.current.value = ''
     if (inputRefB.current) inputRefB.current.value = ''
@@ -216,45 +133,20 @@ export default function Home() {
     <div className="home">
       <nav className="nav">
         <div className="nav-brand">Court Simulator</div>
-        <div className="nav-links">
-          <Link to="/avatar" className="nav-link">Avatar</Link>
-          <Link to="/playground" className="nav-link">Playground</Link>
-        </div>
+        <div className="nav-spacer" />
       </nav>
 
       <main className="home-main">
         <div className="hero">
-          <h1>Brief Analysis</h1>
-          <p>Upload two legal briefs to generate questions and insights</p>
-        </div>
-
-        <div className="provider-toggle">
-          <span className="provider-label">AI Provider:</span>
-          <div className="toggle-group">
-            <button
-              className={`toggle-btn ${provider === 'openai' ? 'active' : ''}`}
-              onClick={() => setProvider('openai')}
-              disabled={!OPENAI_API_KEY}
-              title={!OPENAI_API_KEY ? 'OpenAI API key not configured' : ''}
-            >
-              OpenAI
-            </button>
-            <button
-              className={`toggle-btn ${provider === 'gemini' ? 'active' : ''}`}
-              onClick={() => setProvider('gemini')}
-              disabled={!GEMINI_API_KEY}
-              title={!GEMINI_API_KEY ? 'Gemini API key not configured' : ''}
-            >
-              Gemini
-            </button>
-          </div>
+          <h1>Court Simulator</h1>
+          <p>Upload your two briefs to enter the courtroom</p>
         </div>
 
         <div className="upload-section">
           <div className="upload-card">
             <div className="upload-header">
               <span className="upload-badge upload-badge-a">A</span>
-              <label>First Brief</label>
+              <label>Appellant Brief</label>
             </div>
             <div className="upload-body">
               {fileA ? (
@@ -283,7 +175,7 @@ export default function Home() {
                       const file = e.target.files?.[0]
                       if (file) handleFileUpload(file, setFileA, setLoadingA)
                     }}
-                    disabled={loadingA || loading}
+                    disabled={loadingA}
                   />
                   {loadingA ? (
                     <>
@@ -305,7 +197,7 @@ export default function Home() {
           <div className="upload-card">
             <div className="upload-header">
               <span className="upload-badge upload-badge-b">B</span>
-              <label>Second Brief</label>
+              <label>Appellee Brief</label>
             </div>
             <div className="upload-body">
               {fileB ? (
@@ -334,7 +226,7 @@ export default function Home() {
                       const file = e.target.files?.[0]
                       if (file) handleFileUpload(file, setFileB, setLoadingB)
                     }}
-                    disabled={loadingB || loading}
+                    disabled={loadingB}
                   />
                   {loadingB ? (
                     <>
@@ -356,34 +248,20 @@ export default function Home() {
 
         <div className="action-row">
           <button
-            className="btn-primary-large"
-            onClick={analyzeBriefs}
-            disabled={loading || !fileA || !fileB}
+            className="btn-primary-large start-btn"
+            onClick={enterCourtroom}
+            disabled={!fileA || !fileB}
           >
-            {loading ? (
-              <>
-                <span className="spinner" />
-                Analyzing...
-              </>
-            ) : (
-              'Generate Questions'
-            )}
+            Enter Courtroom
           </button>
-          {(fileA || fileB || response) && (
-            <button className="btn-ghost" onClick={clearAll} disabled={loading}>
+          {(fileA || fileB) && (
+            <button className="btn-ghost" onClick={clearAll}>
               Clear All
             </button>
           )}
         </div>
 
         {error && <div className="error-banner">{error}</div>}
-
-        {response && (
-          <div className="response-output">
-            <h2>Analysis</h2>
-            <div className="response-text">{response}</div>
-          </div>
-        )}
       </main>
     </div>
   )

@@ -1,1 +1,0 @@
-from interruptor import thoughtocomplete

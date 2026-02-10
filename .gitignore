@@ -1,0 +1,20 @@
+# Env secrets — .env.example is committed; never commit .env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+
+# Node
+node_modules/
+
+# Build / IDE
+dist/
+.DS_Store
