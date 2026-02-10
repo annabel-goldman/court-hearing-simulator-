@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [court-hearing]
+    branches: [court-room]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: court-hearing
+          ref: court-room
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
