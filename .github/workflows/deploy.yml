@@ -2,8 +2,13 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [court-room]
+    branches: [court-room, court-hearing]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build and deploy'
+        required: true
+        default: 'court-room'
 
 permissions:
   contents: read
@@ -21,7 +26,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: court-room
+          ref: ${{ github.event.inputs.branch || github.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -44,6 +49,10 @@ jobs:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
         run: bun run build
+
+      - name: Write deploy info (verify which branch is live)
+        run: |
+          echo '{"branch":"${{ github.ref_name }}","sha":"${{ github.sha }}"}' > frontend/dist/deploy-info.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
