@@ -52,7 +52,7 @@ Your app has two parts: **frontend** (React/Vite, static) and **backend** (FastA
 
 The workflow deploys when you push to the **`court-hearing`** branch.
 
-1. In GitHub: **Settings → Pages** → Source: **GitHub Actions**.
+1. In GitHub: **Settings → Pages** → set **Source** to **GitHub Actions** (not "Deploy from a branch"). If it’s set to a branch like main, the site will serve from that branch instead of the workflow.
 2. In **Settings → Secrets and variables → Actions**, add:
    - `OPENAI_API_KEY` and/or `GEMINI_API_KEY` (for Judge Admin).
    - **Required for production:** `VITE_API_URL` = `https://your-app.onrender.com` (your Render URL, no trailing slash).
