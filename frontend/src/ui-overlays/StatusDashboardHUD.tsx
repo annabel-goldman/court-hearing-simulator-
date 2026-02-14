@@ -1,5 +1,5 @@
 /**
- * CourtroomHUD Component
+ * StatusDashboardHUD Component
  * 
  * Heads-up display elements for the courtroom simulation:
  * - Self-preview video
@@ -10,9 +10,9 @@
  */
 
 import { RefObject } from 'react'
-import type { SpeakingRole, SimulationPhase } from '../courtroom/types'
+import type { SpeakingRole, SimulationPhase } from '../3d-rendering/types'
 
-interface CourtroomHUDProps {
+interface StatusDashboardHUDProps {
   phase: SimulationPhase
   isConnected: boolean
   isCameraOn: boolean
@@ -32,7 +32,7 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
-export function CourtroomHUD({
+export function StatusDashboardHUD({
   phase,
   isConnected,
   isCameraOn,
@@ -44,7 +44,7 @@ export function CourtroomHUD({
   speakingRole,
   videoPreviewRef,
   onEndSession,
-}: CourtroomHUDProps) {
+}: StatusDashboardHUDProps) {
   const isProceeding = phase === 'PROCEEDING'
 
   return (

@@ -5,7 +5,7 @@ Handles PDF processing and brief analysis.
 
 import io
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from pypdf import PdfReader
 
@@ -146,34 +146,3 @@ class CaseIngestionService:
                 unique_citations.append(normalized)
         
         return unique_citations[:50]  # Limit to top 50
-    
-    async def compare_briefs(
-        self, 
-        appellant_data: Dict[str, Any], 
-        appellee_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Compare two briefs and generate a discrepancy map.
-        
-        Returns:
-            {
-                "factual_disputes": [...],
-                "legal_disagreements": [...],
-                "citation_overlap": [...],
-                "key_differences": [...]
-            }
-        """
-        appellant_text = appellant_data.get("cleaned_text", "")
-        appellee_text = appellee_data.get("cleaned_text", "")
-        
-        appellant_citations = set(appellant_data.get("citations", []))
-        appellee_citations = set(appellee_data.get("citations", []))
-        
-        return {
-            "factual_disputes": [],  # Would use NLP to identify
-            "legal_disagreements": [],  # Would use NLP to identify
-            "citation_overlap": list(appellant_citations & appellee_citations),
-            "appellant_unique_citations": list(appellant_citations - appellee_citations),
-            "appellee_unique_citations": list(appellee_citations - appellant_citations),
-            "key_differences": []  # Would use LLM to summarize
-        }

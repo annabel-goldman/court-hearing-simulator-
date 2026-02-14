@@ -7,7 +7,7 @@
 
 import { memo } from 'react'
 import { Text } from '@react-three/drei'
-import { SCENE_PRESETS, type SceneConfig } from '../../config/scenePresets'
+import { SCENE_PRESETS, type SceneConfig } from './scenePresets'
 
 // Get scene config
 const SCENE_CONFIG: SceneConfig = SCENE_PRESETS.default

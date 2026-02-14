@@ -12,7 +12,7 @@
 //   4. Export it below
 //
 // TO SWITCH PRESETS:
-//   In Avatar.tsx, change: const SCENE_CONFIG = SCENE_PRESETS.yourPresetName
+//   In CourtroomPage.tsx, change: const SCENE_CONFIG = SCENE_PRESETS.yourPresetName
 //
 // COORDINATE SYSTEM:
 //   X axis: Left (-) to Right (+), viewer facing judge
@@ -246,72 +246,14 @@ export const PRESET_DEFAULT: SceneConfig = {
 }
 
 // ============================================================================
-// ADDITIONAL PRESETS - Add your custom configurations here
-// ============================================================================
-
-// Close-up view - Zoom in for more intimate scenes
-export const PRESET_CLOSE_UP: SceneConfig = {
-  ...PRESET_DEFAULT,
-  name: 'Close Up',
-  description: 'Zoomed in view for dramatic moments',
-  sceneScale: 0.75,
-  camera: {
-    ...PRESET_DEFAULT.camera,
-    position: [-0.8, 1.5, 0.5],
-    fov: 50,
-  },
-}
-
-// Wide shot - See more of the courtroom
-export const PRESET_WIDE_SHOT: SceneConfig = {
-  ...PRESET_DEFAULT,
-  name: 'Wide Shot',
-  description: 'Wider view showing more of the courtroom',
-  sceneScale: 0.4,
-  camera: {
-    ...PRESET_DEFAULT.camera,
-    position: [0, 1.8, 4],
-    fov: 75,
-  },
-}
-
-// Center aisle view - Standing in the middle
-export const PRESET_CENTER_AISLE: SceneConfig = {
-  ...PRESET_DEFAULT,
-  name: 'Center Aisle',
-  description: 'Standing in the center aisle facing the judge',
-  camera: {
-    ...PRESET_DEFAULT.camera,
-    position: [0, 1.6, 2.5],
-  },
-}
-
-// ============================================================================
 // PRESET COLLECTION - Export all presets for easy access
 // ============================================================================
 
 export const SCENE_PRESETS = {
   default: PRESET_DEFAULT,
-  closeUp: PRESET_CLOSE_UP,
-  wideShot: PRESET_WIDE_SHOT,
-  centerAisle: PRESET_CENTER_AISLE,
 } as const
 
 export type PresetName = keyof typeof SCENE_PRESETS
-
-// Helper to get a preset by name
-export function getPreset(name: PresetName): SceneConfig {
-  return SCENE_PRESETS[name]
-}
-
-// Helper to list all available presets
-export function listPresets(): { name: PresetName; display: string; description: string }[] {
-  return Object.entries(SCENE_PRESETS).map(([key, config]) => ({
-    name: key as PresetName,
-    display: config.name,
-    description: config.description,
-  }))
-}
 
 // Default export for convenience
 export default SCENE_PRESETS

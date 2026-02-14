@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 const DEFAULT_SEED_PROMPT = `You are a legal analyst preparing questions for a moot court judge. Given the following legal briefs, generate a comprehensive list of questions that a judge might ask during oral argument.
 
 APPELLANT BRIEF:
@@ -56,11 +58,6 @@ Respond as JSON:
   "questionId": "id of seed question used, if any" | null
 }`
 
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || ''
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
-
-type Provider = 'openai' | 'gemini'
-
 export default function JudgeAdmin() {
   // Prompt editors
   const [seedPrompt, setSeedPrompt] = useState(DEFAULT_SEED_PROMPT)
@@ -79,7 +76,6 @@ export default function JudgeAdmin() {
   const [activeTab, setActiveTab] = useState<'seed' | 'synthesis'>('seed')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [provider, setProvider] = useState<Provider>(OPENAI_API_KEY ? 'openai' : 'gemini')
 
   const testSeedGeneration = async () => {
     if (!appellantBrief.trim() || !appelleeBrief.trim()) {
@@ -87,58 +83,24 @@ export default function JudgeAdmin() {
       return
     }
 
-    const apiKey = provider === 'openai' ? OPENAI_API_KEY : GEMINI_API_KEY
-    if (!apiKey) {
-      setError(`${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key not configured`)
-      return
-    }
-
     setLoading(true)
     setError('')
     setSeedQuestions('')
 
-    const fullPrompt = seedPrompt
-      .replace('{{APPELLANT_BRIEF}}', appellantBrief)
-      .replace('{{APPELLEE_BRIEF}}', appelleeBrief)
-
     try {
-      let responseText = ''
-
-      if (provider === 'openai') {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: fullPrompt }],
-            temperature: 0.7,
-            max_tokens: 4096,
-          }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error?.message || 'API request failed')
-        responseText = data.choices?.[0]?.message?.content || ''
-      } else {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: fullPrompt }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 4096 },
-            }),
-          }
-        )
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error?.message || 'API request failed')
-        responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      }
-
-      setSeedQuestions(responseText)
+      const res = await fetch(`${API_URL}/api/seed-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appellant_brief: appellantBrief,
+          appellee_brief: appelleeBrief,
+          system_prompt: seedPrompt
+        }),
+      })
+      
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'API request failed')
+      setSeedQuestions(JSON.stringify(data.questions, null, 2))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -152,60 +114,26 @@ export default function JudgeAdmin() {
       return
     }
 
-    const apiKey = provider === 'openai' ? OPENAI_API_KEY : GEMINI_API_KEY
-    if (!apiKey) {
-      setError(`${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key not configured`)
-      return
-    }
-
     setLoading(true)
     setError('')
     setSynthesisResult('')
 
-    const fullPrompt = synthesisPrompt
-      .replace('{{TRANSCRIPT}}', testTranscript)
-      .replace('{{SEED_QUESTIONS}}', seedQuestions || 'No seed questions generated yet.')
-      .replace('{{BRIEF_SUMMARY}}', `Appellant: ${appellantBrief.slice(0, 500)}...\nAppellee: ${appelleeBrief.slice(0, 500)}...`)
-      .replace('{{ASKED_QUESTIONS}}', 'None yet.')
-
     try {
-      let responseText = ''
-
-      if (provider === 'openai') {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: fullPrompt }],
-            temperature: 0.7,
-            max_tokens: 1024,
-          }),
-        })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error?.message || 'API request failed')
-        responseText = data.choices?.[0]?.message?.content || ''
-      } else {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: fullPrompt }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-            }),
-          }
-        )
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error?.message || 'API request failed')
-        responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      }
-
-      setSynthesisResult(responseText)
+      const res = await fetch(`${API_URL}/api/synthesize-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript: testTranscript,
+          seed_questions: seedQuestions ? JSON.parse(seedQuestions) : [],
+          brief_summary: `Appellant: ${appellantBrief.slice(0, 500)}...\nAppellee: ${appelleeBrief.slice(0, 500)}...`,
+          asked_questions: [],
+          system_prompt: synthesisPrompt
+        }),
+      })
+      
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'API request failed')
+      setSynthesisResult(JSON.stringify(data, null, 2))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -223,25 +151,9 @@ export default function JudgeAdmin() {
       </nav>
 
       <div className="admin-header">
-        <div className="provider-toggle">
-          <span className="provider-label">AI Provider:</span>
-          <div className="toggle-group">
-            <button
-              className={`toggle-btn ${provider === 'openai' ? 'active' : ''}`}
-              onClick={() => setProvider('openai')}
-              disabled={!OPENAI_API_KEY}
-            >
-              OpenAI
-            </button>
-            <button
-              className={`toggle-btn ${provider === 'gemini' ? 'active' : ''}`}
-              onClick={() => setProvider('gemini')}
-              disabled={!GEMINI_API_KEY}
-            >
-              Gemini
-            </button>
-          </div>
-        </div>
+        <p className="admin-intro">
+          Test and refine the Judge's reasoning engine using the unified OpenAI backend.
+        </p>
       </div>
 
       <div className="admin-tabs">

@@ -1,5 +1,5 @@
 /**
- * Avatar Page
+ * CourtroomPage
  * 
  * Main courtroom simulation page that orchestrates:
  * - 3D scene rendering (via CourtroomScene)
@@ -10,41 +10,56 @@
  */
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Lipsync } from 'wawa-lipsync'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+
+// 3D Rendering
+import { CourtroomScene } from '../3d-rendering/CourtroomScene'
+import type { SpeakingRole, SimulationPhase, SessionConfig } from '../3d-rendering/types'
+
+// UI Overlays
+import { CourtroomRitualOverlay } from '../ui-overlays/CourtroomRitualOverlay'
+import { JudgeSpeechOverlay } from '../ui-overlays/JudgeSpeechOverlay'
+import { StatusDashboardHUD } from '../ui-overlays/StatusDashboardHUD'
+
+// Hooks
 import { useSimulationSocket, useAudioPlayer, type JudgeInterrupt } from '../hooks/useSimulationSocket'
-import { CourtroomScene } from '../components/courtroom/CourtroomScene'
-import { RitualOverlay } from '../components/overlays/RitualOverlay'
-import { JudgeQuestionOverlay } from '../components/overlays/JudgeQuestionOverlay'
-import { CourtroomHUD } from '../components/overlays/CourtroomHUD'
-import type { SpeakingRole, SimulationPhase, SessionConfig } from '../components/courtroom/types'
+import { useMediaRecording } from '../hooks/useMediaRecording'
+
+// Configuration
+import {
+  RECORDING_SYNC_DELAY_MS,
+  DEMO_SESSION_DURATION_SECONDS,
+  TRANSCRIPT_DISPLAY_DURATION_MS,
+  MS_PER_WORD,
+  MIN_SPEAKING_TIME_MS,
+  FALLBACK_QUESTION_TIMEOUT_MS,
+  RITUAL_START_DELAY_MS,
+  JUDGE_ENTERING_DURATION_MS,
+  PROCEEDING_START_DELAY_MS,
+  OPENING_STATEMENT_DURATION_MS,
+  BROWSER_TTS_RATE,
+  BROWSER_TTS_PITCH,
+  TIMER_INTERVAL_MS,
+} from '../config/simulationConfig'
 
 // TTS endpoint (set VITE_API_URL in production, e.g. https://your-backend.onrender.com)
 const TTS_ENDPOINT = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api/tts'
 
-export default function Avatar() {
+export default function CourtroomPage() {
+  const navigate = useNavigate()
+
   // ========== STATE ==========
   const [speakingRole, setSpeakingRole] = useState<SpeakingRole>(null)
   const [simulationPhase, setSimulationPhase] = useState<SimulationPhase>('OFF_RECORD')
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
-  const [isCameraOn, setIsCameraOn] = useState(false)
-  const [isMicOn, setIsMicOn] = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
   const [currentJudgeQuestion, setCurrentJudgeQuestion] = useState<string | null>(null)
-  const [audioLevel, setAudioLevel] = useState(0)
   const [recentTranscript, setRecentTranscript] = useState<string>('')
-  const [timerSeconds, setTimerSeconds] = useState(60)
+  const [timerSeconds, setTimerSeconds] = useState(DEMO_SESSION_DURATION_SECONDS)
 
   // ========== REFS ==========
-  const videoPreviewRef = useRef<HTMLVideoElement>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioAnalyzerRef = useRef<AnalyserNode | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
-  const audioAccumulatorRef = useRef<Blob[]>([])
-  const recordingIntervalRef = useRef<number | null>(null)
   const lipsyncRef = useRef<Lipsync | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
   const orbitControlsRef = useRef<OrbitControlsImpl>(null)
   const questionTimeoutRef = useRef<number | null>(null)
 
@@ -65,26 +80,46 @@ export default function Avatar() {
     sessionId,
     onJudgeInterrupt: handleJudgeInterrupt,
     onPhaseChange: (phase) => {
-      console.log('[Avatar] Backend phase update:', phase)
+      console.log('[CourtroomPage] Backend phase update:', phase)
       // Only accept PROCEEDING/ADJOURNED from backend (ritual phases controlled by frontend)
       if (phase === 'PROCEEDING' || phase === 'ADJOURNED') {
         setSimulationPhase(phase)
       }
     },
     onTranscriptReceived: (transcript: string) => {
-      console.log('[Avatar] Transcript:', transcript)
+      console.log('[CourtroomPage] Transcript:', transcript)
       setRecentTranscript(transcript)
       // Clear transcript timeout
-      setTimeout(() => setRecentTranscript(''), 5000)
+      setTimeout(() => setRecentTranscript(''), TRANSCRIPT_DISPLAY_DURATION_MS)
     },
     onError: (error) => {
-      console.error('[Avatar] WebSocket error:', error)
+      console.error('[CourtroomPage] WebSocket error:', error)
+    }
+  })
+
+  // ========== MEDIA RECORDING ==========
+  const {
+    isCameraOn,
+    isMicOn,
+    isRecording,
+    audioLevel,
+    videoPreviewRef,
+    startRecording,
+    stopRecording,
+  } = useMediaRecording({
+    onAudioChunk: (blob) => {
+      if (isConnected) {
+        sendAudio(blob)
+      }
+    },
+    onError: (error) => {
+      console.error('[CourtroomPage] Media error:', error)
     }
   })
 
   // ========== JUDGE INTERRUPT HANDLER ==========
   function handleJudgeInterrupt(interrupt: JudgeInterrupt) {
-    console.log('[Avatar] Judge interrupt:', interrupt.question)
+    console.log('[CourtroomPage] Judge interrupt:', interrupt.question)
     
     // Clear any pending timeout
     if (questionTimeoutRef.current) {
@@ -97,7 +132,7 @@ export default function Avatar() {
     if (interrupt.audio && interrupt.audioFormat) {
       playAudioChunk(interrupt.audio, interrupt.audioFormat)
       const wordCount = interrupt.question.split(' ').length
-      const speakingTimeMs = Math.max(wordCount * 400, 3000)
+      const speakingTimeMs = Math.max(wordCount * MS_PER_WORD, MIN_SPEAKING_TIME_MS)
       questionTimeoutRef.current = window.setTimeout(() => {
         setCurrentJudgeQuestion(null)
         setSpeakingRole(null)
@@ -107,7 +142,7 @@ export default function Avatar() {
       questionTimeoutRef.current = window.setTimeout(() => {
         setCurrentJudgeQuestion(null)
         setSpeakingRole(null)
-      }, 5000)
+      }, FALLBACK_QUESTION_TIMEOUT_MS)
     }
   }
 
@@ -123,136 +158,10 @@ export default function Avatar() {
         }
         return prev - 1
       })
-    }, 1000)
+    }, TIMER_INTERVAL_MS)
     
     return () => clearInterval(interval)
   }, [simulationPhase])
-
-  // ========== MEDIA INITIALIZATION ==========
-  useEffect(() => {
-    const initMedia = async () => {
-      try {
-        console.log('[Avatar] Requesting camera/mic access...')
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        console.log('[Avatar] Media stream obtained')
-        mediaStreamRef.current = stream
-        
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = stream
-        }
-        
-        const audioContext = new AudioContext()
-        if (audioContext.state === 'suspended') {
-          const resumeAudio = () => {
-            audioContext.resume()
-            document.removeEventListener('click', resumeAudio)
-            document.removeEventListener('keydown', resumeAudio)
-          }
-          document.addEventListener('click', resumeAudio)
-          document.addEventListener('keydown', resumeAudio)
-        }
-        
-        const source = audioContext.createMediaStreamSource(stream)
-        const analyzer = audioContext.createAnalyser()
-        analyzer.fftSize = 256
-        analyzer.smoothingTimeConstant = 0.5
-        source.connect(analyzer)
-        audioAnalyzerRef.current = analyzer
-        audioContextRef.current = audioContext
-        
-        const dataArray = new Uint8Array(analyzer.frequencyBinCount)
-        let frameCount = 0
-        const updateLevel = () => {
-          frameCount++
-          if (audioAnalyzerRef.current && audioContextRef.current?.state === 'running') {
-            audioAnalyzerRef.current.getByteFrequencyData(dataArray)
-            const average = dataArray.reduce((a, b) => a + b) / dataArray.length
-            if (frameCount % 3 === 0) {
-              setAudioLevel(average)
-            }
-          }
-          animationFrameRef.current = requestAnimationFrame(updateLevel)
-        }
-        updateLevel()
-        
-        setIsCameraOn(true)
-        setIsMicOn(true)
-      } catch (err) {
-        console.error('[Avatar] Failed to access camera/mic:', err)
-      }
-    }
-    
-    initMedia()
-    
-    return () => {
-      mediaStreamRef.current?.getTracks().forEach(track => track.stop())
-      if (mediaRecorderRef.current?.state !== 'inactive') {
-        mediaRecorderRef.current?.stop()
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
-      audioContextRef.current?.close()
-    }
-  }, [])
-
-  // ========== RECORDING ==========
-  const startRecording = useCallback(() => {
-    console.log('[Avatar] Starting recording...')
-    if (!mediaStreamRef.current) return
-    
-    const startNewRecorder = () => {
-      const audioStream = new MediaStream(mediaStreamRef.current!.getAudioTracks())
-      const recorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' })
-      
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioAccumulatorRef.current.push(event.data)
-        }
-      }
-      
-      recorder.onstop = () => {
-        if (audioAccumulatorRef.current.length > 0) {
-          const completeBlob = new Blob(audioAccumulatorRef.current, { type: 'audio/webm' })
-          console.log('[Avatar] Sending audio:', completeBlob.size, 'bytes')
-          if (isConnected) {
-            sendAudio(completeBlob)
-          }
-          audioAccumulatorRef.current = []
-        }
-      }
-      
-      recorder.start()
-      mediaRecorderRef.current = recorder
-      
-      setTimeout(() => {
-        if (recorder.state === 'recording') {
-          recorder.stop()
-        }
-      }, 4000)
-    }
-    
-    startNewRecorder()
-    recordingIntervalRef.current = window.setInterval(() => {
-      if (mediaStreamRef.current) {
-        startNewRecorder()
-      }
-    }, 4500)
-    
-    setIsRecording(true)
-  }, [isConnected, sendAudio])
-
-  const stopRecording = useCallback(() => {
-    if (recordingIntervalRef.current) {
-      clearInterval(recordingIntervalRef.current)
-      recordingIntervalRef.current = null
-    }
-    if (mediaRecorderRef.current?.state !== 'inactive') {
-      mediaRecorderRef.current?.stop()
-    }
-    setIsRecording(false)
-    audioAccumulatorRef.current = []
-  }, [])
 
   // ========== AUTO-START RECORDING ==========
   useEffect(() => {
@@ -267,9 +176,9 @@ export default function Avatar() {
       }
       
       const timer = setTimeout(() => {
-        console.log('[Avatar] Starting recording after sync delay')
+        console.log('[CourtroomPage] Starting recording after sync delay')
         startRecording()
-      }, 500)
+      }, RECORDING_SYNC_DELAY_MS)
       
       return () => clearTimeout(timer)
     } else if (simulationPhase === 'ADJOURNED' && isRecording) {
@@ -279,41 +188,41 @@ export default function Avatar() {
 
   // ========== SESSION INITIALIZATION ==========
   useEffect(() => {
-    console.log('[Avatar] Initializing courtroom...')
+    console.log('[CourtroomPage] Initializing courtroom...')
     const stored = sessionStorage.getItem('courtSession')
     if (!stored) {
-      console.log('[Avatar] No session config, redirecting...')
-      window.location.href = '/'
+      console.log('[CourtroomPage] No session config, redirecting...')
+      navigate('/')
       return
     }
     
     try {
       const config = JSON.parse(stored) as SessionConfig
-      console.log('[Avatar] Session loaded:', config.proceedingType)
+      console.log('[CourtroomPage] Session loaded:', config.proceedingType)
       setSessionConfig(config)
-      setTimerSeconds(60) // Demo mode: 1 minute
+      setTimerSeconds(DEMO_SESSION_DURATION_SECONDS)
       
       const timeoutId = window.setTimeout(() => {
-        console.log('[Avatar] Starting ritual: ALL_RISE')
+        console.log('[CourtroomPage] Starting ritual: ALL_RISE')
         setSimulationPhase('ALL_RISE')
         playRitualCue('All rise. The Honorable Court is now in session.')
-      }, 1500)
+      }, RITUAL_START_DELAY_MS)
       
       return () => clearTimeout(timeoutId)
     } catch (e) {
-      console.error('[Avatar] Failed to parse session:', e)
+      console.error('[CourtroomPage] Failed to parse session:', e)
     }
-  }, [])
+  }, [navigate])
 
   // ========== TTS ==========
   async function playRitualCue(text: string): Promise<void> {
-    console.log('[Avatar] Playing TTS:', text)
+    console.log('[CourtroomPage] Playing TTS:', text)
     
     try {
       const response = await fetch(TTS_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: 'onyx', provider: 'openai' })
+        body: JSON.stringify({ text, voice: 'onyx' })
       })
       
       if (response.ok) {
@@ -331,14 +240,14 @@ export default function Avatar() {
         }
       }
     } catch (err) {
-      console.warn('[Avatar] Backend TTS failed:', err)
+      console.warn('[CourtroomPage] Backend TTS failed:', err)
     }
     
     // Fallback to browser TTS
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = 0.85
-      utterance.pitch = 0.9
+      utterance.rate = BROWSER_TTS_RATE
+      utterance.pitch = BROWSER_TTS_PITCH
       utterance.onend = () => resolve()
       utterance.onerror = () => resolve()
       
@@ -356,12 +265,12 @@ export default function Avatar() {
         setTimeout(() => {
           setSimulationPhase('JUDGE_SEATED')
           playRitualCue('You may be seated.')
-        }, 3000)
+        }, JUDGE_ENTERING_DURATION_MS)
         break
         
       case 'JUDGE_SEATED':
         setSimulationPhase('PROCEEDING')
-        console.log('[Avatar] Transitioning to PROCEEDING')
+        console.log('[CourtroomPage] Transitioning to PROCEEDING')
         sendPhaseChange('PROCEEDING')
         setTimeout(() => {
           const openingText = 'Counsel for the appellant, you may proceed when ready.'
@@ -371,16 +280,16 @@ export default function Avatar() {
           setTimeout(() => {
             setCurrentJudgeQuestion(null)
             setSpeakingRole(null)
-          }, 4000)
-        }, 1000)
+          }, OPENING_STATEMENT_DURATION_MS)
+        }, PROCEEDING_START_DELAY_MS)
         break
         
       case 'ADJOURNED':
         sessionStorage.removeItem('courtSession')
-        window.location.href = '/'
+        navigate('/')
         break
     }
-  }, [simulationPhase, sendPhaseChange])
+  }, [simulationPhase, sendPhaseChange, navigate])
 
   // End session handler
   const endSession = useCallback(() => {
@@ -394,7 +303,6 @@ export default function Avatar() {
   useEffect(() => {
     lipsyncRef.current = new Lipsync()
     return () => {
-      audioContextRef.current?.close()
       if (questionTimeoutRef.current) {
         clearTimeout(questionTimeoutRef.current)
       }
@@ -404,7 +312,7 @@ export default function Avatar() {
   // ========== RENDER ==========
   return (
     <div className="avatar-page courtroom-fullscreen">
-      <RitualOverlay phase={simulationPhase} onAction={handleRitualAction} />
+      <CourtroomRitualOverlay phase={simulationPhase} onAction={handleRitualAction} />
 
       <div className="courtroom-canvas-fullscreen">
         <CourtroomScene 
@@ -413,7 +321,7 @@ export default function Avatar() {
           orbitControlsRef={orbitControlsRef}
         />
         
-        <CourtroomHUD
+        <StatusDashboardHUD
           phase={simulationPhase}
           isConnected={isConnected}
           isCameraOn={isCameraOn}
@@ -427,7 +335,7 @@ export default function Avatar() {
           onEndSession={endSession}
         />
 
-        <JudgeQuestionOverlay question={currentJudgeQuestion} />
+        <JudgeSpeechOverlay question={currentJudgeQuestion} />
       </div>
     </div>
   )

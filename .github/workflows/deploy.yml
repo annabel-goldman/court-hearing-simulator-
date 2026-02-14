@@ -62,6 +62,18 @@ jobs:
         with:
           path: ./frontend/dist
 
+      - name: Trigger Render backend deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "Triggering Render backend deploy..."
+            curl -f -X POST "$RENDER_DEPLOY_HOOK_URL"
+            echo "Backend deploy triggered."
+          else
+            echo "RENDER_DEPLOY_HOOK_URL not set; skipping backend deploy trigger."
+          fi
+
   deploy:
     environment:
       name: github-pages

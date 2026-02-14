@@ -11,7 +11,7 @@ import { useGLTF } from '@react-three/drei'
 import { Lipsync } from 'wawa-lipsync'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
-import type { AvatarPoseConfig } from '../../config/scenePresets'
+import type { AvatarPoseConfig } from './scenePresets'
 import { VISEME_MAP } from './types'
 
 export interface AvatarModelProps {

@@ -1,14 +1,14 @@
 /**
- * JudgeQuestionOverlay Component
+ * JudgeSpeechOverlay Component
  * 
- * Displays the judge's current question in the center of the screen.
+ * Displays the judge's current question/speech in the center of the screen.
  */
 
-interface JudgeQuestionOverlayProps {
+interface JudgeSpeechOverlayProps {
   question: string | null
 }
 
-export function JudgeQuestionOverlay({ question }: JudgeQuestionOverlayProps) {
+export function JudgeSpeechOverlay({ question }: JudgeSpeechOverlayProps) {
   if (!question) return null
 
   return (

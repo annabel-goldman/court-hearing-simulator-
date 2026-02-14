@@ -1,13 +1,13 @@
 /**
- * RitualOverlay Component
+ * CourtroomRitualOverlay Component
  * 
  * Displays courtroom ritual phases (All Rise, Judge Entering, etc.)
  * with appropriate messaging and action buttons.
  */
 
-import type { SimulationPhase } from '../courtroom/types'
+import type { SimulationPhase } from '../3d-rendering/types'
 
-interface RitualOverlayProps {
+interface CourtroomRitualOverlayProps {
   phase: SimulationPhase
   onAction: () => void
 }
@@ -43,7 +43,7 @@ const RITUAL_CONTENT = {
   },
 } as const
 
-export function RitualOverlay({ phase, onAction }: RitualOverlayProps) {
+export function CourtroomRitualOverlay({ phase, onAction }: CourtroomRitualOverlayProps) {
   // Skip rendering if not in a ritual phase
   if (phase === 'OFF_RECORD' || phase === 'PROCEEDING') {
     return null

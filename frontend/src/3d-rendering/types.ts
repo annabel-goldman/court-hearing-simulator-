@@ -1,5 +1,5 @@
 /**
- * Shared types for courtroom components
+ * Shared types for 3D courtroom rendering
  */
 
 export type SpeakingRole = 'judge' | 'counsel' | null

@@ -4,16 +4,9 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { SimulationPhase } from '../3d-rendering/types'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws'
-
-export type SimulationPhase = 
-  | 'OFF_RECORD'
-  | 'ALL_RISE'
-  | 'JUDGE_ENTERING'
-  | 'JUDGE_SEATED'
-  | 'PROCEEDING'
-  | 'ADJOURNED'
 
 export interface JudgeInterrupt {
   question: string
@@ -22,11 +15,13 @@ export interface JudgeInterrupt {
   audioFormat?: string  // 'opus', 'mp3', etc.
 }
 
-export interface SessionConfig {
+export interface WebSocketSessionConfig {
   proceedingType: 'appellate' | 'demo'
   userRole: 'attorney' | 'self-represented'
   judgePersonality?: string
   interruptionFrequency?: string
+  seed_questions?: any[]
+  brief_summary?: string
 }
 
 interface UseSimulationSocketOptions {
@@ -40,10 +35,8 @@ interface UseSimulationSocketOptions {
 interface UseSimulationSocketReturn {
   isConnected: boolean
   phase: SimulationPhase
-  sendConfig: (config: SessionConfig & { seed_questions?: any[]; brief_summary?: string }) => void
-  sendTranscript: (text: string) => void
+  sendConfig: (config: WebSocketSessionConfig) => void
   sendAudio: (audioBlob: Blob) => void
-  requestInterrupt: () => void
   changePhase: (phase: SimulationPhase) => void
   disconnect: () => void
 }
@@ -161,12 +154,8 @@ export function useSimulationSocket(
   }, [])
 
   // Public API
-  const sendConfig = useCallback((config: SessionConfig) => {
+  const sendConfig = useCallback((config: WebSocketSessionConfig) => {
     sendMessage('config', config)
-  }, [sendMessage])
-
-  const sendTranscript = useCallback((text: string) => {
-    sendMessage('transcript', { text })
   }, [sendMessage])
 
   const sendAudio = useCallback(async (audioBlob: Blob) => {
@@ -184,10 +173,6 @@ export function useSimulationSocket(
       sendMessage('audio', { audio: base64 })
     }
     reader.readAsDataURL(audioBlob)
-  }, [sendMessage])
-
-  const requestInterrupt = useCallback(() => {
-    sendMessage('request_interrupt', {})
   }, [sendMessage])
 
   const changePhase = useCallback((newPhase: SimulationPhase) => {
@@ -223,9 +208,7 @@ export function useSimulationSocket(
     isConnected,
     phase,
     sendConfig,
-    sendTranscript,
     sendAudio,
-    requestInterrupt,
     changePhase,
     disconnect
   }

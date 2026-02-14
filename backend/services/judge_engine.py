@@ -11,7 +11,8 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load environment variables from the root .env file
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
 
 # Lazy-load OpenAI client to avoid errors when API key is not set
 _openai_client = None

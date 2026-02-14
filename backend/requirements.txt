@@ -12,8 +12,6 @@ python-multipart>=0.0.6
 pypdf>=3.17.0
 
 # Optional: ElevenLabs TTS
-elevenlabs>=1.0.0
-
 # Optional: Speech recognition
 # soundfile>=0.12.1
 # sounddevice>=0.4.6

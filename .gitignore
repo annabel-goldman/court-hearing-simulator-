@@ -5,6 +5,8 @@
 .env.*.local
 !.env.example
 
+Deploy.md
+
 # Python
 __pycache__/
 *.py[cod]
