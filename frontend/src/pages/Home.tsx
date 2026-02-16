@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -34,6 +34,7 @@ export default function Home() {
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
   const [loadingA, setLoadingA] = useState(false)
   const [loadingB, setLoadingB] = useState(false)
+  const [isSummarizing, setIsSummarizing] = useState(false)
   const [dragOverA, setDragOverA] = useState(false)
   const [dragOverB, setDragOverB] = useState(false)
   const [error, setError] = useState('')
@@ -92,23 +93,71 @@ export default function Home() {
     }
   }
 
-  const enterCourtroom = () => {
+  const enterCourtroom = async () => {
     if (!fileA?.text || !fileB?.text) {
       setError('Please upload both briefs before entering the courtroom')
       return
     }
 
-    // Store session config with demo mode and attorney role
-    const sessionConfig = {
-      proceedingType: 'demo',
-      userRole: 'attorney',
-      materials: [
-        { name: fileA.name, text: fileA.text, role: 'appellant' },
-        { name: fileB.name, text: fileB.text, role: 'appellee' }
-      ]
+    setIsSummarizing(true)
+    setError('')
+
+    try {
+      // Check for custom prompts from Judge Admin
+      let customSummarizationPrompt: string | undefined
+      try {
+        const storedPrompts = sessionStorage.getItem('customJudgePrompts')
+        if (storedPrompts) {
+          const prompts = JSON.parse(storedPrompts)
+          customSummarizationPrompt = prompts.summarizationPrompt
+        }
+      } catch (e) {
+        console.warn('Failed to load custom prompts:', e)
+      }
+
+      // Generate AI summary
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const res = await fetch(`${API_URL}/api/summarize-briefs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appellant_brief: fileA.text,
+          appellee_brief: fileB.text,
+          system_prompt: customSummarizationPrompt
+        }),
+      })
+      
+      const data = await res.json()
+      const judicialSummary = res.ok ? data.summary : undefined
+
+      // Store session config with demo mode and attorney role
+      const sessionConfig = {
+        proceedingType: 'demo',
+        userRole: 'attorney',
+        materials: [
+          { name: fileA.name, text: fileA.text, role: 'appellant' },
+          { name: fileB.name, text: fileB.text, role: 'appellee' }
+        ],
+        judicialSummary
+      }
+      sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
+      navigate('/courtroom')
+    } catch (err) {
+      console.warn('Summary generation failed, proceeding with naive approach:', err)
+      // Fallback: Proceed without summary if API fails
+      const sessionConfig = {
+        proceedingType: 'demo',
+        userRole: 'attorney',
+        materials: [
+          { name: fileA.name, text: fileA.text, role: 'appellant' },
+          { name: fileB.name, text: fileB.text, role: 'appellee' }
+        ]
+      }
+      sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
+      navigate('/courtroom')
+    } finally {
+      setIsSummarizing(false)
     }
-    sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
-    navigate('/courtroom')
   }
 
   const clearAll = () => {
@@ -133,7 +182,9 @@ export default function Home() {
     <div className="home">
       <nav className="nav">
         <div className="nav-brand">Court Simulator</div>
-        <div className="nav-spacer" />
+        <div className="nav-links">
+          <Link to="/admin/judge" className="nav-link">Judge Admin</Link>
+        </div>
       </nav>
 
       <main className="home-main">
@@ -250,9 +301,16 @@ export default function Home() {
           <button
             className="btn-primary-large start-btn"
             onClick={enterCourtroom}
-            disabled={!fileA || !fileB}
+            disabled={!fileA || !fileB || isSummarizing}
           >
-            Enter Courtroom
+            {isSummarizing ? (
+              <>
+                <span className="spinner" />
+                Analyzing Case...
+              </>
+            ) : (
+              'Enter Courtroom'
+            )}
           </button>
           {(fileA || fileB) && (
             <button className="btn-ghost" onClick={clearAll}>

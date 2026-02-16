@@ -8,19 +8,19 @@ This document explains how each file in the codebase works together, the separat
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              FRONTEND (React)                               │
 │                                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                      │
-│  │   Home.tsx  │───▶│  Avatar.tsx │───▶│ CourtroomScene │                   │
-│  │ (PDF Upload)│    │(Orchestrator)│    │   (3D World)   │                   │
-│  └─────────────┘    └──────┬──────┘    └───────────────┘                    │
-│                            │                                                 │
-│                            ▼                                                 │
-│                   ┌────────────────────┐                                     │
-│                   │useSimulationSocket │                                     │
-│                   │   (WebSocket Hook) │                                     │
-│                   └─────────┬──────────┘                                     │
-└─────────────────────────────┼───────────────────────────────────────────────┘
-                              │ WebSocket (ws://localhost:8000/ws/{session_id})
-                              ▼
+│  ┌─────────────┐    ┌──────────────────┐    ┌─────────────────┐             │
+│  │   Home.tsx  │───▶│ CourtroomPage.tsx│───▶│ CourtroomScene  │             │
+│  │ (PDF Upload)│    │  (Orchestrator)  │    │   (3D World)    │             │
+│  └─────────────┘    └────────┬─────────┘    └─────────────────┘             │
+│                              │                                               │
+│                              ▼                                               │
+│              ┌───────────────────────────────────┐                           │
+│              │ useSimulationSocket │ useMediaRecording │                     │
+│              │    (WebSocket)      │  (Audio Capture)  │                     │
+│              └───────────────────┬─────────────────────┘                     │
+└──────────────────────────────────┼──────────────────────────────────────────┘
+                                   │ WebSocket (ws://localhost:8000/ws/{session_id})
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              BACKEND (FastAPI)                              │
 │                                                                             │
@@ -42,6 +42,43 @@ This document explains how each file in the codebase works together, the separat
 
 ## Frontend Architecture
 
+### Folder Structure
+
+```
+frontend/src/
+├── main.tsx                    # React entry point
+├── App.tsx                     # Routing + AuthGate wrapper
+│
+├── pages/
+│   ├── Home.tsx                # PDF upload interface
+│   ├── CourtroomPage.tsx       # Main simulation orchestrator
+│   └── JudgeAdmin.tsx          # Admin tool for testing prompts
+│
+├── 3d-rendering/               # All 3D scene components
+│   ├── index.ts                # Module exports
+│   ├── types.ts                # Shared types (SpeakingRole, SimulationPhase, etc.)
+│   ├── scenePresets.ts         # 3D layout configuration (camera, positions, colors)
+│   ├── CourtroomScene.tsx      # Canvas wrapper with lighting/camera
+│   ├── Courtroom.tsx           # Static courtroom geometry (benches, walls, etc.)
+│   └── AvatarModel.tsx         # Ready Player Me avatar with lipsync
+│
+├── ui-overlays/                # 2D UI overlay components
+│   ├── index.ts                # Module exports
+│   ├── CourtroomRitualOverlay.tsx  # Full-screen ritual phase prompts
+│   ├── JudgeSpeechOverlay.tsx      # Judge question subtitle display
+│   └── StatusDashboardHUD.tsx      # Video preview, timer, transcript, controls
+│
+├── hooks/
+│   ├── useSimulationSocket.ts  # WebSocket communication + audio player
+│   └── useMediaRecording.ts    # Camera/mic capture + audio chunking
+│
+├── config/
+│   └── simulationConfig.ts     # Centralized timing constants
+│
+└── components/
+    └── AuthGate.tsx            # Password protection gate
+```
+
 ### Entry Point
 
 | File | Purpose |
@@ -54,45 +91,59 @@ This document explains how each file in the codebase works together, the separat
 | File | Route | Purpose |
 |------|-------|---------|
 | `pages/Home.tsx` | `/` | PDF upload interface. Extracts text from briefs using PDF.js and stores in `sessionStorage`. |
-| `pages/Avatar.tsx` | `/courtroom` | **Main orchestrator**. Manages the simulation loop, audio recording, WebSocket communication, and renders the 3D scene. |
+| `pages/CourtroomPage.tsx` | `/courtroom` | **Main orchestrator**. Manages the simulation loop, uses hooks for audio and WebSocket, and renders the 3D scene with UI overlays. |
 | `pages/JudgeAdmin.tsx` | `/admin/judge` | Admin tool for testing judge prompts via backend API. |
 
-### Components
-
-#### Courtroom (3D)
+### 3D Rendering (`3d-rendering/`)
 
 | File | Purpose |
 |------|---------|
-| `components/courtroom/CourtroomScene.tsx` | The `<Canvas>` wrapper. Sets up lighting, fog, camera, and renders the 3D courtroom + avatars. |
-| `components/courtroom/Courtroom.tsx` | The 3D courtroom model (benches, walls, floor, chairs, tables). |
-| `components/courtroom/AvatarModel.tsx` | Loads Ready Player Me avatars and applies lipsync/sitting poses. |
-| `components/courtroom/types.ts` | Shared TypeScript types (`SimulationPhase`, `SpeakingRole`, etc.). |
+| `types.ts` | Shared TypeScript types: `SimulationPhase`, `SpeakingRole`, `SessionConfig`, `VISEME_MAP`. |
+| `scenePresets.ts` | Configuration for 3D scene layout (camera position, avatar positions, bench dimensions, colors). Easily adjustable constants. |
+| `CourtroomScene.tsx` | The `<Canvas>` wrapper. Sets up lighting, fog, camera controls, and renders the 3D courtroom + avatars. |
+| `Courtroom.tsx` | The 3D courtroom model (benches, walls, floor, chairs, tables, flags, seal). |
+| `AvatarModel.tsx` | Loads Ready Player Me avatars and applies lipsync/sitting poses via bone manipulation. |
+| `index.ts` | Barrel export for all 3D components and types. |
 
-#### Overlays (2D UI)
-
-| File | Purpose |
-|------|---------|
-| `components/overlays/RitualOverlay.tsx` | Full-screen overlay for ritual phases (All Rise, Judge Seated, Adjourned). Prompts user to click to advance. |
-| `components/overlays/JudgeQuestionOverlay.tsx` | Displays the judge's current question as a subtitle. |
-| `components/overlays/CourtroomHUD.tsx` | Heads-up display: self-preview video, timer, transcript feedback, connection status, end session button. |
-
-#### Other
+### UI Overlays (`ui-overlays/`)
 
 | File | Purpose |
 |------|---------|
-| `components/AuthGate.tsx` | Password gate. Currently uses a hardcoded hash (to be moved to backend). |
+| `CourtroomRitualOverlay.tsx` | Full-screen overlay for ritual phases (All Rise, Judge Seated, Adjourned). Prompts user to click to advance. |
+| `JudgeSpeechOverlay.tsx` | Displays the judge's current question as a subtitle in the center of the screen. |
+| `StatusDashboardHUD.tsx` | Heads-up display: self-preview video, timer, transcript feedback, connection status, end session button. |
+| `index.ts` | Barrel export for all overlay components. |
 
 ### Hooks
 
 | File | Purpose |
 |------|---------|
-| `hooks/useSimulationSocket.ts` | **Core communication hook**. Manages the WebSocket connection to the backend. Exposes `sendAudio`, `sendConfig`, `changePhase`, and handles incoming `judge_interrupt` and `transcript_update` messages. Also includes `useAudioPlayer` for playing TTS audio via Web Audio API. |
+| `useSimulationSocket.ts` | **WebSocket communication**. Manages connection to backend. Exposes `sendAudio`, `sendConfig`, `changePhase`. Handles incoming `judge_interrupt` and `transcript_update` messages. Includes `useAudioPlayer` for playing TTS audio via Web Audio API. |
+| `useMediaRecording.ts` | **Media capture**. Initializes camera/mic, provides video preview ref, monitors audio levels, and captures audio in configurable chunks. Returns `startRecording`/`stopRecording` controls. |
 
 ### Config
 
 | File | Purpose |
 |------|---------|
-| `config/scenePresets.ts` | Configuration for 3D scene layout (camera position, avatar positions, bench dimensions). |
+| `simulationConfig.ts` | **Centralized timing constants**. All magic numbers for audio chunking, recording intervals, TTS settings, ritual timing, and session duration. Easy to adjust without hunting through code. |
+
+#### Key Constants in `simulationConfig.ts`:
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `AUDIO_CHUNK_DURATION_MS` | 4000 | Duration of each audio chunk sent to backend |
+| `RECORDING_INTERVAL_MS` | 4500 | Interval between starting new recordings |
+| `RECORDING_SYNC_DELAY_MS` | 500 | Delay before starting recording after phase change |
+| `DEMO_SESSION_DURATION_SECONDS` | 60 | Total session time for demo mode |
+| `MS_PER_WORD` | 400 | Used to calculate judge speaking duration |
+| `RITUAL_START_DELAY_MS` | 1500 | Delay before "All Rise" starts |
+| `JUDGE_ENTERING_DURATION_MS` | 3000 | Duration of judge entering animation |
+
+### Other Components
+
+| File | Purpose |
+|------|---------|
+| `components/AuthGate.tsx` | Password gate. Currently uses a hardcoded hash (to be moved to backend). |
 
 ---
 
@@ -126,7 +177,7 @@ This is the core loop that makes the app work:
 
 1. USER SPEAKS
    └─▶ Browser MediaRecorder captures audio in 4-second WebM chunks.
-       (Avatar.tsx: startRecording)
+       (useMediaRecording.ts: startRecording)
 
 2. AUDIO SENT TO BACKEND
    └─▶ Chunk is Base64-encoded and sent via WebSocket.
@@ -142,7 +193,7 @@ This is the core loop that makes the app work:
 
 5. TRANSCRIPT SENT BACK
    └─▶ Backend sends `transcript_update` to frontend for UI feedback.
-       (main.py → useSimulationSocket.ts → CourtroomHUD)
+       (main.py → useSimulationSocket.ts → StatusDashboardHUD)
 
 6. JUDGE DECISION
    └─▶ JudgeEngine (GPT-4) analyzes transcript:
@@ -160,11 +211,12 @@ This is the core loop that makes the app work:
 8. FRONTEND PLAYS AUDIO
    └─▶ useAudioPlayer decodes Base64 → Web Audio API playback.
    └─▶ Judge avatar mouth animates (lipsync).
-   └─▶ Question displayed in JudgeQuestionOverlay.
-       (Avatar.tsx: handleJudgeInterrupt)
+   └─▶ Question displayed in JudgeSpeechOverlay.
+       (CourtroomPage.tsx: handleJudgeInterrupt)
 
 9. LOOP REPEATS
    └─▶ Every 4.5 seconds, a new audio chunk is sent.
+       (Configurable via RECORDING_INTERVAL_MS in simulationConfig.ts)
 ```
 
 ---
@@ -173,10 +225,11 @@ This is the core loop that makes the app work:
 
 ### Frontend Responsibilities
 - **UI/UX**: All visual rendering, 3D scene, overlays, user feedback.
-- **Audio Capture**: MediaRecorder for capturing user speech.
+- **Audio Capture**: useMediaRecording hook handles MediaRecorder.
 - **Audio Playback**: Web Audio API for playing judge TTS.
 - **Session State**: Manages `simulationPhase` (ritual progression).
 - **PDF Parsing**: Extracts text from briefs using PDF.js (client-side).
+- **Timing Configuration**: All timing constants centralized in `simulationConfig.ts`.
 
 ### Backend Responsibilities
 - **AI Services**: All OpenAI API calls (STT, TTS, GPT-4) happen server-side.
@@ -203,9 +256,8 @@ This is the core loop that makes the app work:
 | Type | Payload | When |
 |------|---------|------|
 | `config` | `{ proceedingType, userRole, seed_questions, brief_summary }` | When PROCEEDING phase starts |
-| `audio` | `{ audio: "base64..." }` | Every 4 seconds during PROCEEDING |
+| `audio` | `{ audio: "base64..." }` | Every 4.5 seconds during PROCEEDING |
 | `phase_change` | `{ phase: "PROCEEDING" \| "ADJOURNED" }` | When user advances phases |
-| `request_interrupt` | `{}` | (Debug) Force a judge interrupt |
 
 ### Backend → Frontend
 
@@ -225,14 +277,20 @@ App.tsx
 ├── AuthGate.tsx
 ├── Home.tsx
 │   └── (PDF.js for text extraction)
-├── Avatar.tsx (ORCHESTRATOR)
+├── CourtroomPage.tsx (ORCHESTRATOR)
 │   ├── useSimulationSocket.ts (WebSocket + Audio Player)
-│   ├── CourtroomScene.tsx
-│   │   ├── Courtroom.tsx (3D model)
-│   │   └── AvatarModel.tsx (Ready Player Me)
-│   ├── RitualOverlay.tsx
-│   ├── JudgeQuestionOverlay.tsx
-│   └── CourtroomHUD.tsx
+│   ├── useMediaRecording.ts (Camera/Mic + Audio Chunks)
+│   ├── simulationConfig.ts (Timing Constants)
+│   ├── 3d-rendering/
+│   │   ├── CourtroomScene.tsx
+│   │   │   ├── Courtroom.tsx (3D geometry)
+│   │   │   └── AvatarModel.tsx (Ready Player Me)
+│   │   ├── scenePresets.ts (Layout config)
+│   │   └── types.ts (Shared types)
+│   └── ui-overlays/
+│       ├── CourtroomRitualOverlay.tsx
+│       ├── JudgeSpeechOverlay.tsx
+│       └── StatusDashboardHUD.tsx
 └── JudgeAdmin.tsx (calls /api/seed-questions, /api/synthesize-question)
 
 main.py (BACKEND ORCHESTRATOR)
@@ -264,10 +322,18 @@ All configuration is centralized in the root `.env` file:
 
 2. **WebSocket for Real-Time**: Audio is sent via WebSocket (not REST) to minimize latency in the interrupt loop.
 
-3. **4-Second Audio Chunks**: Balances latency (shorter = faster feedback) with transcription quality (longer = more context for Whisper).
+3. **Configurable Audio Chunks**: Chunk duration and interval are centralized in `simulationConfig.ts` for easy tuning.
 
 4. **Frontend Controls Ritual Phases**: The backend echoes phase changes but doesn't initiate them. This keeps the "theatrical" flow in the frontend.
 
 5. **Backend Controls Judge Logic**: The decision to interrupt and the question content are entirely server-side. This keeps AI logic secure and modular.
 
 6. **Rolling Transcript**: The backend maintains a growing transcript per session. The JudgeEngine analyzes the most recent 1500 characters to decide on interrupts.
+
+7. **Modular Folder Structure**: 3D rendering, UI overlays, hooks, and config are separated into distinct folders for maintainability.
+
+8. **Centralized Timing Config**: All timing constants are in one file (`simulationConfig.ts`) to make tuning the simulation easy.
+
+9. **Hook-Based Architecture**: Media recording is extracted into `useMediaRecording` for reusability and cleaner separation from the main page component.
+
+10. **React Router Navigation**: Session end uses `useNavigate()` for proper SPA navigation instead of `window.location.href`.

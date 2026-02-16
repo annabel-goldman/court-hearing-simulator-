@@ -17,6 +17,7 @@ export interface SessionConfig {
   proceedingType: 'demo'
   userRole: 'attorney'
   materials: Array<{ name: string; text: string; role: string }>
+  judicialSummary?: string
 }
 
 // Viseme mapping for Ready Player Me avatars

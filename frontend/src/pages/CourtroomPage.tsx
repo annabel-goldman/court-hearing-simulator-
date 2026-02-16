@@ -167,11 +167,24 @@ export default function CourtroomPage() {
   useEffect(() => {
     if (simulationPhase === 'PROCEEDING' && !isRecording) {
       if (isConnected && sessionConfig) {
+        // Check for custom prompts from Judge Admin
+        let customSynthesisPrompt: string | undefined
+        try {
+          const storedPrompts = sessionStorage.getItem('customJudgePrompts')
+          if (storedPrompts) {
+            const prompts = JSON.parse(storedPrompts)
+            customSynthesisPrompt = prompts.synthesisPrompt
+          }
+        } catch (e) {
+          console.warn('Failed to load custom prompts:', e)
+        }
+
         sendConfig({
           proceedingType: sessionConfig.proceedingType,
           userRole: sessionConfig.userRole,
           seed_questions: [],
-          brief_summary: sessionConfig.materials?.map(m => m.text.slice(0, 500)).join('\n') || ''
+          brief_summary: sessionConfig.judicialSummary || sessionConfig.materials?.map(m => m.text.slice(0, 500)).join('\n') || '',
+          synthesis_prompt: customSynthesisPrompt
         })
       }
       

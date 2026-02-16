@@ -47,6 +47,11 @@ class SynthesisRequest(BaseModel):
     asked_questions: List[str] = []
     system_prompt: Optional[str] = None
 
+class SummarizeRequest(BaseModel):
+    appellant_brief: str
+    appellee_brief: str
+    system_prompt: Optional[str] = None
+
 class TTSRequest(BaseModel):
     text: str
     voice: str = 'onyx'
@@ -121,6 +126,18 @@ async def generate_seed_questions(request: SeedQuestionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/summarize-briefs")
+async def summarize_briefs(request: SummarizeRequest):
+    try:
+        summary = await global_judge_engine.summarize_briefs(
+            appellant_text=request.appellant_brief,
+            appellee_text=request.appellee_brief,
+            system_prompt=request.system_prompt
+        )
+        return {"summary": summary}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/synthesize-question")
 async def synthesize_question(request: SynthesisRequest):
     try:
@@ -176,7 +193,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     manager.session_data[session_id].update({
                         'config': payload,
                         'seed_questions': payload.get('seed_questions', []),
-                        'brief_summary': payload.get('brief_summary', '')
+                        'brief_summary': payload.get('brief_summary', ''),
+                        'custom_synthesis_prompt': payload.get('synthesis_prompt')
                     })
                 
                 elif msg_type == "audio":
@@ -208,10 +226,11 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
     if session.get('phase') != 'PROCEEDING': return
     
     last_interrupt = session.get('last_interrupt_time')
-    if last_interrupt and (datetime.now() - last_interrupt).total_seconds() < 15: return
+    custom_prompt = session.get('custom_synthesis_prompt')
 
     should, question, _ = await engine.should_interrupt(
-        session_id, session.get('transcript', ''), session.get('config')
+        session_id, session.get('transcript', ''), session.get('config'),
+        custom_system_prompt=custom_prompt
     )
     
     if should and question:

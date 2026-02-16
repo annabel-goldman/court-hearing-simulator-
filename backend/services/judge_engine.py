@@ -171,7 +171,8 @@ Guidelines:
         self,
         session_id: str,
         transcript: str,
-        config: Optional[Dict] = None
+        config: Optional[Dict] = None,
+        custom_system_prompt: Optional[str] = None
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Determine if judge should interrupt and generate question if so.
@@ -233,10 +234,13 @@ Respond in JSON format:
                 print("WARNING: OpenAI client not available, returning mock response")
                 return False, None, "OpenAI API key not configured"
             
+            # Use custom prompt if provided, otherwise use default
+            system_prompt = custom_system_prompt or self._get_judge_system_prompt()
+            
             response = await client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": self._get_judge_system_prompt() + "\n\nIMPORTANT: Respond ONLY with valid JSON."},
+                    {"role": "system", "content": system_prompt + "\n\nIMPORTANT: Respond ONLY with valid JSON."},
                     {"role": "user", "content": analysis_prompt}
                 ],
                 temperature=0.7,
@@ -277,6 +281,51 @@ Respond in JSON format:
             print(f"Error in judge analysis: {e}")
             return False, None, f"Error: {str(e)}"
     
+    async def summarize_briefs(
+        self,
+        appellant_text: str,
+        appellee_text: str,
+        system_prompt: Optional[str] = None
+    ) -> str:
+        """Generate a concise judicial summary of both briefs."""
+        default_system = "You are an expert legal summarizer."
+        
+        prompt = f"""You are a senior law clerk summarizing two opposing legal briefs for an appellate judge.
+Provide a concise summary (max 300 words) that captures:
+1. The core legal dispute.
+2. The appellant's primary argument.
+3. The appellee's primary response.
+4. The key precedents involved.
+
+APPELLANT BRIEF TEXT:
+{appellant_text[:4000]}
+
+APPELLEE BRIEF TEXT:
+{appellee_text[:4000]}
+
+Format as a professional judicial summary."""
+
+        try:
+            client = get_openai_client()
+            if not client:
+                return "Judicial summary unavailable (API key not set)."
+            
+            response = await client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt or default_system},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3, # Low temperature for factual summary
+                max_tokens=500
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            print(f"Error summarizing briefs: {e}")
+            return f"Error generating summary: {str(e)}"
+
     async def generate_seed_questions(
         self,
         appellant_brief: str,
@@ -321,8 +370,9 @@ Return as JSON array:
             )
             
             content = response.choices[0].message.content.strip()
+            print(f"[SeedQuestions] Raw OpenAI response:\n{content[:500]}...")
             
-            # Extract JSON array
+            # Extract JSON array from markdown code blocks if present
             if "```" in content:
                 lines = content.split("\n")
                 json_lines = []
@@ -332,13 +382,29 @@ Return as JSON array:
                         in_json = not in_json
                     elif in_json:
                         json_lines.append(line)
-                content = "\n".join(json_lines)
+                if json_lines:
+                    content = "\n".join(json_lines)
+                    print(f"[SeedQuestions] Extracted from code block:\n{content[:300]}...")
+            
+            # Try to find JSON array in the content
+            if not content.strip().startswith("["):
+                # Try to find array in the content
+                start_idx = content.find("[")
+                end_idx = content.rfind("]")
+                if start_idx != -1 and end_idx != -1:
+                    content = content[start_idx:end_idx + 1]
+                    print(f"[SeedQuestions] Extracted array:\n{content[:300]}...")
             
             questions = json.loads(content)
+            print(f"[SeedQuestions] Parsed {len(questions) if isinstance(questions, list) else 0} questions")
             return questions if isinstance(questions, list) else []
             
+        except json.JSONDecodeError as e:
+            print(f"[SeedQuestions] JSON parse error: {e}")
+            print(f"[SeedQuestions] Content was: {content[:500] if content else 'None'}")
+            return []
         except Exception as e:
-            print(f"Error generating seed questions: {e}")
+            print(f"[SeedQuestions] Error generating seed questions: {e}")
             return []
     
     async def synthesize_question(
