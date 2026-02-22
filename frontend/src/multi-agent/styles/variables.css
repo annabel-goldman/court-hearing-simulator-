@@ -1,0 +1,59 @@
+/**
+ * CSS Variables for Multi-Agent Module
+ * 
+ * Central location for colors, spacing, and other design tokens
+ */
+
+:root {
+  /* Background colors */
+  --ma-bg-primary: #111827;     /* gray-900 */
+  --ma-bg-secondary: #1f2937;   /* gray-800 */
+  --ma-bg-tertiary: #374151;    /* gray-700 */
+  --ma-bg-input: #111827;       /* gray-900 */
+  
+  /* Text colors */
+  --ma-text-primary: #ffffff;
+  --ma-text-secondary: #d1d5db;  /* gray-300 */
+  --ma-text-muted: #9ca3af;      /* gray-400 */
+  --ma-text-dim: #6b7280;        /* gray-500 */
+  
+  /* Border colors */
+  --ma-border-default: #374151;  /* gray-700 */
+  --ma-border-muted: #4b5563;    /* gray-600 */
+  
+  /* Status colors */
+  --ma-success: #22c55e;         /* green-500 */
+  --ma-success-bg: rgba(34, 197, 94, 0.2);
+  --ma-error: #ef4444;           /* red-500 */
+  --ma-error-bg: rgba(239, 68, 68, 0.2);
+  --ma-warning: #eab308;         /* yellow-500 */
+  --ma-warning-bg: rgba(234, 179, 8, 0.2);
+  --ma-info: #3b82f6;            /* blue-500 */
+  --ma-info-bg: rgba(59, 130, 246, 0.2);
+  
+  /* Button colors */
+  --ma-btn-primary: #2563eb;     /* blue-600 */
+  --ma-btn-primary-hover: #1d4ed8;
+  --ma-btn-success: #16a34a;     /* green-600 */
+  --ma-btn-success-hover: #15803d;
+  --ma-btn-danger: #dc2626;      /* red-600 */
+  --ma-btn-danger-hover: #b91c1c;
+  --ma-btn-warning: #ca8a04;     /* yellow-600 */
+  --ma-btn-warning-hover: #a16207;
+  --ma-btn-secondary: #4b5563;   /* gray-600 */
+  --ma-btn-secondary-hover: #6b7280;
+  --ma-btn-disabled: #4b5563;
+  
+  /* Spacing */
+  --ma-space-xs: 0.25rem;
+  --ma-space-sm: 0.5rem;
+  --ma-space-md: 1rem;
+  --ma-space-lg: 1.5rem;
+  --ma-space-xl: 2rem;
+  
+  /* Border radius */
+  --ma-radius-sm: 0.25rem;
+  --ma-radius-md: 0.5rem;
+  --ma-radius-lg: 0.75rem;
+  --ma-radius-full: 9999px;
+}

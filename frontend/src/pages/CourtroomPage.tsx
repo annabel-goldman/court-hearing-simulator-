@@ -170,13 +170,20 @@ export default function CourtroomPage() {
         // Check for custom prompts from Judge Admin
         let customSynthesisPrompt: string | undefined
         try {
-          const storedPrompts = sessionStorage.getItem('customJudgePrompts')
+          const storedPrompts = localStorage.getItem('customJudgePrompts')
           if (storedPrompts) {
             const prompts = JSON.parse(storedPrompts)
             customSynthesisPrompt = prompts.synthesisPrompt
           }
         } catch (e) {
           console.warn('Failed to load custom prompts:', e)
+        }
+
+        if (customSynthesisPrompt) {
+          const preview = customSynthesisPrompt.slice(0, 200).replace(/\n/g, ' ')
+          console.log('[CourtroomPage] Judge using CUSTOM synthesis prompt (from Set Prompts):', preview + (customSynthesisPrompt.length > 200 ? '...' : ''))
+        } else {
+          console.log('[CourtroomPage] Judge using backend DEFAULT synthesis prompt (no custom prompt in localStorage)')
         }
 
         sendConfig({

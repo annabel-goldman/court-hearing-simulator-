@@ -1,0 +1,36 @@
+/**
+ * Transcript Display Styles
+ * 
+ * Corresponds to: components/features/TranscriptDisplay.tsx
+ */
+
+.ma-transcript {
+  background-color: var(--ma-bg-primary);
+  border-radius: var(--ma-radius-lg);
+  padding: var(--ma-space-md);
+}
+
+.ma-transcript__title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ma-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.ma-transcript__content {
+  min-height: 6rem;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.ma-transcript__text {
+  color: var(--ma-text-secondary);
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.ma-transcript__placeholder {
+  color: var(--ma-text-dim);
+  font-style: italic;
+}

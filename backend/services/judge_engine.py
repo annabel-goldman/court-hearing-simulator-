@@ -166,17 +166,63 @@ Guidelines:
         }
         
         return base_prompt + personality_additions.get(self.judge_personality, "")
+
+    _OMIT_SECTION = "\n__OMIT_SECTION__"
+
+    def _substitute_synthesis_prompt(
+        self,
+        template: str,
+        recent_transcript: str,
+        brief_summary: Optional[str] = None,
+        seed_questions: Optional[List[str]] = None,
+        asked_questions: Optional[List[str]] = None,
+    ) -> str:
+        """Substitute {{TRANSCRIPT}}, {{SEED_QUESTIONS}}, {{BRIEF_SUMMARY}}, {{ASKED_QUESTIONS}}.
+        Empty inputs are omitted so they are not sent to the model."""
+        seed_text = ""
+        if seed_questions:
+            seed_text = "\n".join(f"- {q}" if isinstance(q, str) else f"- {q.get('text', q)}" for q in seed_questions[:15])
+        brief_text = (brief_summary or "").strip()[:500] if brief_summary else ""
+        asked_text = ""
+        if asked_questions:
+            asked_text = "\n".join(f"- {q}" if isinstance(q, str) else f"- {q.get('question', q)}" for q in asked_questions[-10:])
+
+        out = template.replace("{{TRANSCRIPT}}", recent_transcript or "")
+        out = out.replace("{{SEED_QUESTIONS}}", seed_text if seed_text else self._OMIT_SECTION)
+        out = out.replace("{{BRIEF_SUMMARY}}", brief_text if brief_text else self._OMIT_SECTION)
+        out = out.replace("{{ASKED_QUESTIONS}}", asked_text if asked_text else self._OMIT_SECTION)
+
+        # Remove optional sections that are empty: drop the line with __OMIT_SECTION__ and the preceding line (section header)
+        lines = out.split("\n")
+        result = []
+        i = 0
+        while i < len(lines):
+            if self._OMIT_SECTION.strip() in lines[i]:
+                if result and result[-1].strip().endswith(":"):
+                    result.pop()
+                i += 1
+                continue
+            result.append(lines[i])
+            i += 1
+        return "\n".join(result)
     
     async def should_interrupt(
         self,
         session_id: str,
         transcript: str,
         config: Optional[Dict] = None,
-        custom_system_prompt: Optional[str] = None
+        custom_system_prompt: Optional[str] = None,
+        brief_summary: Optional[str] = None,
+        seed_questions: Optional[List[str]] = None,
+        asked_questions: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Determine if judge should interrupt and generate question if so.
         Based on moot-court-practice JudgeAnalyzer.should_interrupt()
+
+        When custom_system_prompt is set, placeholders {{TRANSCRIPT}}, {{SEED_QUESTIONS}},
+        {{BRIEF_SUMMARY}}, {{ASKED_QUESTIONS}} are substituted. Empty inputs are omitted
+        so they are not sent to the model.
         
         Returns:
             Tuple of (should_interrupt: bool, question: str or None, reasoning: str or None)
@@ -234,14 +280,34 @@ Respond in JSON format:
                 print("WARNING: OpenAI client not available, returning mock response")
                 return False, None, "OpenAI API key not configured"
             
-            # Use custom prompt if provided, otherwise use default
-            system_prompt = custom_system_prompt or self._get_judge_system_prompt()
-            
+            # Custom prompt entirely overrides all backend prompts; substitutes placeholders
+            if custom_system_prompt:
+                # The custom prompt IS the full prompt (system + instructions combined)
+                # Substitute placeholders and use it as-is
+                full_prompt = self._substitute_synthesis_prompt(
+                    custom_system_prompt,
+                    recent_transcript=recent_transcript,
+                    brief_summary=brief_summary,
+                    seed_questions=seed_questions or [],
+                    asked_questions=asked_questions or [],
+                )
+                # Minimal user message - just request JSON response
+                user_message = "Respond now with valid JSON only."
+                system_prompt = full_prompt
+                print(f"[Judge] Using CUSTOM prompt (len={len(system_prompt)})")
+                print(f"[Judge] Placeholders filled: TRANSCRIPT={len(recent_transcript)} chars, BRIEF_SUMMARY={'yes' if brief_summary else 'empty'}, SEED_QUESTIONS={len(seed_questions or [])} items, ASKED={len(asked_questions or [])} items")
+                print(f"[Judge] Full prompt being sent to model:\n{'='*60}\n{system_prompt}\n{'='*60}")
+            else:
+                # No custom prompt - use backend defaults
+                system_prompt = self._get_judge_system_prompt()
+                user_message = analysis_prompt
+                print(f"[Judge] Using DEFAULT backend prompt (no custom prompt set)")
+
             response = await client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt + "\n\nIMPORTANT: Respond ONLY with valid JSON."},
-                    {"role": "user", "content": analysis_prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
                 max_tokens=300
@@ -257,14 +323,14 @@ Respond in JSON format:
                 lines = content.split("\n")
                 content = "\n".join(lines[1:-1]) if len(lines) > 2 else content
             
-            # Try to extract JSON
-            json_match = re.search(r'\{[^{}]*"should_interrupt"[^{}]*\}', content, re.DOTALL)
+            # Try to extract JSON (accept either snake_case or camelCase from frontend prompt)
+            json_match = re.search(r'\{[^{}]*"(?:should_interrupt|shouldInterrupt)"[^{}]*\}', content, re.DOTALL)
             if json_match:
                 content = json_match.group(0)
             
             result = json.loads(content)
             
-            should_interrupt = result.get("should_interrupt", False)
+            should_interrupt = result.get("should_interrupt", result.get("shouldInterrupt", False))
             question = result.get("question")
             reasoning = result.get("reasoning", "")
             topic = result.get("topic", "")
@@ -415,23 +481,20 @@ Return as JSON array:
         asked_questions: List[str] = [],
         system_prompt: Optional[str] = None
     ) -> Dict:
-        """Synthesize a new question based on recent transcript and seed questions."""
-        prompt = f"""Based on the advocate's recent argument, generate a relevant judicial question.
-
-RECENT TRANSCRIPT:
-{transcript[-1500:]}
-
-AVAILABLE SEED QUESTIONS (use as inspiration, don't repeat exactly):
-{chr(10).join(f'- {q}' for q in seed_questions[:5])}
-
-ALREADY ASKED (don't repeat):
-{chr(10).join(f'- {q}' for q in asked_questions[-3:])}
-
-BRIEF SUMMARY:
-{brief_summary[:500]}
-
-Generate a substantive question. Return JSON:
-{{"should_interrupt": true/false, "question": "...", "reasoning": "..."}}"""
+        """Synthesize a new question based on recent transcript and seed questions.
+        Empty inputs (brief_summary, seed_questions, asked_questions) are not sent to the model."""
+        parts = ["Based on the advocate's recent argument, generate a relevant judicial question.\n\nRECENT TRANSCRIPT:\n", (transcript or "")[-1500:]]
+        if seed_questions:
+            parts.append("\n\nAVAILABLE SEED QUESTIONS (use as inspiration, don't repeat exactly):\n")
+            parts.append("\n".join(f"- {q}" if isinstance(q, str) else f"- {q.get('text', q)}" for q in seed_questions[:5]))
+        if asked_questions:
+            parts.append("\n\nALREADY ASKED (don't repeat):\n")
+            parts.append("\n".join(f"- {q}" if isinstance(q, str) else f"- {q.get('question', q)}" for q in asked_questions[-3:]))
+        if (brief_summary or "").strip():
+            parts.append("\n\nBRIEF SUMMARY:\n")
+            parts.append((brief_summary or "").strip()[:500])
+        parts.append("\n\nGenerate a substantive question. Return JSON:\n{\"should_interrupt\": true/false, \"question\": \"...\", \"reasoning\": \"...\"}")
+        prompt = "".join(parts)
 
         try:
             client = get_openai_client()

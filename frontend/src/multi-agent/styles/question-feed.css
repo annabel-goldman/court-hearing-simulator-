@@ -1,0 +1,70 @@
+/**
+ * Question Feed Styles
+ * 
+ * Corresponds to: components/features/QuestionFeed.tsx
+ */
+
+.ma-question-feed {
+  background-color: var(--ma-bg-primary);
+  border-radius: var(--ma-radius-lg);
+  padding: 0.75rem;
+  min-height: 16rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ma-question-feed__placeholder {
+  color: var(--ma-text-dim);
+  font-style: italic;
+  font-size: 0.875rem;
+}
+
+/* Question item */
+.ma-question-item {
+  border-radius: var(--ma-radius-lg);
+  padding: 0.75rem;
+  border-left: 4px solid;
+  animation: ma-fade-in 0.3s ease;
+}
+
+.ma-question-item__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.ma-question-item__dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.ma-question-item__agent-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.ma-question-item__timestamp {
+  color: var(--ma-text-dim);
+  font-size: 0.75rem;
+}
+
+.ma-question-item__text {
+  color: var(--ma-text-primary);
+  font-size: 0.875rem;
+}
+
+@keyframes ma-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

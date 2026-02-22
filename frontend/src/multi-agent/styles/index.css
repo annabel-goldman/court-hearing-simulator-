@@ -1,0 +1,30 @@
+/**
+ * Multi-Agent Module Styles Index
+ * 
+ * Import this file to include all multi-agent styles.
+ * Each file corresponds to a specific component for easy navigation.
+ */
+
+/* Variables and design tokens */
+@import './variables.css';
+
+/* UI Components */
+@import './button.css';
+@import './card.css';
+@import './input.css';
+@import './badge.css';
+@import './alert.css';
+@import './file-upload.css';
+
+/* Feature Components */
+@import './agent-selector.css';
+@import './question-feed.css';
+@import './transcript.css';
+@import './recording.css';
+@import './active-agents.css';
+@import './editor-actions.css';
+@import './new-agent-form.css';
+@import './summary.css';
+
+/* Page Layout */
+@import './page.css';

@@ -1,0 +1,107 @@
+/**
+ * Button Styles
+ * 
+ * Corresponds to: components/ui/Button.tsx
+ */
+
+.ma-btn {
+  border-radius: var(--ma-radius-lg);
+  font-weight: 500;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+  cursor: pointer;
+  border: none;
+  color: var(--ma-text-primary);
+}
+
+.ma-btn:disabled {
+  cursor: not-allowed;
+  background-color: var(--ma-btn-disabled);
+}
+
+/* Variants */
+.ma-btn--primary {
+  background-color: var(--ma-btn-primary);
+}
+.ma-btn--primary:hover:not(:disabled) {
+  background-color: var(--ma-btn-primary-hover);
+}
+
+.ma-btn--secondary {
+  background-color: var(--ma-btn-secondary);
+}
+.ma-btn--secondary:hover:not(:disabled) {
+  background-color: var(--ma-btn-secondary-hover);
+}
+
+.ma-btn--success {
+  background-color: var(--ma-btn-success);
+}
+.ma-btn--success:hover:not(:disabled) {
+  background-color: var(--ma-btn-success-hover);
+}
+
+.ma-btn--danger {
+  background-color: var(--ma-btn-danger);
+}
+.ma-btn--danger:hover:not(:disabled) {
+  background-color: var(--ma-btn-danger-hover);
+}
+
+.ma-btn--warning {
+  background-color: var(--ma-btn-warning);
+}
+.ma-btn--warning:hover:not(:disabled) {
+  background-color: var(--ma-btn-warning-hover);
+}
+
+.ma-btn--ghost {
+  background-color: transparent;
+  border: 1px solid var(--ma-border-muted);
+  color: var(--ma-text-secondary);
+}
+.ma-btn--ghost:hover:not(:disabled) {
+  background-color: var(--ma-bg-tertiary);
+  color: var(--ma-text-primary);
+}
+
+/* Sizes */
+.ma-btn--sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.ma-btn--md {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+.ma-btn--lg {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+}
+
+/* Full width */
+.ma-btn--full {
+  width: 100%;
+}
+
+/* Loading state */
+.ma-btn__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.ma-btn__spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: ma-spin 0.6s linear infinite;
+}
+
+@keyframes ma-spin {
+  to { transform: rotate(360deg); }
+}

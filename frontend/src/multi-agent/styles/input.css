@@ -1,0 +1,68 @@
+/**
+ * Input Styles
+ * 
+ * Corresponds to: components/ui/Input.tsx
+ */
+
+.ma-input,
+.ma-textarea {
+  width: 100%;
+  background-color: var(--ma-bg-primary);
+  color: var(--ma-text-primary);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--ma-radius-lg);
+  border: 1px solid var(--ma-border-default);
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ma-input::placeholder,
+.ma-textarea::placeholder {
+  color: var(--ma-text-dim);
+}
+
+.ma-input:focus,
+.ma-textarea:focus {
+  outline: none;
+  border-color: var(--ma-btn-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3);
+}
+
+.ma-input--error,
+.ma-textarea--error {
+  border-color: var(--ma-error);
+}
+
+.ma-input--error:focus,
+.ma-textarea--error:focus {
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
+}
+
+.ma-textarea--mono {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+}
+
+.ma-input__label,
+.ma-textarea__label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ma-text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.ma-input__error,
+.ma-textarea__error {
+  color: var(--ma-error);
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+/* Color picker */
+.ma-color-picker {
+  width: 5rem;
+  height: 2.5rem;
+  border-radius: var(--ma-radius-md);
+  cursor: pointer;
+  border: 1px solid var(--ma-border-default);
+}

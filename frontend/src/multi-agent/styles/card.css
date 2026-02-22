@@ -1,0 +1,38 @@
+/**
+ * Card Styles
+ * 
+ * Corresponds to: components/ui/Card.tsx
+ */
+
+.ma-card {
+  background-color: var(--ma-bg-secondary);
+  border-radius: var(--ma-radius-lg);
+  padding: var(--ma-space-lg);
+}
+
+.ma-card--dark {
+  background-color: var(--ma-bg-primary);
+}
+
+.ma-card--bordered {
+  background-color: var(--ma-bg-secondary);
+  border: 2px dashed var(--ma-border-muted);
+}
+
+.ma-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--ma-space-md);
+}
+
+.ma-card__title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--ma-text-primary);
+  margin: 0;
+}
+
+.ma-card__content {
+  color: var(--ma-text-secondary);
+}

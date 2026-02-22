@@ -1,0 +1,27 @@
+/**
+ * New Agent Form Styles
+ * 
+ * Corresponds to: components/features/NewAgentForm.tsx
+ */
+
+.ma-new-agent-form {
+  background-color: var(--ma-bg-tertiary);
+  border-radius: var(--ma-radius-lg);
+  padding: var(--ma-space-md);
+  margin-bottom: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+.ma-new-agent-form__title {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--ma-text-primary);
+  margin: 0;
+}
+
+.ma-new-agent-form__actions {
+  display: flex;
+  gap: 0.5rem;
+}

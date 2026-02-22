@@ -106,7 +106,7 @@ export default function Home() {
       // Check for custom prompts from Judge Admin
       let customSummarizationPrompt: string | undefined
       try {
-        const storedPrompts = sessionStorage.getItem('customJudgePrompts')
+        const storedPrompts = localStorage.getItem('customJudgePrompts')
         if (storedPrompts) {
           const prompts = JSON.parse(storedPrompts)
           customSummarizationPrompt = prompts.summarizationPrompt
@@ -183,6 +183,7 @@ export default function Home() {
       <nav className="nav">
         <div className="nav-brand">Court Simulator</div>
         <div className="nav-links">
+          <Link to="/multi-agent" className="nav-link">Multi-Agent Practice</Link>
           <Link to="/admin/judge" className="nav-link">Judge Admin</Link>
         </div>
       </nav>

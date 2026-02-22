@@ -62,30 +62,55 @@ Output as JSON array:
   ]
 }`
 
-const DEFAULT_SYNTHESIS_PROMPT = `You are a federal appellate judge presiding over oral argument. Based on the advocate's recent statements and the prepared questions, decide whether to interrupt with a question.
+const DEFAULT_SYNTHESIS_PROMPT = `You are a federal appellate court judge presiding over a moot court argument.
+Your role is to:
+1. Listen carefully to the advocate's argument
+2. Identify points that need clarification, have logical gaps, or raise questions
+3. Interrupt naturally when you have a substantive question
+4. Ask probing questions that test the advocate's understanding
+5. Be respectful but challenging
 
-RECENT TRANSCRIPT:
+Guidelines:
+- Interrupt when the argument is unclear or you need clarification
+- Interrupt when you spot a logical weakness or inconsistency
+- Interrupt when you want to test the advocate's knowledge
+- Don't interrupt too frequently (allow advocate to develop points)
+- Questions should be substantive and relevant to the case
+- Use natural judicial language and tone
+
+You are a strict, demanding judge who challenges arguments rigorously and expects precise legal reasoning.
+
+---
+
+Based on the advocate's argument so far:
+
+TRANSCRIPT:
 {{TRANSCRIPT}}
 
-AVAILABLE QUESTIONS:
-{{SEED_QUESTIONS}}
-
-CASE CONTEXT:
+CASE CONTEXT (BRIEF SUMMARY):
 {{BRIEF_SUMMARY}}
+
+AVAILABLE SEED QUESTIONS:
+{{SEED_QUESTIONS}}
 
 ALREADY ASKED:
 {{ASKED_QUESTIONS}}
 
 Determine:
-1. Should you interrupt now? (Consider: unclear point, logical gap, good pause moment, not too frequent)
-2. If yes, select or synthesize the most relevant question
+1. Should you interrupt now? Consider:
+   - Is the current point unclear or confusing?
+   - Are there logical gaps in the argument?
+   - Do you need clarification on a specific claim?
+   - Is this a good natural pause point?
+   - Have you already asked about this topic recently?
 
-Respond as JSON:
+2. If yes, what is your question? Make it substantive and relevant.
+
+Respond in JSON format:
 {
-  "shouldInterrupt": boolean,
-  "question": "The question to ask" | null,
-  "reasoning": "Brief explanation",
-  "questionId": "id of seed question used, if any" | null
+  "should_interrupt": true/false,
+  "question": "Your question here" (or null if not interrupting),
+  "reasoning": "Brief explanation of why interrupting or not"
 }`
 
 const DEFAULT_SUMMARIZATION_PROMPT = `You are a senior law clerk summarizing two opposing legal briefs for an appellate judge.
@@ -97,10 +122,10 @@ Provide a concise summary (max 300 words) that captures:
 
 Format as a professional judicial summary that will help the judge quickly understand the case before oral argument.`
 
-// Helper to load prompts from sessionStorage
+// Helper to load prompts from localStorage (persists across navigation and browser sessions)
 function loadStoredPrompts(): { seedPrompt: string; synthesisPrompt: string; summarizationPrompt: string } | null {
   try {
-    const stored = sessionStorage.getItem(CUSTOM_PROMPTS_KEY)
+    const stored = localStorage.getItem(CUSTOM_PROMPTS_KEY)
     if (stored) {
       return JSON.parse(stored)
     }
@@ -110,9 +135,9 @@ function loadStoredPrompts(): { seedPrompt: string; synthesisPrompt: string; sum
   return null
 }
 
-// Helper to save prompts to sessionStorage
+// Helper to save prompts to localStorage (persists across navigation and browser sessions)
 function savePromptsToStorage(prompts: { seedPrompt: string; synthesisPrompt: string; summarizationPrompt: string }) {
-  sessionStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(prompts))
+  localStorage.setItem(CUSTOM_PROMPTS_KEY, JSON.stringify(prompts))
 }
 
 export default function JudgeAdmin() {
@@ -243,7 +268,7 @@ export default function JudgeAdmin() {
     setHasUnsavedChanges(hasChanges)
   }, [seedPrompt, synthesisPrompt, summarizationPrompt])
 
-  // Save prompts to session
+  // Save prompts to localStorage (sticky across navigation)
   const handleSetPrompts = () => {
     savePromptsToStorage({ seedPrompt, synthesisPrompt, summarizationPrompt })
     setSaveSuccess(true)
@@ -256,7 +281,7 @@ export default function JudgeAdmin() {
     setSeedPrompt(DEFAULT_SEED_PROMPT)
     setSynthesisPrompt(DEFAULT_SYNTHESIS_PROMPT)
     setSummarizationPrompt(DEFAULT_SUMMARIZATION_PROMPT)
-    sessionStorage.removeItem(CUSTOM_PROMPTS_KEY)
+    localStorage.removeItem(CUSTOM_PROMPTS_KEY)
     setHasUnsavedChanges(false)
   }
 
@@ -430,7 +455,7 @@ export default function JudgeAdmin() {
             <li><strong>Save when ready</strong> — Click "Set Prompts" to save your customizations. They'll be used for all courtroom sessions.</li>
           </ol>
           <p className="explainer-note">
-            Work through the tabs in order — each step builds on the previous. Your prompts are stored in your browser session.
+            Work through the tabs in order — each step builds on the previous. Your prompts are stored in your browser and persist until you reset or clear site data.
           </p>
         </div>
       </div>
@@ -449,7 +474,7 @@ export default function JudgeAdmin() {
           >
             Reset to Defaults
           </button>
-          {saveSuccess && <span className="save-success">Prompts saved to session!</span>}
+          {saveSuccess && <span className="save-success">Prompts saved.</span>}
         </div>
       </div>
 

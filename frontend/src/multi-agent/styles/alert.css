@@ -1,0 +1,35 @@
+/**
+ * Alert Styles
+ * 
+ * Corresponds to: components/ui/Alert.tsx
+ */
+
+.ma-alert {
+  padding: 0.75rem 1rem;
+  border-radius: var(--ma-radius-md);
+  border: 1px solid;
+}
+
+.ma-alert--error {
+  background-color: var(--ma-error-bg);
+  border-color: var(--ma-error);
+  color: #fecaca; /* red-200 */
+}
+
+.ma-alert--warning {
+  background-color: var(--ma-warning-bg);
+  border-color: var(--ma-warning);
+  color: #fef08a; /* yellow-200 */
+}
+
+.ma-alert--success {
+  background-color: var(--ma-success-bg);
+  border-color: var(--ma-success);
+  color: #bbf7d0; /* green-200 */
+}
+
+.ma-alert--info {
+  background-color: var(--ma-info-bg);
+  border-color: var(--ma-info);
+  color: #bfdbfe; /* blue-200 */
+}

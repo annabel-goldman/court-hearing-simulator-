@@ -1,0 +1,34 @@
+/**
+ * Agent Selector Styles
+ * 
+ * Corresponds to: components/features/AgentSelector.tsx
+ */
+
+.ma-agent-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ma-agent-selector__btn {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--ma-radius-lg);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+  color: var(--ma-text-primary);
+}
+
+.ma-agent-selector__btn:hover {
+  opacity: 0.85;
+}
+
+.ma-agent-selector__btn--selected {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px rgba(255, 255, 255, 0.3);
+}
+
+.ma-agent-selector__edit-marker {
+  margin-left: 0.25rem;
+}
