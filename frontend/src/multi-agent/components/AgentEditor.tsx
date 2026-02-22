@@ -244,9 +244,58 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
     }
   }, [agents, onAgentsChange]);
 
+  const handleDelete = useCallback(async () => {
+    if (!selectedAgentId) return;
+
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete this agent? This cannot be undone.`
+    );
+    if (!confirmDelete) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/multi-agent/agents/${selectedAgentId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete agent');
+      }
+
+      // Remove from local state
+      setLocalEdits(prev => {
+        const newEdits = { ...prev };
+        delete newEdits[selectedAgentId];
+        return newEdits;
+      });
+      setVersionHistory(prev => {
+        const newHistory = { ...prev };
+        delete newHistory[selectedAgentId];
+        return newHistory;
+      });
+
+      // Remove from agents list
+      const newAgents = agents.filter(a => a.id !== selectedAgentId);
+      onAgentsChange(newAgents);
+
+      // Clear selection
+      setSelectedAgentId(null);
+      setEditedJson('');
+      setJsonError(null);
+
+    } catch (e) {
+      console.error('Failed to delete agent:', e);
+      setJsonError(e instanceof Error ? e.message : 'Failed to delete agent');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedAgentId, agents, onAgentsChange]);
+
   const selectedAgent = selectedAgentId ? getEffectiveAgent(selectedAgentId) : null;
   const canUndo = selectedAgentId && (versionHistory[selectedAgentId]?.length || 0) > 0;
   const hasLocalEdits = selectedAgentId && !!localEdits[selectedAgentId];
+  const canDelete = selectedAgent?.is_custom === true;
 
   return (
     <Card>
@@ -283,8 +332,10 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
               onReset={handleReset}
               onWrite={handleWrite}
               onUndo={handleUndo}
+              onDelete={handleDelete}
               canUpdate={!jsonError}
               canUndo={!!canUndo}
+              canDelete={!!canDelete}
               hasLocalEdits={!!hasLocalEdits}
               isLoading={isLoading}
             />

@@ -13,6 +13,7 @@ export interface Agent {
   version?: number;
   created_at?: string;
   is_default?: boolean;
+  is_custom?: boolean;  // True if this agent can be deleted
 }
 
 export interface AgentQuestion {

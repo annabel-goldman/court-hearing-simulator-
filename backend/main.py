@@ -242,6 +242,24 @@ async def reset_agent(agent_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/multi-agent/agents/{agent_id}")
+async def delete_agent(agent_id: str):
+    """Delete a custom agent (cannot delete default agents)."""
+    try:
+        deleted = multi_agent_service.delete_agent(agent_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot delete default agent '{agent_id}'. Use Reset instead."
+            )
+        return {"success": True, "message": f"Agent '{agent_id}' deleted"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/multi-agent/summarize")
 async def multi_agent_summarize(request: MultiAgentSummarizeRequest):
     """Generate a summary of both briefs for multi-agent simulation."""

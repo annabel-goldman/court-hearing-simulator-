@@ -69,6 +69,18 @@ class MultiAgentService:
         """Create a completely new agent."""
         return self.storage.create_new_agent(agent_data)
 
+    def is_custom_agent(self, agent_id: str) -> bool:
+        """Check if an agent is a custom agent (not a default)."""
+        return self.storage.is_custom_agent(agent_id)
+
+    def delete_agent(self, agent_id: str) -> bool:
+        """Delete a custom agent. Returns False for default agents."""
+        return self.storage.delete_agent(agent_id)
+
+    def delete_custom_versions(self, agent_id: str) -> int:
+        """Delete all custom versions of an agent (reset to default)."""
+        return self.storage.delete_custom_versions(agent_id)
+
     # =========================================================================
     # LLM Operations (delegated to llm)
     # =========================================================================

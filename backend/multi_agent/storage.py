@@ -71,6 +71,8 @@ class AgentStorage:
         1. Custom versions of default agents (latest version)
         2. Default agents (if no custom version)
         3. New custom agents (not based on defaults)
+        
+        Sets is_custom=True for agents that don't have a default version.
         """
         agents = []
         seen_ids = set()
@@ -84,10 +86,13 @@ class AgentStorage:
                     # Check if there's a custom version
                     latest = self.get_agent_by_id(agent_id)
                     if latest:
+                        latest.is_custom = False  # Has a default, not deletable
                         agents.append(latest)
                         seen_ids.add(agent_id)
                     else:
-                        agents.append(Agent.from_dict(data))
+                        agent = Agent.from_dict(data)
+                        agent.is_custom = False  # Is a default, not deletable
+                        agents.append(agent)
                         seen_ids.add(agent_id)
             except Exception as e:
                 print(f"Error loading agent {file_path}: {e}")
@@ -104,6 +109,7 @@ class AgentStorage:
                         # This is a new custom agent, get the latest version
                         latest = self.get_agent_by_id(base_id)
                         if latest:
+                            latest.is_custom = True  # No default, can be deleted
                             agents.append(latest)
                             seen_ids.add(base_id)
             except Exception as e:
@@ -218,13 +224,68 @@ class AgentStorage:
         
         agent_data["version"] = 1
         agent_data["created_at"] = datetime.now().isoformat()
+        agent_data["is_custom"] = True  # New agents are always custom (deletable)
         
         # Save as first custom version
         file_path = self.custom_path / f"{agent_id}_v1.json"
         with open(file_path, "w") as f:
             json.dump(agent_data, f, indent=2)
         
-        return Agent.from_dict(agent_data)
+        agent = Agent.from_dict(agent_data)
+        agent.is_custom = True
+        return agent
+
+    # =========================================================================
+    # Deleting Agents
+    # =========================================================================
+
+    def is_custom_agent(self, agent_id: str) -> bool:
+        """Check if an agent is a custom agent (not a default)."""
+        default_path = self.defaults_path / f"{agent_id}.json"
+        return not default_path.exists()
+
+    def delete_agent(self, agent_id: str) -> bool:
+        """
+        Delete a custom agent and all its versions.
+        
+        Returns True if deleted, False if agent is a default (cannot delete).
+        Raises ValueError if agent doesn't exist.
+        """
+        # Check if it's a default agent (cannot delete)
+        default_path = self.defaults_path / f"{agent_id}.json"
+        if default_path.exists():
+            return False  # Cannot delete default agents
+        
+        # Delete all custom versions
+        deleted_any = False
+        pattern = f"{agent_id}_v*.json"
+        for file_path in self.custom_path.glob(pattern):
+            try:
+                file_path.unlink()
+                deleted_any = True
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
+        
+        if not deleted_any:
+            raise ValueError(f"Agent '{agent_id}' not found")
+        
+        return True
+
+    def delete_custom_versions(self, agent_id: str) -> int:
+        """
+        Delete all custom versions of an agent (reset to default).
+        
+        Returns the number of versions deleted.
+        """
+        deleted_count = 0
+        pattern = f"{agent_id}_v*.json"
+        for file_path in self.custom_path.glob(pattern):
+            try:
+                file_path.unlink()
+                deleted_count += 1
+            except Exception as e:
+                print(f"Error deleting {file_path}: {e}")
+        return deleted_count
 
 
 # Global instance for easy import

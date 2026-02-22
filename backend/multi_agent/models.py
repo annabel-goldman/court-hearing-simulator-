@@ -20,6 +20,7 @@ class Agent:
     extra_prompt: str
     version: int = 1
     created_at: Optional[str] = None
+    is_custom: bool = False  # True if this is a user-created agent (can be deleted)
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -36,4 +37,5 @@ class Agent:
             extra_prompt=data.get("extra_prompt", ""),
             version=data.get("version", 1),
             created_at=data.get("created_at"),
+            is_custom=data.get("is_custom", False),
         )
