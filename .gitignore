@@ -21,3 +21,6 @@ node_modules/
 # Build / IDE
 dist/
 .DS_Store
+
+# Multi-agent custom data (user-created, should not be deployed)
+backend/multi_agent/data/custom/

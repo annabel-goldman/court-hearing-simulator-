@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Agent, AgentQuestion, SimulationPhase, MultiAgentSocketMessage } from '../types';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
+// Get base WS URL and remove trailing /ws if present (for consistency with main project)
+const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws').replace(/\/ws\/?$/, '');
 
 interface UseMultiAgentSocketProps {
   sessionId: string;
@@ -36,7 +37,7 @@ export function useMultiAgentSocket({
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`${WS_URL}/ws/multi-agent/${sessionId}`);
+    const ws = new WebSocket(`${WS_BASE}/ws/multi-agent/${sessionId}`);
     
     ws.onopen = () => {
       console.log('[MultiAgentSocket] Connected');
@@ -61,7 +62,7 @@ export function useMultiAgentSocket({
             onTranscriptUpdate?.(message.data.text as string);
             break;
           case 'agent_question':
-            onAgentQuestion?.(message.data as AgentQuestion);
+            onAgentQuestion?.(message.data as unknown as AgentQuestion);
             break;
           case 'phase_update':
             onPhaseUpdate?.(message.data.phase as SimulationPhase);
