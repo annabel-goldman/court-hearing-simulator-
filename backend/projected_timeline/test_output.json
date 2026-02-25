@@ -1,0 +1,40 @@
+{
+  "model": "mistralai/Mistral-7B-Instruct-v0.2",
+  "case_summary": "Coastal Energy LLC operates an LNG terminal in Oregon without an individual \u00a7404 permit for dredging, according to Pacific Environmental Alliance. The dispute centers on the applicability of Nationwide Permit 12 and the adequacy of FERC's Environmental Impact Statement.",
+  "key_legal_issues": [
+    "Applicability of Nationwide Permit 12 to Coastal's dredging activities",
+    "Adequacy of FERC's Environmental Impact Statement"
+  ],
+  "predictions": [
+    {
+      "prediction_id": 1,
+      "lens": "Statutory Text & Plain Meaning",
+      "rationale": "Parse error.",
+      "topics": []
+    },
+    {
+      "prediction_id": 2,
+      "lens": "Precedent & Stare Decisis",
+      "rationale": "Parse error.",
+      "topics": []
+    },
+    {
+      "prediction_id": 3,
+      "lens": "Agency Deference & Administrative Law",
+      "rationale": "Parse error.",
+      "topics": []
+    },
+    {
+      "prediction_id": 4,
+      "lens": "Weakest Links in Each Party's Argument",
+      "rationale": "Parse error.",
+      "topics": []
+    },
+    {
+      "prediction_id": 5,
+      "lens": "Policy Consequences & Practical Impact",
+      "rationale": "Parse error.",
+      "topics": []
+    }
+  ]
+}

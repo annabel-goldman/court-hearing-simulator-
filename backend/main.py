@@ -23,6 +23,7 @@ from services.tts_provider import get_tts_provider
 from services.stt_provider import get_stt_provider
 from services.case_ingestion import CaseIngestionService
 from multi_agent import multi_agent_service, Agent
+from projected_timeline import router as projected_timeline_router
 
 # Configure logging
 logging.basicConfig(
@@ -95,6 +96,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(projected_timeline_router)
 
 # -----------------------------------------------------------------------------
 # Connection Manager
