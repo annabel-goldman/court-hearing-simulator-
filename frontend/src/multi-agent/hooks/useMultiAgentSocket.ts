@@ -3,7 +3,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Agent, AgentQuestion, SimulationPhase, MultiAgentSocketMessage } from '../types';
+import type {
+  Agent,
+  AgendaItem,
+  AgendaUpdate,
+  AgentQuestion,
+  CounterArgument,
+  SimulationPhase,
+  MultiAgentSocketMessage,
+} from '../types';
 
 // Get base WS URL and remove trailing /ws if present (for consistency with main project)
 const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws').replace(/\/ws\/?$/, '');
@@ -13,6 +21,8 @@ interface UseMultiAgentSocketProps {
   onTranscriptUpdate?: (text: string) => void;
   onAgentQuestion?: (question: AgentQuestion) => void;
   onPhaseUpdate?: (phase: SimulationPhase) => void;
+  onAgendaUpdate?: (update: AgendaUpdate) => void;
+  onCounterArgument?: (arg: CounterArgument) => void;
 }
 
 interface UseMultiAgentSocketReturn {
@@ -23,6 +33,7 @@ interface UseMultiAgentSocketReturn {
   sendAudio: (audioBase64: string) => void;
   setPhase: (phase: SimulationPhase) => void;
   updateAgents: (agents: Agent[]) => void;
+  sendAgenda: (predictedTopicSets: unknown, agendaItems: AgendaItem[]) => void;
 }
 
 export function useMultiAgentSocket({
@@ -30,6 +41,8 @@ export function useMultiAgentSocket({
   onTranscriptUpdate,
   onAgentQuestion,
   onPhaseUpdate,
+  onAgendaUpdate,
+  onCounterArgument,
 }: UseMultiAgentSocketProps): UseMultiAgentSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -38,7 +51,7 @@ export function useMultiAgentSocket({
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const ws = new WebSocket(`${WS_BASE}/ws/multi-agent/${sessionId}`);
-    
+
     ws.onopen = () => {
       console.log('[MultiAgentSocket] Connected');
       setIsConnected(true);
@@ -56,7 +69,7 @@ export function useMultiAgentSocket({
     ws.onmessage = (event) => {
       try {
         const message: MultiAgentSocketMessage = JSON.parse(event.data);
-        
+
         switch (message.type) {
           case 'transcript_update':
             onTranscriptUpdate?.(message.data.text as string);
@@ -67,8 +80,17 @@ export function useMultiAgentSocket({
           case 'phase_update':
             onPhaseUpdate?.(message.data.phase as SimulationPhase);
             break;
+          case 'agenda_update':
+            onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
+            break;
+          case 'agent_counter_argument':
+            onCounterArgument?.(message.data as unknown as CounterArgument);
+            break;
           case 'config_ack':
             console.log('[MultiAgentSocket] Config acknowledged:', message.data);
+            break;
+          case 'agenda_set_ack':
+            console.log('[MultiAgentSocket] Agenda set:', message.data);
             break;
           case 'agents_updated':
             console.log('[MultiAgentSocket] Agents updated:', message.data);
@@ -82,7 +104,7 @@ export function useMultiAgentSocket({
     };
 
     wsRef.current = ws;
-  }, [sessionId, onTranscriptUpdate, onAgentQuestion, onPhaseUpdate]);
+  }, [sessionId, onTranscriptUpdate, onAgentQuestion, onPhaseUpdate, onAgendaUpdate, onCounterArgument]);
 
   const disconnect = useCallback(() => {
     wsRef.current?.close();
@@ -112,6 +134,16 @@ export function useMultiAgentSocket({
     sendMessage('update_agents', { agents });
   }, [sendMessage]);
 
+  const sendAgenda = useCallback(
+    (predictedTopicSets: unknown, agendaItems: AgendaItem[]) => {
+      sendMessage('set_agenda', {
+        predicted_topic_sets: predictedTopicSets,
+        agenda_items: agendaItems as unknown as Record<string, unknown>[],
+      });
+    },
+    [sendMessage],
+  );
+
   useEffect(() => {
     return () => {
       disconnect();
@@ -126,5 +158,6 @@ export function useMultiAgentSocket({
     sendAudio,
     setPhase,
     updateAgents,
+    sendAgenda,
   };
 }

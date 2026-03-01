@@ -184,6 +184,7 @@ export default function Home() {
         <div className="nav-brand">Court Simulator</div>
         <div className="nav-links">
           <Link to="/multi-agent" className="nav-link">Multi-Agent Practice</Link>
+          <Link to="/orchestrated-agents" className="nav-link">Orchestrated Agents</Link>
           <Link to="/admin/judge" className="nav-link">Judge Admin</Link>
         </div>
       </nav>

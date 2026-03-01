@@ -1,160 +1,121 @@
 {
-  "model": "mistralai/Mistral-7B-Instruct-v0.2",
-  "case_summary": "Coastal Energy LLC operates an LNG terminal in Oregon, permitted by FERC and Army Corps of Engineers (2018). Pacific Environmental Alliance (PEA) filed suit alleging Coastal's dredging violates CWA \u00a7404 and NEPA. The district court granted summary judgment to PEA, holding Coastal lacked a required individual \u00a7404 permit and FERC's EIS was inadequate.",
+  "model": "unsloth/Qwen2.5-7B-Instruct",
+  "case_summary": "Coastal Energy LLC appeals a decision that Nationwide Permit 12 did not cover their dredging activities for their LNG terminal, while also challenging whether the Federal Energy Regulatory Commission's (FERC) Environmental Impact Statement (EIS) adequately addressed new climate change studies.",
   "key_legal_issues": [
-    "Whether Nationwide Permit 12 (NWP 12) covers Coastal's dredging activities.",
-    "Whether FERC's Environmental Impact Statement (EIS) satisfies NEPA requirements."
+    "Whether Nationwide Permit 12 covers Coastal Energy LLC's dredging activities for their LNG terminal.",
+    "Whether the plain text of Nationwide Permit 12 limits its coverage to activities 'incidental' to utility line construction.",
+    "Whether the district court erred in reading an implied acreage cap into Nationwide Permit 12.",
+    "Whether the Federal Energy Regulatory Commission's EIS satisfies the requirements of the National Environmental Policy Act (NEPA).",
+    "Whether the FERC was required to supplement the EIS based on new climate change studies."
   ],
   "predictions": [
     {
       "prediction_id": 1,
       "lens": "Statutory Text & Plain Meaning",
-      "rationale": "Parse error.",
-      "topics": []
+      "rationale": "Judges will to focus on statutory language and intent, particularly the term 'incidental' as it applies to NWP 12.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Coverage of Dredging Activities",
+          "description": "Clarify if Coastal's dredging qualifies as 'incidental' to utility line construction under NWP 12.",
+          "target": "both"
+        },
+        {
+          "order": 2,
+          "title": "Interpretation of 'Incidental'",
+          "description": "Determine if the term 'incidental' in NWP 12 allows for large-scale land clearing and wetland destruction.",
+          "target": "appellant"
+        },
+        {
+          "order": 3,
+          "title": "Implied Acreage Cap",
+          "description": "Assess whether the district court correctly read an implied acreage limit into NWP 12.",
+          "target": "appellee"
+        },
+        {
+          "order": 4,
+          "title": "Supplementation of EIS",
+          "description": "Evaluate if FERC needed to supplement the EIS based on the 2arly 2020s climate change studies.",
+          "target": "both"
+        },
+        {
+          "order": 5,
+          "title": "Application of NEPA",
+          "description": "Determine if FERC's EIS adequately addressed the new climate change studies and their implications.",
+          "target": "appellee"
+        }
+      ]
     },
     {
       "prediction_id": 2,
       "lens": "Precedent & Stare Decisis",
-      "rationale": "Parse error.",
-      "topics": []
+      "rationale": "Judges will focus on controlling precedent and stare decisis to determine if the district court's interpretation of NWP 12 and FERC's EIS complies with established law.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Scope of NWP 12",
+          "description": "Whether the plain text of NWP 12 limits coverage to activities 'incidental' to utility line construction, and how the district court's interpretation impacts this scope.",
+          "target": "both"
+        },
+        {
+          "order": 2,
+          "title": "Application of Borden Ranch",
+          "description": "Whether Borden Ranch supports Coastal's argument that NWP 12 applies to the dredging activities, and how the district court's reliance on it was erroneous.",
+          "target": "appellant"
+        },
+        {
+          "order": 3,
+          "title": "Supplementation of EIS",
+          "description": "Whether the 2024 IPCC regional study requires supplementation of the EIS under NEPA, and whether FERC's finding that the new data was consistent with prior analysis is sufficient.",
+          "target": "appellee"
+        },
+        {
+          "order": 4,
+          "title": "Interpretation of Incidental Activities",
+          "description": "How the term 'incidental' should be interpreted in the context of NWP 12, and whether Coastal's dredging activities fit this definition.",
+          "target": "both"
+        },
+        {
+          "order": 5,
+          "title": "Implications of Wetland Destruction",
+          "description": "Whether the destruction of over 40 acres of jurisdictional wetlands without an individual \u00a7404 permit is covered by NWP 12, and how this relates to the district court's decision.",
+          "target": "appellee"
+        }
+      ]
     },
     {
       "prediction_id": 3,
       "lens": "Agency Deference & Administrative Law",
-      "rationale": "As a federal appellate judge with an agency deference and administrative law lens, I will focus on the validity of the agencies' decisions and their adherence to their delegated authority and statutory requirements.",
+      "rationale": "Judges using this lens will to focus on the agency's interpretation and application of the law, ensuring that the Corps of Engineers and FERC acted within their delegated authority and provided adequate reasoning.",
       "topics": [
         {
           "order": 1,
-          "title": "Scope of NWP 12 for Coastal's Dredging",
-          "description": "Explore the argument regarding whether NWP 12 covers Coastal's dredging activities and if the district court's interpretation contradicts the regulation.",
-          "target": "appellee"
-        },
-        {
-          "order": 2,
-          "title": "Individual \u00a7404 Permit for Coastal",
-          "description": "Probe the argument that Coastal lacked an individual \u00a7404 permit and the implications for its dredging activities.",
-          "target": "appellant"
-        },
-        {
-          "order": 3,
-          "title": "NEPA Compliance of FERC's EIS",
-          "description": "Assess the argument that FERC's EIS failed to satisfy NEPA requirements and if the 2024 IPCC study necessitated a supplement.",
-          "target": "appellee"
-        },
-        {
-          "order": 4,
-          "title": "Borden Ranch Precedent",
-          "description": "Examine the relevance of Borden Ranch Partnership v. Army Corps in the context of NWP 12 and its application to Coastal's activities.",
-          "target": "both"
-        },
-        {
-          "order": 5,
-          "title": "Mitigation for Wetlands Destruction",
-          "description": "Discuss the argument that Coastal destroyed over 40 acres of jurisdictional wetlands without adequate mitigation.",
-          "target": "appellant"
-        },
-        {
-          "order": 6,
-          "title": "Chevron Deference for FERC's Decision",
-          "description": "Consider if Chevron deference applies to FERC's decision-making process and the extent of judicial review.",
-          "target": "both"
-        },
-        {
-          "order": 7,
-          "title": "FERC's Knowledge of the IPCC Study",
-          "description": "Investigate the argument that FERC was aware of the IPCC study and should have incorporated it into the EIS.",
-          "target": "appellee"
-        }
-      ]
-    },
-    {
-      "prediction_id": 4,
-      "lens": "Weakest Links in Each Party's Argument",
-      "rationale": "A judge with this lens focuses on the most vulnerable points in each party's argument to stress-test their positions during oral argument.",
-      "topics": [
-        {
-          "order": 1,
-          "title": "NWP 12 Scope for Coastal's Dredging",
-          "description": "Probe appellee's argument that NWP 12 does not cover Coastal's dredging activities beyond de minimis thresholds.",
-          "target": "appellee"
-        },
-        {
-          "order": 2,
-          "title": "Individual Permit Requirement",
-          "description": "Explore appellant's argument that the district court's individual permit requirement contradicts federal regulations and case law.",
-          "target": "appellant"
-        },
-        {
-          "order": 3,
-          "title": "Scale of Coastal's Dredging",
-          "description": "Question appellee on the significance of the scale of Coastal's dredging activities and the applicability of NWP 12.",
-          "target": "appellee"
-        },
-        {
-          "order": 4,
-          "title": "FERC's Knowledge of New Study",
-          "description": "Probe appellee's argument that FERC should have supplemented their EIS due to new climate study findings.",
-          "target": "appellee"
-        },
-        {
-          "order": 5,
-          "title": "NEPA's Post-hoc Study Requirements",
-          "description": "Explore appellant's argument that NEPA does not require supplementation for every post-hoc study.",
-          "target": "appellant"
-        },
-        {
-          "order": 6,
-          "title": "Mitigation for Wetlands Destruction",
-          "description": "Question appellee on the adequacy of Coastal's wetlands mitigation efforts.",
-          "target": "appellee"
-        },
-        {
-          "order": 7,
-          "title": "FERC's EIS Compliance with 1502.9(d)",
-          "description": "Probe appellee's argument that FERC's EIS failed to comply with 1502.9(d) and should have been supplemented.",
-          "target": "appellee"
-        }
-      ]
-    },
-    {
-      "prediction_id": 5,
-      "lens": "Policy Consequences & Practical Impact",
-      "rationale": "A judge with this lens approaches the case by considering the regulatory, commercial, and institutional consequences of a ruling for each side, and probing topics that elucidate these implications.",
-      "topics": [
-        {
-          "order": 1,
-          "title": "Scope of NWP 12 for Coastal's Dredging",
-          "description": "Explore the applicability of NWP 12 to Coastal's dredging activities based on the scale and nature of the operations.",
+          "title": "Coverage of NWP 12",
+          "description": "Probe whether the Corps of Engineers correctly interpreted NWP 12 to cover Coastal's dredging activities given the text and purpose of the permit.",
           "target": "both"
         },
         {
           "order": 2,
-          "title": "Legal Interpretation of NWP 12 Exemptions",
-          "description": "Discuss the meaning and implications of the NWP 12 exemptions for utility line activities and dredging.",
+          "title": "Interpretation of 'Incidental'",
+          "description": "Question whether Coastal's dredging activities are 'incidental' to utility line construction as defined by the Corps of Engineers and Congress.",
           "target": "appellant"
         },
         {
           "order": 3,
-          "title": "FERC's Knowledge of New Flood Risk Data",
-          "description": "Investigate FERC's awareness and handling of the 2024 IPCC regional study's flood risk projections.",
+          "title": "Acreage Cap Implied by District Court",
+          "description": "Explore whether the district court's implied acreage cap on NWP 12 is consistent with statutory intent and agency interpretation.",
           "target": "appellee"
         },
         {
           "order": 4,
-          "title": "Mitigation Requirements for Wetlands Destruction",
-          "description": "Assess the adequacy of Coastal's wetlands mitigation efforts and the legal requirements for such actions.",
-          "target": "appellant"
-        },
-        {
-          "order": 5,
-          "title": "NEPA's Supplementation Requirements",
-          "description": "Examine the circumstances under which a NEPA EIS needs to be supplemented, and whether the 2024 IPCC study warranted such action.",
+          "title": "Supplementation of EIS",
+          "description": "Determine if FERC was required to supplement the EIS based on the 2024 IPCC regional study and whether the agency's response was adequate.",
           "target": "appellee"
         },
         {
-          "order": 6,
-          "title": "Practical Impact of Ruling for Each Side",
-          "description": "Discuss the potential regulatory, commercial, and institutional consequences of a ruling for Coastal and PEA.",
+          "order": 5,
+          "title": "NEPA Compliance",
+          "description": "Assess whether FERC's EIS adequately addressed the new climate change studies and whether additional supplementation was necessary.",
           "target": "both"
         }
       ]

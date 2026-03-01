@@ -27,7 +27,7 @@ class JudgeTopic(BaseModel):
     order:       int    # Position within this agenda (1-indexed)
     title:       str    # Short label, e.g. "Scope of NWP 12 Exemption"
     description: str    # What the judge would probe — 1-2 sentences
-    target:      Literal["appellant", "appellee", "both"]  # Who bears the burden
+    target:      Literal["petitioner", "respondent", "both"]  # Who bears the burden
 
 
 class TopicPrediction(BaseModel):
@@ -46,11 +46,16 @@ class PredictedTopicSets(BaseModel):
     Full output: case summary + N distinct predicted judge agendas.
     Each agenda is an independent forecast of how a judge might structure
     their questioning depending on which issues they prioritise.
+
+    mcts_tree — optional flat node/edge snapshot of the generation-phase MCTS
+    tree, included in the /generate response so the frontend can animate the
+    search tree as nodes pop in.  Absent on tracker-only responses.
     """
     case_summary:      str
     key_legal_issues:  List[str]         # Issues common to all predictions
     predictions:       List[TopicPrediction]
     total_predictions: int
+    mcts_tree:         Optional[Dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +71,7 @@ class TrackerInitRequest(BaseModel):
 
 class HearingTurn(BaseModel):
     """A single spoken turn submitted to the tracker."""
-    speaker:   Literal["judge", "appellant", "appellee"]
+    speaker:   Literal["judge", "petitioner", "respondent"]
     utterance: str
 
 
@@ -76,6 +81,7 @@ class TopicCoverageItem(BaseModel):
     title:       str
     addressed:   bool
     address_turn: Optional[int] = None   # turn index when it was first addressed
+    quality:     float = 0.0             # 0.0–1.0 argument quality score (LLM-assessed)
 
 
 class AgendaConfidence(BaseModel):
@@ -85,6 +91,7 @@ class AgendaConfidence(BaseModel):
     confidence:      float                   # 0.0 – 1.0, higher = better match
     topics_coverage: List[TopicCoverageItem]
     uncovered_titles: List[str]              # topics not yet addressed
+    weak_titles:     List[str] = []          # topics addressed but with quality < 0.4
 
 
 class TrackerStateResponse(BaseModel):
@@ -95,7 +102,7 @@ class TrackerStateResponse(BaseModel):
     - agenda_confidences  : ranked list (best first)
     - regeneration_needed : True when max confidence < threshold → AR trigger
     - turn_count          : total turns processed so far
-    - last_human_point    : the most recent appellant/appellee utterance, echoed
+    - last_human_point    : the most recent petitioner/respondent utterance, echoed
                             back with the matched topic title (if any)
     """
     best_prediction_id:  int

@@ -42,8 +42,10 @@ For production, swap _SESSIONS for Redis or a DB-backed store.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import re
 import uuid
 from typing import Dict, List, Optional, Tuple
 
@@ -65,6 +67,131 @@ logger = logging.getLogger("court-simulator.projected_timeline.tracker")
 LOW_CONFIDENCE_THRESHOLD = 0.25   # below this → suggest AR regeneration
 EMA_ALPHA               = 0.4    # weight of the latest turn vs. running average
                                   # higher = more reactive, lower = more stable
+QUALITY_WEAK_THRESHOLD   = 0.4   # below this → topic is "weak" (needs follow-up)
+
+# ---------------------------------------------------------------------------
+# LLM quality-assessment backend — uses SMALL tier via model_router
+# ---------------------------------------------------------------------------
+
+from model_router import get_task_client
+
+
+_QUALITY_SYSTEM = (
+    "You are a senior appellate judge evaluating the quality of an advocate's "
+    "response to a specific legal topic.  Return ONLY a JSON object."
+)
+
+_QUALITY_USER = """\
+TOPIC BEING ASSESSED: {topic_title}
+TOPIC DESCRIPTION   : {topic_description}
+ADVOCATE'S UTTERANCE:
+{utterance}
+
+Rate how convincingly the advocate addressed this topic on a scale of 0.0 to 1.0:
+  0.0 – not addressed at all / completely off-topic
+  0.2 – mentioned tangentially but no substantive argument
+  0.4 – basic mention with some relevance but weak reasoning
+  0.6 – reasonable argument but missing key supporting authority or logic
+  0.8 – strong argument with clear reasoning and some citations
+  1.0 – compelling, complete argument with authority and strong logical structure
+
+Return JSON: {{"quality": <float>, "rationale": "<one sentence>"}}"""
+
+
+async def _assess_quality_llm(
+    utterance: str,
+    topic_title: str,
+    topic_description: str,
+) -> float:
+    """Call the LLM to assess how well the advocate addressed the topic.
+
+    Returns a float 0.0–1.0.  Falls back to a heuristic if the LLM is
+    unavailable or the call fails.
+    """
+    client, model = get_task_client("quality_assessment")
+    if client is None:
+        return _assess_quality_heuristic(utterance, topic_title)
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _QUALITY_SYSTEM},
+                {
+                    "role": "user",
+                    "content": _QUALITY_USER.format(
+                        topic_title=topic_title,
+                        topic_description=topic_description,
+                        utterance=utterance[-1500:],
+                    ),
+                },
+            ],
+            temperature=0.1,
+            max_tokens=120,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        raw = response.choices[0].message.content.strip()
+        # Strip <think>…</think> and markdown fences
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = re.sub(r"```(?:json)?\s*", "", raw)
+        raw = re.sub(r"```\s*$", "", raw, flags=re.MULTILINE)
+
+        match = re.search(r'\{[^{}]*"quality"\s*:\s*([\d.]+)[^{}]*\}', raw)
+        if match:
+            val = float(match.group(1))
+            quality = max(0.0, min(1.0, val))
+            logger.debug("LLM quality for '%s': %.2f", topic_title, quality)
+            return quality
+
+        # Try full json parse
+        data = json.loads(raw)
+        val = float(data.get("quality", 0.5))
+        return max(0.0, min(1.0, val))
+
+    except Exception as e:
+        logger.warning("LLM quality assessment failed (%s); falling back to heuristic.", e)
+        return _assess_quality_heuristic(utterance, topic_title)
+
+
+def _assess_quality_heuristic(utterance: str, topic_title: str) -> float:
+    """Fast heuristic fallback when LLM is unavailable.
+
+    Considers: utterance length, whether the topic title or close keywords
+    appear, sentence count, and presence of legal signal words.
+    """
+    if not utterance.strip():
+        return 0.0
+
+    words = utterance.split()
+    word_count = len(words)
+    text_lower = utterance.lower()
+    title_lower = topic_title.lower()
+
+    # Base score from length (short = weak, medium = decent, long = good)
+    if word_count < 10:
+        base = 0.15
+    elif word_count < 30:
+        base = 0.3
+    elif word_count < 80:
+        base = 0.5
+    else:
+        base = 0.65
+
+    # Bonus if topic keywords appear in the utterance
+    title_words = set(title_lower.split()) - {"the", "of", "and", "in", "a", "to", "for"}
+    overlap = sum(1 for tw in title_words if tw in text_lower)
+    keyword_bonus = min(0.15, 0.05 * overlap)
+
+    # Bonus for legal reasoning signals
+    legal_signals = [
+        "because", "therefore", "court held", "precedent", "under the statute",
+        "the record shows", "standard of review", "this court", "we submit",
+        "the evidence", "constitutional", "legislative history",
+    ]
+    signal_count = sum(1 for s in legal_signals if s in text_lower)
+    signal_bonus = min(0.2, 0.05 * signal_count)
+
+    return min(1.0, base + keyword_bonus + signal_bonus)
 
 # ---------------------------------------------------------------------------
 # Embedding backend (lazy-loaded)
@@ -80,7 +207,7 @@ def _resolve_embed_backend() -> bool:
     if _USE_SBERT is not None:
         return _USE_SBERT
     try:
-        from sentence_transformers import SentenceTransformer  # noqa: F401
+        import sentence_transformers  # noqa: F401
         _USE_SBERT = True
     except ImportError:
         logger.warning(
@@ -95,8 +222,14 @@ def _get_embed_model():
     global _embed_model
     if _embed_model is None and _resolve_embed_backend():
         from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-        logger.info("Loaded sentence-transformers embedding model (all-MiniLM-L6-v2)")
+        # local_files_only avoids HuggingFace Hub network calls on every load
+        try:
+            _embed_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+            logger.info("Loaded sentence-transformers embedding model (all-MiniLM-L6-v2) [local cache]")
+        except Exception:
+            # First run — model not cached yet, download it
+            _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("Downloaded & loaded sentence-transformers embedding model (all-MiniLM-L6-v2)")
     return _embed_model
 
 
@@ -153,6 +286,9 @@ class _AgendaState:
         self.coverage_turn: Dict[int, Optional[int]] = {
             t.order: None for t in prediction.topics
         }
+        self.quality: Dict[int, float] = {           # order → quality score (0.0–1.0)
+            t.order: 0.0 for t in prediction.topics
+        }
 
     def update_confidence(self, utterance_vec, *, alpha: float = EMA_ALPHA):
         """EMA update: shift confidence toward max topic similarity for this turn."""
@@ -171,10 +307,14 @@ class _AgendaState:
                 best_sim, best_order, best_title = s, topic.order, topic.title
         return best_order, best_title, best_sim
 
-    def mark_addressed(self, order: int, turn_index: int):
-        if order in self.coverage and not self.coverage[order]:
-            self.coverage[order]      = True
-            self.coverage_turn[order] = turn_index
+    def mark_addressed(self, order: int, turn_index: int, quality: float = 0.5):
+        if order in self.coverage:
+            if not self.coverage[order]:
+                self.coverage[order]      = True
+                self.coverage_turn[order] = turn_index
+            # Quality can only go up — revisiting a topic with a stronger
+            # argument improves the score, but never resets it.
+            self.quality[order] = max(self.quality.get(order, 0.0), quality)
 
     def to_agenda_confidence(self) -> AgendaConfidence:
         coverage_items = [
@@ -183,16 +323,22 @@ class _AgendaState:
                 title=t.title,
                 addressed=self.coverage[t.order],
                 address_turn=self.coverage_turn[t.order],
+                quality=round(self.quality.get(t.order, 0.0), 3),
             )
             for t in self.prediction.topics
         ]
         uncovered = [t.title for t in self.prediction.topics if not self.coverage[t.order]]
+        weak = [
+            t.title for t in self.prediction.topics
+            if self.coverage[t.order] and self.quality.get(t.order, 0.0) < 0.4
+        ]
         return AgendaConfidence(
             prediction_id=self.prediction.prediction_id,
             lens=self.prediction.lens,
             confidence=round(self.confidence, 4),
             topics_coverage=coverage_items,
             uncovered_titles=uncovered,
+            weak_titles=weak,
         )
 
 
@@ -240,25 +386,32 @@ class TrajectoryTracker:
     # Public API
     # ------------------------------------------------------------------
 
-    def update(self, turn: HearingTurn) -> TrackerStateResponse:
+    def update(self, turn: HearingTurn) -> "tuple[TrackerStateResponse, tuple]":
         """
-        Process one spoken turn and return the updated tracker state.
+        Process one spoken turn and return (state, refinement_args).
 
-        - Judge turns   → update per-agenda confidence scores.
-        - Human turns   → mark matching topic as addressed + boost confidence
-                          of the best-matching agenda.
+        This is now fully synchronous — embedding + heuristic quality only.
+        The caller receives `refinement_args` and may schedule
+        ``schedule_quality_refinement(*refinement_args)`` as a background
+        coroutine to improve the quality score without blocking the hot path.
+
+        refinement_args is (agenda, order, utterance, title, desc) for human
+        turns, or an empty tuple for judge turns.
         """
         self.turn_count += 1
         self._last_human_matched = None
 
         utterance_vec = _embed([turn.utterance])[0]
 
+        refinement_args: tuple = ()
         if turn.speaker == "judge":
             self._process_judge(utterance_vec)
         else:
-            self._process_human(utterance_vec)
+            agenda, order, title, desc = self._process_human(utterance_vec, turn.utterance)
+            if agenda is not None:
+                refinement_args = (agenda, order, turn.utterance, title, desc)
 
-        return self.state()
+        return self.state(), refinement_args
 
     def state(self) -> TrackerStateResponse:
         """Return the current tracker state without advancing the turn counter."""
@@ -285,40 +438,75 @@ class TrajectoryTracker:
         for agenda in self._agendas:
             agenda.update_confidence(utterance_vec)
 
-    def _process_human(self, utterance_vec):
+    def _process_human(self, utterance_vec, utterance_text: str):
         """
-        Mark the closest topic in the best-matching agenda as addressed,
-        then give that agenda a small confidence boost.
+        Mark the closest topic in the best-matching agenda as addressed.
 
-        This is the human-in-loop step: whenever the appellate counsel
-        makes a substantive point, we record which predicted topic it
-        corresponds to and surface coverage gaps.
+        Quality is scored immediately via the fast heuristic so this method
+        is synchronous and never blocks the event loop.  A background LLM
+        refinement task (scheduled by the caller via schedule_quality_refinement)
+        can later update the quality score once the LLM responds.
         """
         # Find the agenda + topic that best matches this human utterance
         best_agenda: Optional[_AgendaState] = None
         best_order  = -1
         best_title  = ""
+        best_desc   = ""
         best_sim    = -1.0
 
         for agenda in self._agendas:
             order, title, sim = agenda.best_topic_match(utterance_vec)
             if sim > best_sim:
                 best_sim, best_agenda, best_order, best_title = sim, agenda, order, title
+                best_desc = next(
+                    (t.description for t in agenda.prediction.topics if t.order == order),
+                    "",
+                )
 
-        if best_agenda is not None and best_sim > 0.1:   # ignore near-zero matches
-            best_agenda.mark_addressed(best_order, self.turn_count)
+        if best_agenda is not None and best_sim > 0.1:
+            # Use heuristic immediately — never blocks; LLM refinement happens in background
+            quality = _assess_quality_heuristic(utterance_text, best_title)
+            best_agenda.mark_addressed(best_order, self.turn_count, quality=quality)
             self._last_human_matched = best_title
-            # Small confidence boost for the agenda where the human point landed
             best_agenda.confidence = min(
                 1.0,
                 best_agenda.confidence + EMA_ALPHA * 0.3,
             )
-            logger.debug(
-                "Human turn matched topic '%s' in agenda %d (sim=%.3f)",
+            logger.info(
+                "Human turn matched topic '%s' in agenda %d (sim=%.3f, heuristic_quality=%.2f)",
                 best_title,
                 best_agenda.prediction.prediction_id,
                 best_sim,
+                quality,
             )
+            # Return info needed by caller to schedule async LLM refinement
+            return best_agenda, best_order, best_title, best_desc
+        return None, -1, "", ""
+
+    async def schedule_quality_refinement(
+        self,
+        agenda: "_AgendaState",
+        order: int,
+        utterance_text: str,
+        topic_title: str,
+        topic_description: str,
+    ) -> None:
+        """Refine a topic's quality score with an LLM call (non-blocking background task).
+
+        Call this after _process_human returns. The heuristic score already
+        in the tracker will be overwritten with the (better) LLM score if
+        the model rates the argument higher.
+        """
+        try:
+            quality = await _assess_quality_llm(
+                utterance=utterance_text,
+                topic_title=topic_title,
+                topic_description=topic_description,
+            )
+            agenda.mark_addressed(order, self.turn_count, quality=quality)
+            logger.debug("LLM quality refinement for '%s': %.2f", topic_title, quality)
+        except Exception as e:
+            logger.debug("LLM quality refinement skipped (%s)", e)
 
 
 # ---------------------------------------------------------------------------

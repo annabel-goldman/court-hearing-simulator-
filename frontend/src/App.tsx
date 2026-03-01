@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
 import CourtroomPage from './pages/CourtroomPage'
 import JudgeAdmin from './pages/JudgeAdmin'
+import OrchestratedAgents from './pages/OrchestratedAgents'
 import AuthGate from './components/AuthGate'
 import { AgentSimulation } from './multi-agent'
 
@@ -16,6 +17,7 @@ function App() {
           <Route path="/admin/judge" element={<JudgeAdmin />} />
           {/* Multi-Agent Simulation - separate project */}
           <Route path="/multi-agent" element={<AgentSimulation />} />
+          <Route path="/orchestrated-agents" element={<OrchestratedAgents />} />
         </Routes>
       </BrowserRouter>
     </AuthGate>

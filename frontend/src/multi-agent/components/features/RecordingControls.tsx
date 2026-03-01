@@ -34,7 +34,18 @@ export function RecordingControls({
           onClick={onStart}
           disabled={!hasAgents}
         >
-          Start Recording
+          Start Hearing
+        </Button>
+      )}
+
+      {phase === 'INTRO' && (
+        <Button
+          variant="warning"
+          size="lg"
+          disabled
+          isLoading
+        >
+          Judge is speaking…
         </Button>
       )}
 

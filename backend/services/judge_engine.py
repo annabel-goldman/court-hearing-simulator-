@@ -18,7 +18,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
 _openai_client = None
 
 def get_openai_client():
-    """Get or create the OpenAI client."""
+    """Get or create the OpenAI client (legacy helper, still used by old /ws endpoint)."""
     global _openai_client
     if _openai_client is None:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -31,6 +31,9 @@ def get_openai_client():
             base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         )
     return _openai_client
+
+# Model router integration — used for all judge LLM calls
+from model_router import get_task_client
 
 
 class MootCourtContext:
@@ -119,7 +122,6 @@ class JudgeEngine:
     ):
         self.judge_personality = judge_personality
         self.interruption_frequency = interruption_frequency
-        self.model = "gpt-4"
         
         # Timing parameters based on frequency
         self.min_seconds_between = {
@@ -275,7 +277,7 @@ Respond in JSON format:
 }}"""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("judge_interrupt")
             if not client:
                 print("WARNING: OpenAI client not available, returning mock response")
                 return False, None, "OpenAI API key not configured"
@@ -304,7 +306,7 @@ Respond in JSON format:
                 print(f"[Judge] Using DEFAULT backend prompt (no custom prompt set)")
 
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -372,12 +374,12 @@ APPELLEE BRIEF TEXT:
 Format as a professional judicial summary."""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("brief_summary")
             if not client:
                 return "Judicial summary unavailable (API key not set)."
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or default_system},
                     {"role": "user", "content": prompt}
@@ -420,13 +422,13 @@ Return as JSON array:
 ]"""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("seed_questions")
             if not client:
                 print("WARNING: OpenAI client not available for seed questions")
                 return []
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or self._get_judge_system_prompt()},
                     {"role": "user", "content": prompt}
@@ -497,13 +499,13 @@ Return as JSON array:
         prompt = "".join(parts)
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("synthesize_question")
             if not client:
                 print("WARNING: OpenAI client not available for question synthesis")
                 return {"should_interrupt": False, "question": None, "reasoning": "OpenAI API key not configured"}
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or self._get_judge_system_prompt()},
                     {"role": "user", "content": prompt}

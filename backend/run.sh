@@ -1,15 +1,13 @@
 #!/bin/bash
-# Run the backend server in the virtual environment
+# Run the backend server with uv + hypercorn (trio backend)
 
 cd "$(dirname "$0")"
 
-# Create venv if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "Virtual environment not found. Running setup first..."
-    ./setup.sh
-fi
+# Ensure deps are synced (fast no-op if already up to date)
+uv sync --quiet
 
-# Activate venv and run server
-source venv/bin/activate
-echo "Starting Court Simulator Backend on http://localhost:8000"
-uvicorn main:app --reload --port 8000
+echo "Starting Court Simulator Backend on http://localhost:8000 (trio)"
+# hypercorn with --worker-class trio gives structured concurrency and allows
+# anyio.to_thread.run_sync to offload CPU-bound MCTS without blocking the loop.
+# Remove --reload in production.
+uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload

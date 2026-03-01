@@ -18,6 +18,7 @@ analogous to SCOPE's MCTS exploring multiple conversation paths in semantic
 space without running expensive full simulations.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -32,30 +33,23 @@ from .models import (
 logger = logging.getLogger("court-simulator.projected_timeline")
 
 # ---------------------------------------------------------------------------
-# OpenAI client (lazy-loaded, mirrors the pattern in judge_engine.py)
+# Model routing — uses TINY tier for lightweight structured extraction
 # ---------------------------------------------------------------------------
 
-_openai_client = None
+from model_router import get_task_client
+
+
+def _get_model() -> str:
+    """Return the model name for timeline tasks (TINY tier)."""
+    _, model = get_task_client("issue_extraction")
+    return model
 
 
 def _get_client():
-    global _openai_client
-    if _openai_client is None:
-        import os
-        import pathlib
-        from dotenv import load_dotenv
-        from openai import AsyncOpenAI
-
-        root = pathlib.Path(__file__).parent.parent.parent
-        load_dotenv(root / ".env")
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set.")
-        _openai_client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        )
-    return _openai_client
+    client, _ = get_task_client("issue_extraction")
+    if client is None:
+        raise RuntimeError("Model router returned no client — check OPENAI_API_KEY.")
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +86,8 @@ JUDICIAL_LENSES = [
     {
         "lens": "Weakest Links in Each Party's Argument",
         "guidance": (
-            "Identify the single most vulnerable point in the appellant's argument "
-            "and the single most vulnerable point in the appellee's argument. "
+            "Identify the single most vulnerable point in the petitioner's argument "
+            "and the single most vulnerable point in the respondent's argument. "
             "Build the agenda around stress-testing those weak spots."
         ),
     },
@@ -164,28 +158,29 @@ Read these two legal briefs and return a single JSON object:
   "key_legal_issues": ["<issue 1>", "<issue 2>", "<issue 3>", "<issue 4>", "<issue 5>"]
 }}
 
-=== APPELLANT BRIEF ===
+=== PETITIONER BRIEF ===
 {appellant}
 
-=== APPELLEE BRIEF ===
+=== RESPONDENT BRIEF ===
 {appellee}"""
 
 
 async def _extract_issues(client, appellant: str, appellee: str) -> dict:
     response = await client.chat.completions.create(
-        model="gpt-4",
+        model=_get_model(),
         messages=[
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {
                 "role": "user",
                 "content": _EXTRACT_USER.format(
-                    appellant=appellant[:3000],
-                    appellee=appellee[:3000],
+                    appellant=appellant[:12000],
+                    appellee=appellee[:12000],
                 ),
             },
         ],
         temperature=0.2,
-        max_tokens=400,
+        max_tokens=800,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
     raw = response.choices[0].message.content.strip()
     return _parse_json(raw, fallback={
@@ -221,7 +216,7 @@ Return a single JSON object:
       "order": 1,
       "title": "<short topic label>",
       "description": "<1-2 sentences: what the judge would probe on this topic>",
-      "target": "appellant | appellee | both"
+      "target": "petitioner | respondent | both"
     }},
     ...
   ]
@@ -233,11 +228,23 @@ Rules:
 - Vary which party each topic targets; do not target the same party for every topic.
 - titles must be short phrases (3-8 words), not full sentences.
 
-=== APPELLANT BRIEF ===
+=== PETITIONER BRIEF ===
 {appellant}
 
-=== APPELLEE BRIEF ===
+=== RESPONDENT BRIEF ===
 {appellee}"""
+
+
+def _normalise_target(raw: str) -> str:
+    """Map model output to a valid Literal['petitioner', 'respondent', 'both']."""
+    s = raw.lower()
+    has_pet = "petitioner" in s or "appellant" in s
+    has_res = "respondent" in s or "appellee" in s
+    if has_pet and not has_res:
+        return "petitioner"
+    if has_res and not has_pet:
+        return "respondent"
+    return "both"
 
 
 async def _generate_agenda(
@@ -251,7 +258,7 @@ async def _generate_agenda(
     proceeding_type: str,
 ) -> TopicPrediction:
     response = await client.chat.completions.create(
-        model="gpt-4",
+        model=_get_model(),
         messages=[
             {"role": "system", "content": _AGENDA_SYSTEM},
             {
@@ -262,16 +269,18 @@ async def _generate_agenda(
                     key_issues=", ".join(key_issues),
                     lens=lens_def["lens"],
                     guidance=lens_def["guidance"],
-                    appellant=appellant[:2000],
-                    appellee=appellee[:2000],
+                    appellant=appellant[:8000],
+                    appellee=appellee[:8000],
                 ),
             },
         ],
         temperature=0.6,
-        max_tokens=700,
+        max_tokens=1500,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
     raw = response.choices[0].message.content.strip()
+    logger.info("Lens %s — raw response start: %r", lens_def["lens"], raw[:300])
     data = _parse_json(raw, fallback={"rationale": "Parse error.", "topics": []})
 
     topics = [
@@ -279,7 +288,7 @@ async def _generate_agenda(
             order=t.get("order", i + 1),
             title=t.get("title", ""),
             description=t.get("description", ""),
-            target=t.get("target", "both"),
+            target=_normalise_target(t.get("target", "both")),
         )
         for i, t in enumerate(data.get("topics", []))
     ]
@@ -296,42 +305,179 @@ async def _generate_agenda(
 # Public API
 # ---------------------------------------------------------------------------
 
-async def generate_topic_sets(request: TopicPredictionRequest) -> PredictedTopicSets:
+async def generate_topic_sets(
+    request: TopicPredictionRequest,
+    use_mcts: bool = True,
+    mcts_callback=None,
+    progress_callback=None,
+) -> PredictedTopicSets:
     """
     Generate N predicted judge topic agendas from two legal briefs.
 
-    Each agenda explores the case through a different judicial lens,
-    producing a distinct prioritised list of topics the judge would raise.
+    Phase 1: LLM extracts key issues from both briefs.
+    Phase 2 (MCTS mode, default): LLM produces per-lens candidate topic pools,
+             then MCTS ranks them into coherent ordered sequences — one path
+             per prediction.  This gives each prediction a thematically ordered
+             trajectory rather than a flat, unranked list.
+    Phase 2 (fallback): original per-lens LLM ordering used when MCTS is
+             disabled or produces no results.
+
+    progress_callback — optional callable(event_type: str, data: dict).
+        Fired with:
+          ("status",  {"phase": ..., "detail": ...})
+          ("agenda",  {"prediction_id": ..., "lens": ..., ...})  — one per lens
     """
+    def _emit(event_type: str, data: dict) -> None:
+        if progress_callback is not None:
+            progress_callback(event_type, data)
+
     client = _get_client()
     num = max(1, min(request.num_predictions, len(JUDICIAL_LENSES)))
 
+    _emit("status", {"phase": "extracting", "detail": "Extracting issues from briefs…"})
     logger.info("Extracting issues from briefs …")
     meta = await _extract_issues(client, request.appellant_brief, request.appellee_brief)
     case_summary = meta.get("case_summary", "")
     key_issues   = meta.get("key_legal_issues", [])
 
-    logger.info("Generating %d topic agendas …", num)
-    predictions = []
-    for i, lens_def in enumerate(JUDICIAL_LENSES[:num], start=1):
-        logger.info("  Lens %d/%d: %s", i, num, lens_def["lens"])
-        agenda = await _generate_agenda(
-            client=client,
-            prediction_id=i,
-            lens_def=lens_def,
-            case_summary=case_summary,
-            key_issues=key_issues,
-            appellant=request.appellant_brief,
-            appellee=request.appellee_brief,
-            proceeding_type=request.proceeding_type,
+    _emit("status", {"phase": "agendas", "detail": f"Generating {num} topic agendas…"})
+    logger.info("Generating %d per-lens candidate pools in parallel …", num)
+    selected_lenses = JUDICIAL_LENSES[:num]
+
+    # Use as_completed so we can stream each agenda to the UI as it finishes
+    # rather than waiting for all to complete.
+    tasks: dict[asyncio.Task, tuple[int, dict]] = {}
+    for i, lens_def in enumerate(selected_lenses, start=1):
+        task = asyncio.create_task(
+            _generate_agenda(
+                client=client,
+                prediction_id=i,
+                lens_def=lens_def,
+                case_summary=case_summary,
+                key_issues=key_issues,
+                appellant=request.appellant_brief,
+                appellee=request.appellee_brief,
+                proceeding_type=request.proceeding_type,
+            )
         )
-        predictions.append(agenda)
+        tasks[task] = (i, lens_def)
+
+    per_lens: list[tuple[dict, TopicPrediction]] = [None] * num  # type: ignore[list-item]
+    for coro in asyncio.as_completed(tasks.keys()):
+        agenda = await coro
+        # Figure out which task just completed
+        finished_task = None
+        for t in tasks:
+            if t.done() and not getattr(t, "_streamed", False):
+                try:
+                    if t.result() is agenda:
+                        finished_task = t
+                        break
+                except Exception:
+                    pass
+        if finished_task is None:
+            # Fallback: find any unstreamed finished task
+            for t in tasks:
+                if t.done() and not getattr(t, "_streamed", False):
+                    finished_task = t
+                    break
+        if finished_task is not None:
+            setattr(finished_task, "_streamed", True)
+            pred_id, lens_def = tasks[finished_task]
+            per_lens[pred_id - 1] = (lens_def, agenda)
+            _emit("agenda", {
+                "prediction_id": pred_id,
+                "lens": lens_def["lens"],
+                "rationale": agenda.rationale,
+                "topics": [t.model_dump() for t in agenda.topics],
+            })
+        else:
+            logger.warning("Could not match agenda to task")
+
+    # Safety: fill any None slots (shouldn't happen)
+    per_lens = [(ld, ag) for ld, ag in per_lens if ld is not None]  # type: ignore[misc]
+
+    if not use_mcts:
+        predictions = [ag for _, ag in per_lens]
+        return PredictedTopicSets(
+            case_summary=case_summary,
+            key_legal_issues=key_issues,
+            predictions=predictions,
+            total_predictions=len(predictions),
+        )
+
+    # ── MCTS Phase 2 ──────────────────────────────────────────────────────
+    # Flatten all lens topics into a single candidate pool, then let MCTS
+    # discover top-K coherent orderings.
+    _emit("status", {"phase": "mcts", "detail": "Running MCTS search on topic pool…"})
+    topic_pool: list[dict] = []
+    for lens_def, agenda in per_lens:
+        for topic in agenda.topics:
+            topic_pool.append({
+                "title":       topic.title,
+                "description": topic.description,
+                "target":      topic.target,
+                "lens":        lens_def["lens"],
+                "_rationale":  agenda.rationale,
+            })
+
+    predictions: list[TopicPrediction] = []
+    mcts_tree: dict = {}
+    if topic_pool:
+        try:
+            if mcts_callback is not None:
+                from .mcts import run_generation_streaming
+                mcts_paths, mcts_tree = await run_generation_streaming(
+                    topic_pool, on_expand=mcts_callback, top_k=num,
+                    root_label=case_summary,
+                )
+            else:
+                from .mcts import run_generation
+                mcts_paths, mcts_tree = run_generation(topic_pool, top_k=num, root_label=case_summary)
+            logger.info("MCTS returned %d paths, %d tree nodes", len(mcts_paths), len(mcts_tree.get("nodes", [])))
+
+            for path_idx, path in enumerate(mcts_paths[:num], start=1):
+                # Dominant lens = whichever contributed the most topics to this path
+                lens_counts: dict[str, int] = {}
+                for t in path:
+                    lens_counts[t.get("lens", "")] = lens_counts.get(t.get("lens", ""), 0) + 1
+                dominant_lens = max(lens_counts, key=lens_counts.get, default="")
+
+                rationale = next(
+                    (ag.rationale for ld, ag in per_lens if ld["lens"] == dominant_lens),
+                    "MCTS-generated trajectory",
+                )
+
+                topics = [
+                    JudgeTopic(
+                        order=j + 1,
+                        title=t.get("title", ""),
+                        description=t.get("description", ""),
+                        target=_normalise_target(t.get("target", "both")),
+                    )
+                    for j, t in enumerate(path)
+                ]
+                predictions.append(
+                    TopicPrediction(
+                        prediction_id=path_idx,
+                        lens=dominant_lens or f"Trajectory {path_idx}",
+                        rationale=rationale,
+                        topics=topics,
+                    )
+                )
+        except Exception as exc:
+            logger.warning("MCTS failed (%s); falling back to per-lens ordering.", exc)
+
+    # Fall back to per-lens results if MCTS produced nothing
+    if not predictions:
+        predictions = [ag for _, ag in per_lens]
 
     return PredictedTopicSets(
         case_summary=case_summary,
         key_legal_issues=key_issues,
         predictions=predictions,
         total_predictions=len(predictions),
+        mcts_tree=mcts_tree if mcts_tree else None,
     )
 
 
@@ -404,6 +550,8 @@ def _extract_blob(text: str) -> str | None:
 
 
 def _parse_json(text: str, fallback: dict) -> dict:
+    # Strip <think>…</think> blocks produced by reasoning models (Qwen3, etc.)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = re.sub(r"```\s*$", "", text, flags=re.MULTILINE)
 

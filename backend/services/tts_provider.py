@@ -3,9 +3,12 @@ Streamlined OpenAI TTS Provider
 """
 
 import os
+import logging
 import base64
 from abc import ABC, abstractmethod
 from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
 
 
 class TTSProvider(ABC):
@@ -15,22 +18,48 @@ class TTSProvider(ABC):
     
     @abstractmethod
     async def synthesize(self, text: str, voice: str = "default") -> str:
-        """Convert text to speech."""
+        """Convert text to speech. Returns base64-encoded audio or empty string."""
         pass
 
 
 class OpenAITTSProvider(TTSProvider):
-    """OpenAI TTS provider using the tts-1 model."""
+    """OpenAI TTS provider using the tts-1 model.
+
+    Requires a real OpenAI API key and the official OpenAI endpoint.
+    When TTS_API_KEY / TTS_BASE_URL are set they override the defaults,
+    allowing TTS to use the cloud API while LLM inference runs locally.
+
+    If no valid cloud endpoint is available, synthesize() returns "" and
+    the caller falls back to text-only delivery.
+    """
     
     audio_format = "opus"
     
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("WARNING: OPENAI_API_KEY not set. TTS will not work.")
+        # TTS-specific overrides (preferred)
+        tts_key  = os.getenv("TTS_API_KEY", "").strip()
+        tts_url  = os.getenv("TTS_BASE_URL", "").strip()
+
+        # Fall back to the general OpenAI env vars
+        api_key  = tts_key or os.getenv("OPENAI_API_KEY", "")
+        base_url = tts_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+        # Detect local-only setup: key is "local" or URL points to a local server
+        is_local = (
+            api_key.lower() in ("local", "dummy", "")
+            or "localhost" in base_url
+            or "127.0.0.1" in base_url
+        )
+
+        if is_local and not tts_key:
+            # No dedicated TTS key and running against a local LLM server
+            logger.info("TTS disabled — local LLM server does not support /audio/speech. "
+                        "Set TTS_API_KEY + TTS_BASE_URL to enable cloud TTS.")
             self.client = None
         else:
-            self.client = AsyncOpenAI(api_key=api_key)
+            self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+            logger.info("TTS enabled — using %s", base_url)
+
         self.available_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
     
     async def synthesize(self, text: str, voice: str = "onyx") -> str:

@@ -108,7 +108,7 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
           <FileUpload
-            label="Your Brief"
+            label="Petitioner's Brief"
             file={userBrief ? { 
               name: userBrief.name, 
               wordCount: countWords(userBrief.text) 
@@ -118,7 +118,7 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
           />
 
           <FileUpload
-            label="Opposing Counsel's Brief"
+            label="Respondent's Brief"
             file={opposingBrief ? { 
               name: opposingBrief.name, 
               wordCount: countWords(opposingBrief.text) 
