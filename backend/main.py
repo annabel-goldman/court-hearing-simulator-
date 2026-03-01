@@ -7,7 +7,7 @@ import json
 import logging
 import base64
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
@@ -112,7 +112,14 @@ class ConnectionManager:
             self.session_data[session_id] = {
                 'transcript': '',
                 'questions_asked': [],
-                'phase': 'OFF_RECORD'
+                'phase': 'OFF_RECORD',
+                'multi_agent': {
+                    'enabled': False,
+                    'strategy': 'round_robin',
+                    'agents': [],
+                    'next_agent_index': 0,
+                    'max_agents_per_pass': 2,
+                }
             }
     
     def disconnect(self, session_id: str):
@@ -125,6 +132,70 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 global_judge_engine = JudgeEngine()
+
+
+def _extract_question_text(question_entry: Any) -> str:
+    """Normalize question entries that may be plain strings or dict payloads."""
+    if isinstance(question_entry, str):
+        return question_entry
+    if isinstance(question_entry, dict):
+        if isinstance(question_entry.get("question"), str):
+            return question_entry["question"]
+        if isinstance(question_entry.get("text"), str):
+            return question_entry["text"]
+    return ""
+
+
+def _extract_seed_question_text(seed_entry: Any) -> str:
+    """Normalize seed question entries that may be strings or dict payloads."""
+    if isinstance(seed_entry, str):
+        return seed_entry
+    if isinstance(seed_entry, dict):
+        if isinstance(seed_entry.get("question"), str):
+            return seed_entry["question"]
+        if isinstance(seed_entry.get("text"), str):
+            return seed_entry["text"]
+    return ""
+
+
+def _normalize_multi_agent_config(raw_config: Any) -> dict:
+    """Parse optional multi-agent config for the main courtroom socket."""
+    if not isinstance(raw_config, dict):
+        return {
+            "enabled": False,
+            "strategy": "round_robin",
+            "agents": [],
+            "next_agent_index": 0,
+            "max_agents_per_pass": 2,
+        }
+
+    enabled = bool(raw_config.get("enabled"))
+    strategy = str(raw_config.get("strategy", "round_robin"))
+    try:
+        max_agents_per_pass = int(raw_config.get("max_agents_per_pass", 2))
+    except (TypeError, ValueError):
+        max_agents_per_pass = 2
+    max_agents_per_pass = min(max(max_agents_per_pass, 1), 5)
+
+    agents: List[Agent] = []
+    raw_agents = raw_config.get("agents") or []
+    for agent_data in raw_agents:
+        if isinstance(agent_data, dict):
+            agents.append(Agent.from_dict(agent_data))
+
+    if enabled and not agents:
+        try:
+            agents = multi_agent_service.get_all_agents()
+        except Exception as exc:
+            logger.error(f"[Orchestrator] Failed to load default agents: {exc}")
+
+    return {
+        "enabled": enabled and len(agents) > 0,
+        "strategy": strategy,
+        "agents": agents,
+        "next_agent_index": 0,
+        "max_agents_per_pass": max_agents_per_pass,
+    }
 
 # -----------------------------------------------------------------------------
 # REST Endpoints
@@ -175,8 +246,13 @@ async def text_to_speech(request: TTSRequest):
     try:
         provider = get_tts_provider()
         audio_data = await provider.synthesize(request.text, request.voice)
+        if not audio_data:
+            raise HTTPException(status_code=502, detail="TTS returned empty audio payload")
         return {"audio": audio_data, "format": provider.audio_format}
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/upload-brief")
@@ -324,16 +400,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 
                 if msg_type == "config":
                     custom_synthesis = payload.get('synthesis_prompt')
+                    multi_agent_config = _normalize_multi_agent_config(payload.get('multi_agent'))
                     if custom_synthesis:
                         preview = (custom_synthesis[:150] + '...') if len(custom_synthesis) > 150 else custom_synthesis
                         logger.info(f"[Judge] Session {session_id}: using CUSTOM synthesis prompt. Preview: {preview.replace(chr(10), ' ')}")
                     else:
                         logger.info(f"[Judge] Session {session_id}: no custom synthesis prompt; using default system prompt")
+                    if multi_agent_config["enabled"]:
+                        logger.info(
+                            f"[Orchestrator] Session {session_id}: enabled {multi_agent_config['strategy']} "
+                            f"with {len(multi_agent_config['agents'])} agents"
+                        )
+                    else:
+                        logger.info(f"[Orchestrator] Session {session_id}: multi-agent disabled")
                     manager.session_data[session_id].update({
                         'config': payload,
                         'seed_questions': payload.get('seed_questions', []),
                         'brief_summary': payload.get('brief_summary', ''),
-                        'custom_synthesis_prompt': custom_synthesis
+                        'custom_synthesis_prompt': custom_synthesis,
+                        'multi_agent': multi_agent_config,
                     })
                 
                 elif msg_type == "audio":
@@ -354,6 +439,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "type": "phase_update",
                         "data": {"phase": payload.get("phase")}
                     })
+
+                elif msg_type == "silence_timeout":
+                    await trigger_silence_interrupt(session_id, global_judge_engine, tts_provider)
     except WebSocketDisconnect:
         manager.disconnect(session_id)
     except Exception as e:
@@ -363,6 +451,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 async def check_and_trigger_interrupt(session_id, engine, tts):
     session = manager.session_data.get(session_id, {})
     if session.get('phase') != 'PROCEEDING': return
+
+    multi_agent_config = session.get("multi_agent") or {}
+    if multi_agent_config.get("enabled"):
+        await check_and_trigger_multi_agent_interrupt(
+            session_id=session_id,
+            session=session,
+            tts=tts,
+            engine=engine,
+        )
+        return
 
     custom_prompt = session.get('custom_synthesis_prompt')
     if custom_prompt:
@@ -384,13 +482,172 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
     )
     
     if should and question:
-        session['questions_asked'].append(question)
+        source = {"type": "judge_engine", "strategy": "single_judge"}
+        session['questions_asked'].append({
+            "question": question,
+            "source": source,
+            "timestamp": datetime.now().isoformat(),
+        })
         session['last_interrupt_time'] = datetime.now()
         audio = await tts.synthesize(question, voice="onyx")
         await manager.send_json(session_id, {
             "type": "judge_interrupt",
-            "data": {"question": question, "audio": audio, "audio_format": tts.audio_format}
+            "data": {
+                "question": question,
+                "audio": audio,
+                "audio_format": tts.audio_format,
+                "source": source,
+            }
         })
+
+
+async def trigger_silence_interrupt(session_id: str, engine: JudgeEngine, tts) -> None:
+    """Force a judge question after a frontend-reported silence window."""
+    session = manager.session_data.get(session_id, {})
+    if session.get("phase") != "PROCEEDING":
+        return
+
+    transcript = session.get("transcript", "")
+    brief_summary = (session.get("brief_summary") or "").strip()
+    asked_entries = session.get("questions_asked") or []
+    asked_questions = [text for text in (_extract_question_text(entry) for entry in asked_entries) if text]
+    seed_entries = session.get("seed_questions") or []
+    seed_questions = [text for text in (_extract_seed_question_text(entry) for entry in seed_entries) if text]
+    custom_prompt = session.get("custom_synthesis_prompt")
+
+    question: Optional[str] = None
+    try:
+        synthesized = await engine.synthesize_question(
+            transcript=transcript,
+            seed_questions=seed_questions,
+            brief_summary=brief_summary,
+            asked_questions=asked_questions,
+            system_prompt=custom_prompt,
+        )
+        if isinstance(synthesized, dict):
+            candidate = synthesized.get("question")
+            if isinstance(candidate, str) and candidate.strip():
+                question = candidate.strip()
+    except Exception as exc:
+        logger.error(f"[Judge] Silence-trigger synthesis failed for session {session_id}: {exc}")
+
+    if not question:
+        question = "Counsel, you've paused. What is your strongest legal point right now?"
+
+    source = {"type": "judge_engine", "strategy": "silence_trigger"}
+    session["questions_asked"].append({
+        "question": question,
+        "source": source,
+        "timestamp": datetime.now().isoformat(),
+    })
+    session["last_interrupt_time"] = datetime.now()
+
+    # Keep the judge context in sync so follow-up questions can avoid repetition.
+    engine.get_or_create_context(session_id, session.get("config")).add_judge_question(
+        question=question,
+        reasoning="Forced silence-trigger interruption.",
+        topic="silence",
+    )
+
+    audio = await tts.synthesize(question, voice="onyx")
+    await manager.send_json(session_id, {
+        "type": "judge_interrupt",
+        "data": {
+            "question": question,
+            "audio": audio,
+            "audio_format": tts.audio_format,
+            "source": source,
+        }
+    })
+
+
+async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict, tts, engine: JudgeEngine):
+    """Orchestrate one judge interruption from the multi-agent ensemble."""
+    multi_agent_config = session.get("multi_agent") or {}
+    agents: List[Agent] = multi_agent_config.get("agents") or []
+    if not agents:
+        return
+
+    transcript = session.get("transcript", "")
+    if len(transcript.strip().split()) < 10:
+        return
+
+    last_interrupt_time: Optional[datetime] = session.get("last_interrupt_time")
+    if last_interrupt_time:
+        elapsed_seconds = (datetime.now() - last_interrupt_time).total_seconds()
+        if elapsed_seconds < engine.min_seconds_between:
+            return
+
+    questions_asked = session.get("questions_asked", [])
+    asked_texts = [text for text in (_extract_question_text(entry) for entry in questions_asked) if text]
+    brief_summary = session.get("brief_summary", "")
+
+    strategy = str(multi_agent_config.get("strategy", "round_robin"))
+    try:
+        next_agent_index = int(multi_agent_config.get("next_agent_index", 0))
+    except (TypeError, ValueError):
+        next_agent_index = 0
+    try:
+        max_agents_per_pass = int(multi_agent_config.get("max_agents_per_pass", 2))
+    except (TypeError, ValueError):
+        max_agents_per_pass = 2
+    max_agents_per_pass = min(max(max_agents_per_pass, 1), len(agents))
+
+    selected_agent: Optional[Agent] = None
+    selected_question: Optional[str] = None
+    total_agents = len(agents)
+
+    for checked_count in range(max_agents_per_pass):
+        agent_index = (next_agent_index + checked_count) % total_agents
+        agent = agents[agent_index]
+        try:
+            should_ask, question = await multi_agent_service.analyze_agent_question(
+                agent=agent,
+                transcript=transcript,
+                brief_summary=brief_summary,
+                questions_already_asked=asked_texts,
+            )
+        except Exception as exc:
+            logger.error(f"[Orchestrator] Agent check failed for {agent.name}: {exc}")
+            should_ask, question = False, None
+
+        if should_ask and question:
+            selected_agent = agent
+            selected_question = question
+            multi_agent_config["next_agent_index"] = (agent_index + 1) % total_agents
+            break
+
+    if not selected_agent or not selected_question:
+        multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
+        return
+
+    source = {
+        "type": "multi_agent",
+        "agent_id": selected_agent.id,
+        "agent_name": selected_agent.name,
+        "agent_color": selected_agent.color,
+        "strategy": strategy,
+    }
+    session["questions_asked"].append({
+        "question": selected_question,
+        "source": source,
+        "timestamp": datetime.now().isoformat(),
+    })
+    session["last_interrupt_time"] = datetime.now()
+
+    audio = await tts.synthesize(selected_question, voice="onyx")
+    await manager.send_json(session_id, {
+        "type": "judge_interrupt",
+        "data": {
+            "question": selected_question,
+            "audio": audio,
+            "audio_format": tts.audio_format,
+            "source": source,
+        }
+    })
+    logger.info(
+        f"[Orchestrator] Session {session_id}: {selected_agent.name} asked -> {selected_question[:80]}..."
+    )
 
 # -----------------------------------------------------------------------------
 # Multi-Agent WebSocket

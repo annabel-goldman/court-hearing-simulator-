@@ -31,6 +31,8 @@ interface UseMediaRecordingReturn {
   startRecording: () => void
   /** Stop recording */
   stopRecording: () => void
+  /** Stop camera + mic tracks and tear down preview */
+  shutdownMedia: () => void
 }
 
 export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMediaRecordingReturn {
@@ -213,6 +215,32 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
     audioAccumulatorRef.current = []
   }, [])
 
+  // Hard-stop media stream (camera + mic)
+  const shutdownMedia = useCallback(() => {
+    stopRecording()
+
+    mediaStreamRef.current?.getTracks().forEach(track => track.stop())
+    mediaStreamRef.current = null
+
+    if (videoPreviewRef.current) {
+      videoPreviewRef.current.srcObject = null
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close()
+      audioContextRef.current = null
+    }
+
+    setAudioLevel(0)
+    setIsCameraOn(false)
+    setIsMicOn(false)
+  }, [stopRecording])
+
   return {
     isCameraOn,
     isMicOn,
@@ -221,5 +249,6 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
     videoPreviewRef,
     startRecording,
     stopRecording,
+    shutdownMedia,
   }
 }

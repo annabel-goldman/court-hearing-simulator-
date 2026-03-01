@@ -19,13 +19,18 @@ import { CourtroomScene } from '../3d-rendering/CourtroomScene'
 import type { SpeakingRole, SimulationPhase, SessionConfig } from '../3d-rendering/types'
 
 // UI Overlays
-import { CourtroomRitualOverlay } from '../ui-overlays/CourtroomRitualOverlay'
 import { JudgeSpeechOverlay } from '../ui-overlays/JudgeSpeechOverlay'
 import { StatusDashboardHUD } from '../ui-overlays/StatusDashboardHUD'
 
 // Hooks
-import { useSimulationSocket, useAudioPlayer, type JudgeInterrupt } from '../hooks/useSimulationSocket'
+import {
+  useSimulationSocket,
+  useAudioPlayer,
+  type JudgeInterrupt,
+  type MultiAgentSocketConfig,
+} from '../hooks/useSimulationSocket'
 import { useMediaRecording } from '../hooks/useMediaRecording'
+import type { Agent } from '../multi-agent/types'
 
 // Configuration
 import {
@@ -42,10 +47,20 @@ import {
   BROWSER_TTS_RATE,
   BROWSER_TTS_PITCH,
   TIMER_INTERVAL_MS,
+  SILENCE_AUDIO_LEVEL_THRESHOLD,
+  SILENCE_TRIGGER_MS,
+  TIMER_OVERTIME_SECONDS,
 } from '../config/simulationConfig'
+import type {
+  SessionAuditPayload,
+  SessionQuestionRecord,
+  SessionTranscriptRecord,
+} from '../types/sessionAudit'
 
-// TTS endpoint (set VITE_API_URL in production, e.g. https://your-backend.onrender.com)
-const TTS_ENDPOINT = (import.meta.env.VITE_API_URL || 'http://localhost:8000') + '/api/tts'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const TTS_ENDPOINT = `${API_URL}/api/tts`
+const ALL_RISE_AUTO_ADVANCE_MS = 1600
+const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
 
 export default function CourtroomPage() {
   const navigate = useNavigate()
@@ -57,11 +72,20 @@ export default function CourtroomPage() {
   const [currentJudgeQuestion, setCurrentJudgeQuestion] = useState<string | null>(null)
   const [recentTranscript, setRecentTranscript] = useState<string>('')
   const [timerSeconds, setTimerSeconds] = useState(DEMO_SESSION_DURATION_SECONDS)
+  const [questionHistory, setQuestionHistory] = useState<SessionQuestionRecord[]>([])
+  const [transcriptHistory, setTranscriptHistory] = useState<SessionTranscriptRecord[]>([])
 
   // ========== REFS ==========
   const lipsyncRef = useRef<Lipsync | null>(null)
   const orbitControlsRef = useRef<OrbitControlsImpl>(null)
   const questionTimeoutRef = useRef<number | null>(null)
+  const silenceStartAtRef = useRef<number | null>(null)
+  const silenceQuestionRequestedRef = useRef(false)
+  const judgeQuestionActiveRef = useRef(false)
+  const timerOvertimePendingRef = useRef(false)
+  const sessionStartedAtRef = useRef<number | null>(null)
+  const sessionEndedAtRef = useRef<number | null>(null)
+  const hasFinalizedSessionRef = useRef(false)
 
   // Session ID
   const sessionId = useMemo(() => `session_${Date.now()}`, [])
@@ -69,11 +93,39 @@ export default function CourtroomPage() {
   // Audio player for judge TTS
   const { playAudioChunk } = useAudioPlayer()
 
+  const loadMultiAgentConfig = useCallback(async (): Promise<MultiAgentSocketConfig | undefined> => {
+    if (!sessionConfig?.useMultiAgentJudge) return undefined
+
+    try {
+      const response = await fetch(`${API_URL}/api/multi-agent/agents`)
+      if (!response.ok) {
+        throw new Error(`Failed to load agents (${response.status})`)
+      }
+      const payload = await response.json() as { agents?: Agent[] }
+      const agents = payload.agents || []
+      if (agents.length === 0) {
+        console.warn('[CourtroomPage] Multi-agent enabled but no agents were returned')
+        return undefined
+      }
+      console.log(`[CourtroomPage] Loaded ${agents.length} agents for judge orchestration`)
+      return {
+        enabled: true,
+        strategy: 'round_robin',
+        max_agents_per_pass: 2,
+        agents,
+      }
+    } catch (error) {
+      console.warn('[CourtroomPage] Failed to load multi-agent config, falling back to single judge mode:', error)
+      return undefined
+    }
+  }, [sessionConfig?.useMultiAgentJudge])
+
   // ========== WEBSOCKET ==========
   const { 
     isConnected, 
     sendConfig, 
     sendAudio,
+    sendSilenceTimeout,
     changePhase: sendPhaseChange,
     disconnect: disconnectSocket
   } = useSimulationSocket({
@@ -89,6 +141,21 @@ export default function CourtroomPage() {
     onTranscriptReceived: (transcript: string) => {
       console.log('[CourtroomPage] Transcript:', transcript)
       setRecentTranscript(transcript)
+      const cleanTranscript = transcript.trim()
+      if (cleanTranscript.length > 0) {
+        setTranscriptHistory(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].text === cleanTranscript) {
+            return prev
+          }
+          return [
+            ...prev,
+            {
+              text: cleanTranscript,
+              timestamp: new Date().toISOString(),
+            },
+          ]
+        })
+      }
       // Clear transcript timeout
       setTimeout(() => setRecentTranscript(''), TRANSCRIPT_DISPLAY_DURATION_MS)
     },
@@ -106,6 +173,7 @@ export default function CourtroomPage() {
     videoPreviewRef,
     startRecording,
     stopRecording,
+    shutdownMedia,
   } = useMediaRecording({
     onAudioChunk: (blob) => {
       if (isConnected) {
@@ -117,15 +185,63 @@ export default function CourtroomPage() {
     }
   })
 
+  const endJudgeSpeech = useCallback(() => {
+    setCurrentJudgeQuestion(null)
+    setSpeakingRole(null)
+    judgeQuestionActiveRef.current = false
+
+    if (timerOvertimePendingRef.current) {
+      setTimerSeconds(() => {
+        timerOvertimePendingRef.current = false
+        return TIMER_OVERTIME_SECONDS
+      })
+    }
+  }, [])
+
   // ========== JUDGE INTERRUPT HANDLER ==========
   function handleJudgeInterrupt(interrupt: JudgeInterrupt) {
-    console.log('[CourtroomPage] Judge interrupt:', interrupt.question)
+    const source = interrupt.source
+    const sourceType = source?.type === 'multi_agent' ? 'multi_agent' : 'judge_engine'
+    const agentName = sourceType === 'multi_agent'
+      ? source?.agent_name || source?.agent_id || 'Unnamed Agent'
+      : 'Judge Engine'
+
+    setQuestionHistory(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        question: interrupt.question,
+        timestamp: new Date().toISOString(),
+        sourceType,
+        agentId: source?.agent_id,
+        agentName,
+        agentColor: source?.agent_color,
+      },
+    ])
+
+    if (source?.type === 'multi_agent') {
+      console.log(
+        `[CourtroomPage] Judge interrupt from agent "${source.agent_name || source.agent_id}"`,
+        {
+          strategy: source.strategy,
+          agentId: source.agent_id,
+          agentColor: source.agent_color,
+          question: interrupt.question,
+        }
+      )
+    } else {
+      console.log('[CourtroomPage] Judge interrupt from default judge engine:', interrupt.question)
+    }
     
     // Clear any pending timeout
     if (questionTimeoutRef.current) {
       clearTimeout(questionTimeoutRef.current)
     }
-    
+
+    silenceStartAtRef.current = null
+    silenceQuestionRequestedRef.current = false
+    judgeQuestionActiveRef.current = true
+
     setCurrentJudgeQuestion(interrupt.question)
     setSpeakingRole('judge')
     
@@ -134,17 +250,52 @@ export default function CourtroomPage() {
       const wordCount = interrupt.question.split(' ').length
       const speakingTimeMs = Math.max(wordCount * MS_PER_WORD, MIN_SPEAKING_TIME_MS)
       questionTimeoutRef.current = window.setTimeout(() => {
-        setCurrentJudgeQuestion(null)
-        setSpeakingRole(null)
+        endJudgeSpeech()
       }, speakingTimeMs)
     } else {
       playRitualCue(interrupt.question)
       questionTimeoutRef.current = window.setTimeout(() => {
-        setCurrentJudgeQuestion(null)
-        setSpeakingRole(null)
+        endJudgeSpeech()
       }, FALLBACK_QUESTION_TIMEOUT_MS)
     }
   }
+
+  const buildSessionAudit = useCallback((): SessionAuditPayload => {
+    const fallbackTimestamp = Date.now()
+    const startedAt = sessionStartedAtRef.current ?? fallbackTimestamp
+    const endedAt = sessionEndedAtRef.current ?? fallbackTimestamp
+    const durationSeconds = Math.max(1, Math.round((endedAt - startedAt) / 1000))
+
+    return {
+      sessionId,
+      startedAt: new Date(startedAt).toISOString(),
+      endedAt: new Date(endedAt).toISOString(),
+      durationSeconds,
+      proceedingType: 'demo',
+      userRole: 'attorney',
+      useMultiAgentJudge: Boolean(sessionConfig?.useMultiAgentJudge),
+      questions: questionHistory,
+      transcriptSegments: transcriptHistory,
+    }
+  }, [sessionId, sessionConfig?.useMultiAgentJudge, questionHistory, transcriptHistory])
+
+  const finalizeSession = useCallback(() => {
+    if (hasFinalizedSessionRef.current) return
+    hasFinalizedSessionRef.current = true
+    sessionEndedAtRef.current = Date.now()
+
+    shutdownMedia()
+    disconnectSocket()
+
+    const auditPayload = buildSessionAudit()
+    sessionStorage.setItem(SESSION_AUDIT_STORAGE_KEY, JSON.stringify(auditPayload))
+    sessionStorage.removeItem('courtSession')
+
+    navigate('/session-audit', {
+      state: { audit: auditPayload },
+      replace: true,
+    })
+  }, [shutdownMedia, disconnectSocket, buildSessionAudit, navigate])
 
   // ========== TIMER ==========
   useEffect(() => {
@@ -152,7 +303,14 @@ export default function CourtroomPage() {
     
     const interval = setInterval(() => {
       setTimerSeconds(prev => {
-        if (prev <= 0) {
+        if (prev <= 1) {
+          if (timerOvertimePendingRef.current) {
+            return prev
+          }
+          if (judgeQuestionActiveRef.current) {
+            timerOvertimePendingRef.current = true
+            return 0
+          }
           setSimulationPhase('ADJOURNED')
           return 0
         }
@@ -163,48 +321,103 @@ export default function CourtroomPage() {
     return () => clearInterval(interval)
   }, [simulationPhase])
 
+  useEffect(() => {
+    if (simulationPhase === 'PROCEEDING' && !sessionStartedAtRef.current) {
+      sessionStartedAtRef.current = Date.now()
+    }
+    if (simulationPhase === 'ADJOURNED') {
+      finalizeSession()
+    }
+  }, [simulationPhase, finalizeSession])
+
   // ========== AUTO-START RECORDING ==========
   useEffect(() => {
     if (simulationPhase === 'PROCEEDING' && !isRecording) {
-      if (isConnected && sessionConfig) {
-        // Check for custom prompts from Judge Admin
-        let customSynthesisPrompt: string | undefined
-        try {
-          const storedPrompts = localStorage.getItem('customJudgePrompts')
-          if (storedPrompts) {
-            const prompts = JSON.parse(storedPrompts)
-            customSynthesisPrompt = prompts.synthesisPrompt
+      let isCancelled = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+
+      const configureAndStart = async () => {
+        if (isConnected && sessionConfig) {
+          // Check for custom prompts from Judge Admin
+          let customSynthesisPrompt: string | undefined
+          try {
+            const storedPrompts = localStorage.getItem('customJudgePrompts')
+            if (storedPrompts) {
+              const prompts = JSON.parse(storedPrompts)
+              customSynthesisPrompt = prompts.synthesisPrompt
+            }
+          } catch (e) {
+            console.warn('Failed to load custom prompts:', e)
           }
-        } catch (e) {
-          console.warn('Failed to load custom prompts:', e)
+
+          if (customSynthesisPrompt) {
+            const preview = customSynthesisPrompt.slice(0, 200).replace(/\n/g, ' ')
+            console.log('[CourtroomPage] Judge using CUSTOM synthesis prompt (from Set Prompts):', preview + (customSynthesisPrompt.length > 200 ? '...' : ''))
+          } else {
+            console.log('[CourtroomPage] Judge using backend DEFAULT synthesis prompt (no custom prompt in localStorage)')
+          }
+
+          const multiAgentConfig = await loadMultiAgentConfig()
+          sendConfig({
+            proceedingType: sessionConfig.proceedingType,
+            userRole: sessionConfig.userRole,
+            seed_questions: [],
+            brief_summary: sessionConfig.judicialSummary || sessionConfig.materials?.map(m => m.text.slice(0, 500)).join('\n') || '',
+            synthesis_prompt: customSynthesisPrompt,
+            multi_agent: multiAgentConfig,
+          })
         }
 
-        if (customSynthesisPrompt) {
-          const preview = customSynthesisPrompt.slice(0, 200).replace(/\n/g, ' ')
-          console.log('[CourtroomPage] Judge using CUSTOM synthesis prompt (from Set Prompts):', preview + (customSynthesisPrompt.length > 200 ? '...' : ''))
-        } else {
-          console.log('[CourtroomPage] Judge using backend DEFAULT synthesis prompt (no custom prompt in localStorage)')
-        }
-
-        sendConfig({
-          proceedingType: sessionConfig.proceedingType,
-          userRole: sessionConfig.userRole,
-          seed_questions: [],
-          brief_summary: sessionConfig.judicialSummary || sessionConfig.materials?.map(m => m.text.slice(0, 500)).join('\n') || '',
-          synthesis_prompt: customSynthesisPrompt
-        })
+        if (isCancelled) return
+        timer = setTimeout(() => {
+          console.log('[CourtroomPage] Starting recording after sync delay')
+          startRecording()
+        }, RECORDING_SYNC_DELAY_MS)
       }
-      
-      const timer = setTimeout(() => {
-        console.log('[CourtroomPage] Starting recording after sync delay')
-        startRecording()
-      }, RECORDING_SYNC_DELAY_MS)
-      
-      return () => clearTimeout(timer)
+
+      configureAndStart()
+
+      return () => {
+        isCancelled = true
+        if (timer) clearTimeout(timer)
+      }
     } else if (simulationPhase === 'ADJOURNED' && isRecording) {
       stopRecording()
     }
-  }, [simulationPhase, isRecording, isConnected, sessionConfig, sendConfig, startRecording, stopRecording])
+  }, [simulationPhase, isRecording, isConnected, sessionConfig, sendConfig, startRecording, stopRecording, loadMultiAgentConfig])
+
+  // ========== SILENCE DETECTION ==========
+  useEffect(() => {
+    if (simulationPhase !== 'PROCEEDING' || !isRecording || !isConnected) {
+      silenceStartAtRef.current = null
+      silenceQuestionRequestedRef.current = false
+      return
+    }
+
+    if (speakingRole === 'judge') {
+      silenceStartAtRef.current = null
+      return
+    }
+
+    const now = Date.now()
+    if (audioLevel <= SILENCE_AUDIO_LEVEL_THRESHOLD) {
+      if (silenceStartAtRef.current === null) {
+        silenceStartAtRef.current = now
+      }
+
+      if (
+        !silenceQuestionRequestedRef.current &&
+        now - silenceStartAtRef.current >= SILENCE_TRIGGER_MS
+      ) {
+        sendSilenceTimeout()
+        silenceQuestionRequestedRef.current = true
+      }
+      return
+    }
+
+    silenceStartAtRef.current = null
+    silenceQuestionRequestedRef.current = false
+  }, [audioLevel, isConnected, isRecording, sendSilenceTimeout, simulationPhase, speakingRole])
 
   // ========== SESSION INITIALIZATION ==========
   useEffect(() => {
@@ -235,7 +448,7 @@ export default function CourtroomPage() {
   }, [navigate])
 
   // ========== TTS ==========
-  async function playRitualCue(text: string): Promise<void> {
+  const playRitualCue = useCallback(async (text: string): Promise<void> => {
     console.log('[CourtroomPage] Playing TTS:', text)
     
     try {
@@ -244,21 +457,26 @@ export default function CourtroomPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, voice: 'onyx' })
       })
-      
-      if (response.ok) {
-        const data = await response.json()
-        if (data.audio?.length > 0) {
-          const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))
-          const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' : 
-                           data.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg'
-          const audioBlob = new Blob([audioBytes], { type: mimeType })
-          const audioUrl = URL.createObjectURL(audioBlob)
-          const audio = new Audio(audioUrl)
-          audio.onended = () => URL.revokeObjectURL(audioUrl)
-          await audio.play()
-          return
-        }
+
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '')
+        throw new Error(`TTS request failed (${response.status}): ${detail || response.statusText}`)
       }
+      
+      const data = await response.json()
+      if (data.audio?.length > 0) {
+        const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))
+        const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' : 
+                         data.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg'
+        const audioBlob = new Blob([audioBytes], { type: mimeType })
+        const audioUrl = URL.createObjectURL(audioBlob)
+        const audio = new Audio(audioUrl)
+        audio.onended = () => URL.revokeObjectURL(audioUrl)
+        await audio.play()
+        return
+      }
+
+      throw new Error('TTS returned no audio bytes')
     } catch (err) {
       console.warn('[CourtroomPage] Backend TTS failed:', err)
     }
@@ -275,49 +493,55 @@ export default function CourtroomPage() {
       if (voices.length > 0) utterance.voice = voices[0]
       speechSynthesis.speak(utterance)
     })
-  }
+  }, [])
 
-  // ========== RITUAL PROGRESSION ==========
-  const handleRitualAction = useCallback(() => {
-    switch (simulationPhase) {
-      case 'ALL_RISE':
+  const startProceeding = useCallback(() => {
+    setSimulationPhase('PROCEEDING')
+    console.log('[CourtroomPage] Transitioning to PROCEEDING')
+    sendPhaseChange('PROCEEDING')
+    setTimeout(() => {
+      const openingText = 'Counsel for the appellant, you may proceed when ready.'
+      judgeQuestionActiveRef.current = false
+      setCurrentJudgeQuestion(openingText)
+      setSpeakingRole('judge')
+      playRitualCue(openingText)
+      setTimeout(() => {
+        setCurrentJudgeQuestion(null)
+        setSpeakingRole(null)
+      }, OPENING_STATEMENT_DURATION_MS)
+    }, PROCEEDING_START_DELAY_MS)
+  }, [sendPhaseChange, playRitualCue])
+
+  // ========== AUTOMATIC RITUAL PHASES ==========
+  useEffect(() => {
+    if (simulationPhase === 'ALL_RISE') {
+      const timeoutId = window.setTimeout(() => {
         setSimulationPhase('JUDGE_ENTERING')
-        setTimeout(() => {
-          setSimulationPhase('JUDGE_SEATED')
-          playRitualCue('You may be seated.')
-        }, JUDGE_ENTERING_DURATION_MS)
-        break
-        
-      case 'JUDGE_SEATED':
-        setSimulationPhase('PROCEEDING')
-        console.log('[CourtroomPage] Transitioning to PROCEEDING')
-        sendPhaseChange('PROCEEDING')
-        setTimeout(() => {
-          const openingText = 'Counsel for the appellant, you may proceed when ready.'
-          setCurrentJudgeQuestion(openingText)
-          setSpeakingRole('judge')
-          playRitualCue(openingText)
-          setTimeout(() => {
-            setCurrentJudgeQuestion(null)
-            setSpeakingRole(null)
-          }, OPENING_STATEMENT_DURATION_MS)
-        }, PROCEEDING_START_DELAY_MS)
-        break
-        
-      case 'ADJOURNED':
-        sessionStorage.removeItem('courtSession')
-        navigate('/')
-        break
+      }, ALL_RISE_AUTO_ADVANCE_MS)
+      return () => clearTimeout(timeoutId)
     }
-  }, [simulationPhase, sendPhaseChange, navigate])
+
+    if (simulationPhase === 'JUDGE_ENTERING') {
+      const timeoutId = window.setTimeout(() => {
+        setSimulationPhase('JUDGE_SEATED')
+        playRitualCue('You may be seated.')
+      }, JUDGE_ENTERING_DURATION_MS)
+      return () => clearTimeout(timeoutId)
+    }
+
+    if (simulationPhase === 'JUDGE_SEATED') {
+      const timeoutId = window.setTimeout(() => {
+        startProceeding()
+      }, 250)
+      return () => clearTimeout(timeoutId)
+    }
+  }, [simulationPhase, playRitualCue, startProceeding])
 
   // End session handler
   const endSession = useCallback(() => {
-    stopRecording()
-    disconnectSocket()
+    sendPhaseChange('ADJOURNED')
     setSimulationPhase('ADJOURNED')
-    playRitualCue('This court is adjourned. All rise.')
-  }, [disconnectSocket, stopRecording])
+  }, [sendPhaseChange])
 
   // Initialize lipsync
   useEffect(() => {
@@ -326,14 +550,16 @@ export default function CourtroomPage() {
       if (questionTimeoutRef.current) {
         clearTimeout(questionTimeoutRef.current)
       }
+      silenceStartAtRef.current = null
+      silenceQuestionRequestedRef.current = false
+      judgeQuestionActiveRef.current = false
+      timerOvertimePendingRef.current = false
     }
   }, [])
 
   // ========== RENDER ==========
   return (
     <div className="avatar-page courtroom-fullscreen">
-      <CourtroomRitualOverlay phase={simulationPhase} onAction={handleRitualAction} />
-
       <div className="courtroom-canvas-fullscreen">
         <CourtroomScene 
           speakingRole={speakingRole}

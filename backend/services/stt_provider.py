@@ -22,6 +22,7 @@ class OpenAIWhisperProvider(STTProvider):
     
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
+        self.model = os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
         if not api_key:
             print("WARNING: OPENAI_API_KEY not set. STT will not work.")
             self.client = None
@@ -37,13 +38,19 @@ class OpenAIWhisperProvider(STTProvider):
         
         try:
             response = await self.client.audio.transcriptions.create(
-                model="whisper-1",
+                model=self.model,
                 file=audio_file,
                 response_format="text"
             )
-            return response
+            if isinstance(response, str):
+                return response.strip()
+            # Some SDK/model combinations return a structured object.
+            text = getattr(response, "text", "")
+            if isinstance(text, str):
+                return text.strip()
+            return str(text or "").strip()
         except Exception as e:
-            print(f"[STT] Whisper transcription error: {e}")
+            print(f"[STT] Transcription error with model {self.model}: {e}")
             return ""
 
 

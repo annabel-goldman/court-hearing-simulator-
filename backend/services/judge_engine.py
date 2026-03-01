@@ -119,7 +119,7 @@ class JudgeEngine:
     ):
         self.judge_personality = judge_personality
         self.interruption_frequency = interruption_frequency
-        self.model = "gpt-4"
+        self.model = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o-mini")
         
         # Timing parameters based on frequency
         self.min_seconds_between = {

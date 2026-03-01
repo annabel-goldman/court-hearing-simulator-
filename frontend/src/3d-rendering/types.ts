@@ -18,6 +18,7 @@ export interface SessionConfig {
   userRole: 'attorney'
   materials: Array<{ name: string; text: string; role: string }>
   judicialSummary?: string
+  useMultiAgentJudge?: boolean
 }
 
 // Viseme mapping for Ready Player Me avatars

@@ -1,8 +1,8 @@
 /**
  * CourtroomRitualOverlay Component
- * 
+ *
  * Displays courtroom ritual phases (All Rise, Judge Entering, etc.)
- * with appropriate messaging and action buttons.
+ * with formal messaging and action buttons.
  */
 
 import type { SimulationPhase } from '../3d-rendering/types'
@@ -14,37 +14,36 @@ interface CourtroomRitualOverlayProps {
 
 const RITUAL_CONTENT = {
   ALL_RISE: {
-    icon: '⚖️',
+    stage: 'Opening Protocol',
     title: 'All Rise',
-    subtitle: 'The Honorable Court is now in session',
-    instruction: 'Please stand',
-    buttonText: 'I am standing',
+    subtitle: 'The Honorable Court is now in session.',
+    instruction: 'Stand for the court opening statement.',
+    buttonText: 'Standing',
   },
   JUDGE_ENTERING: {
-    icon: '👨‍⚖️',
+    stage: 'Opening Protocol',
     title: 'Judge Entering',
-    subtitle: 'Please remain standing',
+    subtitle: 'Please remain standing while the bench is entering.',
     instruction: null,
     buttonText: null,
   },
   JUDGE_SEATED: {
-    icon: '🪑',
+    stage: 'Opening Protocol',
     title: 'You May Be Seated',
-    subtitle: 'The court is now in session',
-    instruction: 'Please take your seat',
-    buttonText: 'I am seated',
+    subtitle: 'Proceeding will begin momentarily.',
+    instruction: 'Take your seat and prepare to present argument.',
+    buttonText: 'Seated',
   },
   ADJOURNED: {
-    icon: '🏛️',
+    stage: 'Session Closed',
     title: 'Court Adjourned',
-    subtitle: 'This proceeding has concluded',
-    instruction: 'Thank you for your participation',
+    subtitle: 'The proceeding has concluded.',
+    instruction: 'Select below to return to intake and start a new session.',
     buttonText: 'Exit Courtroom',
   },
 } as const
 
 export function CourtroomRitualOverlay({ phase, onAction }: CourtroomRitualOverlayProps) {
-  // Skip rendering if not in a ritual phase
   if (phase === 'OFF_RECORD' || phase === 'PROCEEDING') {
     return null
   }
@@ -55,7 +54,7 @@ export function CourtroomRitualOverlay({ phase, onAction }: CourtroomRitualOverl
   return (
     <div className="ritual-overlay">
       <div className="ritual-content">
-        <div className="ritual-icon">{content.icon}</div>
+        <p className="ritual-stage">{content.stage}</p>
         <h2 className="ritual-title">{content.title}</h2>
         <p className="ritual-subtitle">{content.subtitle}</p>
         {content.instruction && <p className="ritual-instruction">{content.instruction}</p>}

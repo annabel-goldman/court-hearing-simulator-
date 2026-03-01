@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { SimulationPhase } from '../3d-rendering/types'
+import type { Agent as MultiAgentProfile } from '../multi-agent/types'
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws'
 
@@ -13,6 +14,22 @@ export interface JudgeInterrupt {
   reasoning?: string
   audio?: string  // Base64-encoded audio
   audioFormat?: string  // 'opus', 'mp3', etc.
+  source?: JudgeInterruptSource
+}
+
+export interface JudgeInterruptSource {
+  type: 'judge_engine' | 'multi_agent'
+  strategy?: string
+  agent_id?: string
+  agent_name?: string
+  agent_color?: string
+}
+
+export interface MultiAgentSocketConfig {
+  enabled: boolean
+  strategy?: 'round_robin'
+  max_agents_per_pass?: number
+  agents?: MultiAgentProfile[]
 }
 
 export interface WebSocketSessionConfig {
@@ -22,6 +39,8 @@ export interface WebSocketSessionConfig {
   interruptionFrequency?: string
   seed_questions?: any[]
   brief_summary?: string
+  synthesis_prompt?: string
+  multi_agent?: MultiAgentSocketConfig
 }
 
 interface UseSimulationSocketOptions {
@@ -37,6 +56,7 @@ interface UseSimulationSocketReturn {
   phase: SimulationPhase
   sendConfig: (config: WebSocketSessionConfig) => void
   sendAudio: (audioBlob: Blob) => void
+  sendSilenceTimeout: () => void
   changePhase: (phase: SimulationPhase) => void
   disconnect: () => void
 }
@@ -123,7 +143,8 @@ export function useSimulationSocket(
           question: message.data.question,
           reasoning: message.data.reasoning,
           audio: message.data.audio,
-          audioFormat: message.data.audio_format
+          audioFormat: message.data.audio_format,
+          source: message.data.source,
         })
         break
 
@@ -175,6 +196,10 @@ export function useSimulationSocket(
     reader.readAsDataURL(audioBlob)
   }, [sendMessage])
 
+  const sendSilenceTimeout = useCallback(() => {
+    sendMessage('silence_timeout', {})
+  }, [sendMessage])
+
   const changePhase = useCallback((newPhase: SimulationPhase) => {
     sendMessage('phase_change', { phase: newPhase })
     setPhase(newPhase)
@@ -209,6 +234,7 @@ export function useSimulationSocket(
     phase,
     sendConfig,
     sendAudio,
+    sendSilenceTimeout,
     changePhase,
     disconnect
   }
