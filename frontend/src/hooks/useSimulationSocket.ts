@@ -57,6 +57,7 @@ interface UseSimulationSocketReturn {
   sendConfig: (config: WebSocketSessionConfig) => void
   sendAudio: (audioBlob: Blob) => void
   sendSilenceTimeout: () => void
+  sendQuestionCutoff: () => void
   changePhase: (phase: SimulationPhase) => void
   disconnect: () => void
 }
@@ -200,6 +201,10 @@ export function useSimulationSocket(
     sendMessage('silence_timeout', {})
   }, [sendMessage])
 
+  const sendQuestionCutoff = useCallback(() => {
+    sendMessage('question_cutoff', {})
+  }, [sendMessage])
+
   const changePhase = useCallback((newPhase: SimulationPhase) => {
     sendMessage('phase_change', { phase: newPhase })
     setPhase(newPhase)
@@ -235,6 +240,7 @@ export function useSimulationSocket(
     sendConfig,
     sendAudio,
     sendSilenceTimeout,
+    sendQuestionCutoff,
     changePhase,
     disconnect
   }

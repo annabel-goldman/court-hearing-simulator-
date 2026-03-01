@@ -78,7 +78,7 @@ export const TIMER_INTERVAL_MS = 1000
 export const SILENCE_AUDIO_LEVEL_THRESHOLD = 10
 
 /** Judge asks a question after this much uninterrupted user silence (ms) */
-export const SILENCE_TRIGGER_MS = 500
+export const SILENCE_TRIGGER_MS = 2000
 
 /** Extra response window granted when timer expires mid-question (seconds) */
 export const TIMER_OVERTIME_SECONDS = 10

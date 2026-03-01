@@ -6,7 +6,7 @@ import os
 import json
 import logging
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Any
 from contextlib import asynccontextmanager
 
@@ -31,6 +31,12 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 logger = logging.getLogger('court-simulator')
+
+
+# Judge speech pacing should align with frontend timing.
+JUDGE_MS_PER_WORD = 400
+JUDGE_MIN_SPEAKING_TIME_MS = 3000
+JUDGE_POST_SPEECH_COOLDOWN_SECONDS = 3
 
 # -----------------------------------------------------------------------------
 # Models
@@ -113,6 +119,8 @@ class ConnectionManager:
                 'transcript': '',
                 'questions_asked': [],
                 'phase': 'OFF_RECORD',
+                'question_cutoff': False,
+                'next_question_allowed_at': None,
                 'multi_agent': {
                     'enabled': False,
                     'strategy': 'round_robin',
@@ -196,6 +204,37 @@ def _normalize_multi_agent_config(raw_config: Any) -> dict:
         "next_agent_index": 0,
         "max_agents_per_pass": max_agents_per_pass,
     }
+
+
+def _estimate_question_duration_seconds(question: str) -> float:
+    """Estimate judge speaking time using the same heuristic as the frontend."""
+    word_count = len((question or "").split())
+    estimated_ms = max(word_count * JUDGE_MS_PER_WORD, JUDGE_MIN_SPEAKING_TIME_MS)
+    return estimated_ms / 1000.0
+
+
+def _is_question_window_open(session: dict) -> bool:
+    """Return whether this session can receive another judge question now."""
+    if session.get('phase') != 'PROCEEDING':
+        return False
+    if session.get('question_cutoff'):
+        return False
+
+    next_allowed_at: Optional[datetime] = session.get('next_question_allowed_at')
+    if isinstance(next_allowed_at, datetime) and datetime.now() < next_allowed_at:
+        return False
+
+    return True
+
+
+def _mark_question_scheduled(session: dict, question: str) -> None:
+    """Mark when the next question is allowed after speaking + cooldown."""
+    now = datetime.now()
+    speech_seconds = _estimate_question_duration_seconds(question)
+    session['last_interrupt_time'] = now
+    session['next_question_allowed_at'] = now + timedelta(
+        seconds=speech_seconds + JUDGE_POST_SPEECH_COOLDOWN_SECONDS
+    )
 
 # -----------------------------------------------------------------------------
 # REST Endpoints
@@ -401,6 +440,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if msg_type == "config":
                     custom_synthesis = payload.get('synthesis_prompt')
                     multi_agent_config = _normalize_multi_agent_config(payload.get('multi_agent'))
+                    raw_multi_agent = payload.get('multi_agent') or {}
                     if custom_synthesis:
                         preview = (custom_synthesis[:150] + '...') if len(custom_synthesis) > 150 else custom_synthesis
                         logger.info(f"[Judge] Session {session_id}: using CUSTOM synthesis prompt. Preview: {preview.replace(chr(10), ' ')}")
@@ -413,11 +453,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         )
                     else:
                         logger.info(f"[Orchestrator] Session {session_id}: multi-agent disabled")
+                    logger.info(
+                        f"[Orchestrator][DBG] Session {session_id}: config payload multi_agent="
+                        f"enabled={raw_multi_agent.get('enabled')}, strategy={raw_multi_agent.get('strategy')}, "
+                        f"max_agents_per_pass={raw_multi_agent.get('max_agents_per_pass')}, "
+                        f"payload_agents={len(raw_multi_agent.get('agents') or [])}"
+                    )
+                    logger.info(
+                        f"[Orchestrator][DBG] Session {session_id}: normalized multi_agent="
+                        f"enabled={multi_agent_config.get('enabled')}, strategy={multi_agent_config.get('strategy')}, "
+                        f"max_agents_per_pass={multi_agent_config.get('max_agents_per_pass')}, "
+                        f"agents={len(multi_agent_config.get('agents') or [])}"
+                    )
                     manager.session_data[session_id].update({
                         'config': payload,
                         'seed_questions': payload.get('seed_questions', []),
                         'brief_summary': payload.get('brief_summary', ''),
                         'custom_synthesis_prompt': custom_synthesis,
+                        'question_cutoff': False,
+                        'next_question_allowed_at': None,
                         'multi_agent': multi_agent_config,
                     })
                 
@@ -441,7 +495,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     })
 
                 elif msg_type == "silence_timeout":
+                    logger.info(f"[Judge][DBG] Session {session_id}: received silence_timeout")
                     await trigger_silence_interrupt(session_id, global_judge_engine, tts_provider)
+
+                elif msg_type == "question_cutoff":
+                    manager.session_data[session_id]['question_cutoff'] = True
+                    logger.info(f"[Judge] Session {session_id}: question cutoff enabled")
     except WebSocketDisconnect:
         manager.disconnect(session_id)
     except Exception as e:
@@ -450,16 +509,30 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 async def check_and_trigger_interrupt(session_id, engine, tts):
     session = manager.session_data.get(session_id, {})
-    if session.get('phase') != 'PROCEEDING': return
-
+    transcript_words = len((session.get('transcript') or '').strip().split())
     multi_agent_config = session.get("multi_agent") or {}
+    logger.info(
+        f"[Judge][DBG] Session {session_id}: interrupt_check start "
+        f"phase={session.get('phase')} cutoff={session.get('question_cutoff')} "
+        f"multi_agent_enabled={multi_agent_config.get('enabled')} transcript_words={transcript_words}"
+    )
+    if not _is_question_window_open(session):
+        next_allowed_at = session.get("next_question_allowed_at")
+        logger.info(
+            f"[Judge][DBG] Session {session_id}: interrupt_check blocked by window "
+            f"phase={session.get('phase')} cutoff={session.get('question_cutoff')} "
+            f"next_allowed_at={next_allowed_at.isoformat() if isinstance(next_allowed_at, datetime) else next_allowed_at}"
+        )
+        return
+
     if multi_agent_config.get("enabled"):
-        await check_and_trigger_multi_agent_interrupt(
+        asked_by_agent = await check_and_trigger_multi_agent_interrupt(
             session_id=session_id,
             session=session,
             tts=tts,
             engine=engine,
         )
+        logger.info(f"[Orchestrator][DBG] Session {session_id}: primary multi-agent asked={asked_by_agent}")
         return
 
     custom_prompt = session.get('custom_synthesis_prompt')
@@ -488,7 +561,7 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
             "source": source,
             "timestamp": datetime.now().isoformat(),
         })
-        session['last_interrupt_time'] = datetime.now()
+        _mark_question_scheduled(session, question)
         audio = await tts.synthesize(question, voice="onyx")
         await manager.send_json(session_id, {
             "type": "judge_interrupt",
@@ -504,8 +577,21 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
 async def trigger_silence_interrupt(session_id: str, engine: JudgeEngine, tts) -> None:
     """Force a judge question after a frontend-reported silence window."""
     session = manager.session_data.get(session_id, {})
-    if session.get("phase") != "PROCEEDING":
+    if not _is_question_window_open(session):
         return
+
+    multi_agent_config = session.get("multi_agent") or {}
+    if multi_agent_config.get("enabled"):
+        asked_by_agent = await check_and_trigger_multi_agent_interrupt(
+            session_id=session_id,
+            session=session,
+            tts=tts,
+            engine=engine,
+        )
+        if asked_by_agent:
+            logger.info(f"[Orchestrator] Session {session_id}: silence handled by multi-agent")
+            return
+        logger.info(f"[Orchestrator][DBG] Session {session_id}: silence multi-agent did not ask; using judge_engine fallback")
 
     transcript = session.get("transcript", "")
     brief_summary = (session.get("brief_summary") or "").strip()
@@ -540,7 +626,7 @@ async def trigger_silence_interrupt(session_id: str, engine: JudgeEngine, tts) -
         "source": source,
         "timestamp": datetime.now().isoformat(),
     })
-    session["last_interrupt_time"] = datetime.now()
+    _mark_question_scheduled(session, question)
 
     # Keep the judge context in sync so follow-up questions can avoid repetition.
     engine.get_or_create_context(session_id, session.get("config")).add_judge_question(
@@ -561,22 +647,38 @@ async def trigger_silence_interrupt(session_id: str, engine: JudgeEngine, tts) -
     })
 
 
-async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict, tts, engine: JudgeEngine):
+async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict, tts, engine: JudgeEngine) -> bool:
     """Orchestrate one judge interruption from the multi-agent ensemble."""
+    if not _is_question_window_open(session):
+        next_allowed_at = session.get("next_question_allowed_at")
+        logger.info(
+            f"[Orchestrator][DBG] Session {session_id}: blocked by question window "
+            f"phase={session.get('phase')} cutoff={session.get('question_cutoff')} "
+            f"next_allowed_at={next_allowed_at.isoformat() if isinstance(next_allowed_at, datetime) else next_allowed_at}"
+        )
+        return False
+
     multi_agent_config = session.get("multi_agent") or {}
     agents: List[Agent] = multi_agent_config.get("agents") or []
     if not agents:
-        return
+        logger.info(f"[Orchestrator][DBG] Session {session_id}: no agents configured")
+        return False
 
     transcript = session.get("transcript", "")
-    if len(transcript.strip().split()) < 10:
-        return
+    transcript_word_count = len(transcript.strip().split())
+    if transcript_word_count < 10:
+        logger.info(f"[Orchestrator][DBG] Session {session_id}: transcript too short ({transcript_word_count} words)")
+        return False
 
     last_interrupt_time: Optional[datetime] = session.get("last_interrupt_time")
     if last_interrupt_time:
         elapsed_seconds = (datetime.now() - last_interrupt_time).total_seconds()
         if elapsed_seconds < engine.min_seconds_between:
-            return
+            logger.info(
+                f"[Orchestrator][DBG] Session {session_id}: blocked by min_seconds_between "
+                f"elapsed={elapsed_seconds:.2f}s required={engine.min_seconds_between}s"
+            )
+            return False
 
     questions_asked = session.get("questions_asked", [])
     asked_texts = [text for text in (_extract_question_text(entry) for entry in questions_asked) if text]
@@ -592,6 +694,11 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     except (TypeError, ValueError):
         max_agents_per_pass = 2
     max_agents_per_pass = min(max(max_agents_per_pass, 1), len(agents))
+    logger.info(
+        f"[Orchestrator][DBG] Session {session_id}: evaluating multi-agent "
+        f"strategy={strategy} total_agents={len(agents)} next_index={next_agent_index} "
+        f"max_agents_per_pass={max_agents_per_pass} asked_so_far={len(asked_texts)}"
+    )
 
     selected_agent: Optional[Agent] = None
     selected_question: Optional[str] = None
@@ -600,6 +707,10 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     for checked_count in range(max_agents_per_pass):
         agent_index = (next_agent_index + checked_count) % total_agents
         agent = agents[agent_index]
+        logger.info(
+            f"[Orchestrator][DBG] Session {session_id}: checking agent index={agent_index} "
+            f"id={agent.id} name={agent.name}"
+        )
         try:
             should_ask, question = await multi_agent_service.analyze_agent_question(
                 agent=agent,
@@ -610,6 +721,10 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         except Exception as exc:
             logger.error(f"[Orchestrator] Agent check failed for {agent.name}: {exc}")
             should_ask, question = False, None
+        logger.info(
+            f"[Orchestrator][DBG] Session {session_id}: agent result id={agent.id} "
+            f"should_ask={should_ask} question_present={bool(question and str(question).strip())}"
+        )
 
         if should_ask and question:
             selected_agent = agent
@@ -619,7 +734,11 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
 
     if not selected_agent or not selected_question:
         multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
-        return
+        logger.info(
+            f"[Orchestrator][DBG] Session {session_id}: no agent selected this pass; "
+            f"next_index={multi_agent_config['next_agent_index']}"
+        )
+        return False
 
     source = {
         "type": "multi_agent",
@@ -633,7 +752,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         "source": source,
         "timestamp": datetime.now().isoformat(),
     })
-    session["last_interrupt_time"] = datetime.now()
+    _mark_question_scheduled(session, selected_question)
 
     audio = await tts.synthesize(selected_question, voice="onyx")
     await manager.send_json(session_id, {
@@ -648,6 +767,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     logger.info(
         f"[Orchestrator] Session {session_id}: {selected_agent.name} asked -> {selected_question[:80]}..."
     )
+    return True
 
 # -----------------------------------------------------------------------------
 # Multi-Agent WebSocket

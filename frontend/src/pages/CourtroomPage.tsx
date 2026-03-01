@@ -83,6 +83,7 @@ export default function CourtroomPage() {
   const silenceQuestionRequestedRef = useRef(false)
   const judgeQuestionActiveRef = useRef(false)
   const timerOvertimePendingRef = useRef(false)
+  const questionCutoffReachedRef = useRef(false)
   const sessionStartedAtRef = useRef<number | null>(null)
   const sessionEndedAtRef = useRef<number | null>(null)
   const hasFinalizedSessionRef = useRef(false)
@@ -104,19 +105,27 @@ export default function CourtroomPage() {
       const payload = await response.json() as { agents?: Agent[] }
       const agents = payload.agents || []
       if (agents.length === 0) {
-        console.warn('[CourtroomPage] Multi-agent enabled but no agents were returned')
-        return undefined
+        console.warn('[CourtroomPage] No agents returned; enabling backend multi-agent defaults')
+        return {
+          enabled: true,
+          strategy: 'round_robin',
+          max_agents_per_pass: 5,
+        }
       }
       console.log(`[CourtroomPage] Loaded ${agents.length} agents for judge orchestration`)
       return {
         enabled: true,
         strategy: 'round_robin',
-        max_agents_per_pass: 2,
+        max_agents_per_pass: 5,
         agents,
       }
     } catch (error) {
-      console.warn('[CourtroomPage] Failed to load multi-agent config, falling back to single judge mode:', error)
-      return undefined
+      console.warn('[CourtroomPage] Failed to prefetch agents; enabling backend multi-agent defaults:', error)
+      return {
+        enabled: true,
+        strategy: 'round_robin',
+        max_agents_per_pass: 5,
+      }
     }
   }, [sessionConfig?.useMultiAgentJudge])
 
@@ -126,6 +135,7 @@ export default function CourtroomPage() {
     sendConfig, 
     sendAudio,
     sendSilenceTimeout,
+    sendQuestionCutoff,
     changePhase: sendPhaseChange,
     disconnect: disconnectSocket
   } = useSimulationSocket({
@@ -200,6 +210,11 @@ export default function CourtroomPage() {
 
   // ========== JUDGE INTERRUPT HANDLER ==========
   function handleJudgeInterrupt(interrupt: JudgeInterrupt) {
+    if (questionCutoffReachedRef.current) {
+      console.log('[CourtroomPage] Ignoring judge interrupt after timer cutoff:', interrupt.question)
+      return
+    }
+
     const source = interrupt.source
     const sourceType = source?.type === 'multi_agent' ? 'multi_agent' : 'judge_engine'
     const agentName = sourceType === 'multi_agent'
@@ -304,6 +319,10 @@ export default function CourtroomPage() {
     const interval = setInterval(() => {
       setTimerSeconds(prev => {
         if (prev <= 1) {
+          if (!questionCutoffReachedRef.current) {
+            questionCutoffReachedRef.current = true
+            sendQuestionCutoff()
+          }
           if (timerOvertimePendingRef.current) {
             return prev
           }
@@ -319,7 +338,7 @@ export default function CourtroomPage() {
     }, TIMER_INTERVAL_MS)
     
     return () => clearInterval(interval)
-  }, [simulationPhase])
+  }, [simulationPhase, sendQuestionCutoff])
 
   useEffect(() => {
     if (simulationPhase === 'PROCEEDING' && !sessionStartedAtRef.current) {
@@ -358,6 +377,7 @@ export default function CourtroomPage() {
           }
 
           const multiAgentConfig = await loadMultiAgentConfig()
+          console.log('[CourtroomPage][DBG] Sending socket config with multi_agent:', multiAgentConfig)
           sendConfig({
             proceedingType: sessionConfig.proceedingType,
             userRole: sessionConfig.userRole,
@@ -389,6 +409,12 @@ export default function CourtroomPage() {
   // ========== SILENCE DETECTION ==========
   useEffect(() => {
     if (simulationPhase !== 'PROCEEDING' || !isRecording || !isConnected) {
+      silenceStartAtRef.current = null
+      silenceQuestionRequestedRef.current = false
+      return
+    }
+
+    if (questionCutoffReachedRef.current) {
       silenceStartAtRef.current = null
       silenceQuestionRequestedRef.current = false
       return
@@ -434,6 +460,7 @@ export default function CourtroomPage() {
       console.log('[CourtroomPage] Session loaded:', config.proceedingType)
       setSessionConfig(config)
       setTimerSeconds(DEMO_SESSION_DURATION_SECONDS)
+      questionCutoffReachedRef.current = false
       
       const timeoutId = window.setTimeout(() => {
         console.log('[CourtroomPage] Starting ritual: ALL_RISE')
@@ -499,6 +526,7 @@ export default function CourtroomPage() {
     setSimulationPhase('PROCEEDING')
     console.log('[CourtroomPage] Transitioning to PROCEEDING')
     sendPhaseChange('PROCEEDING')
+    questionCutoffReachedRef.current = false
     setTimeout(() => {
       const openingText = 'Counsel for the appellant, you may proceed when ready.'
       judgeQuestionActiveRef.current = false
@@ -554,6 +582,7 @@ export default function CourtroomPage() {
       silenceQuestionRequestedRef.current = false
       judgeQuestionActiveRef.current = false
       timerOvertimePendingRef.current = false
+      questionCutoffReachedRef.current = false
     }
   }, [])
 
