@@ -1,0 +1,107 @@
+.session-audit-page {
+  min-height: 100vh;
+  padding: 2rem 1.1rem 2.6rem;
+  background:
+    radial-gradient(circle at 22% -16%, rgba(233, 198, 146, 0.2), transparent 44%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(100, 72, 39, 0.1) 0px,
+      rgba(100, 72, 39, 0.1) 2px,
+      rgba(84, 56, 29, 0.06) 2px,
+      rgba(84, 56, 29, 0.06) 16px
+    ),
+    linear-gradient(160deg, #4d331f 0%, #3a2518 30%, #2c1c12 100%);
+  color: #2f2318;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.session-audit-shell {
+  width: min(940px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 0.95rem;
+}
+
+.session-audit-header,
+.session-audit-section {
+  background: #f8f2e7;
+  border: 1px solid #d1c5b1;
+  border-radius: 6px;
+  padding: 1rem;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+}
+
+.session-audit-kicker {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8b6236;
+  font-size: 0.77rem;
+  font-weight: 700;
+}
+
+.session-audit-title {
+  margin: 0.38rem 0 0;
+  font-size: clamp(1.85rem, 3.1vw, 2.45rem);
+  color: #33251b;
+  font-weight: 700;
+}
+
+.session-audit-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.12rem;
+  color: #33251b;
+  font-weight: 700;
+}
+
+.session-audit-empty {
+  margin: 0;
+  color: #6b4f35;
+}
+
+.session-audit-question-list {
+  display: grid;
+  gap: 0.66rem;
+}
+
+.session-audit-question {
+  background: #fffaf1;
+  border: 1px solid #d8d0c2;
+  border-radius: 4px;
+  padding: 0.75rem;
+}
+
+.session-audit-question__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.46rem;
+  margin-bottom: 0.45rem;
+}
+
+.session-audit-question__index {
+  color: #5f4630;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.session-audit-question__agent {
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  background: #fffdf8;
+}
+
+.session-audit-question__text {
+  margin: 0;
+  line-height: 1.45;
+  color: #27345a;
+}
+
+.session-audit-performance {
+  margin: 0;
+  color: #27345a;
+  line-height: 1.5;
+}

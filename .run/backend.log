@@ -1,0 +1,7 @@
+[backend/run] Starting backend on http://localhost:8000 (reload=0)
+INFO:     Started server process [25799]
+INFO:     Waiting for application startup.
+02:09:03 [INFO] court-simulator: Starting Court Simulator Backend...
+02:09:03 [INFO] court-simulator: OpenAI API Key configured: Yes
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

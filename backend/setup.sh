@@ -1,27 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Backend setup script - creates venv and installs dependencies
 
-set -e
+set -euo pipefail
 
-echo "Setting up Court Simulator Backend..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv venv
+echo "[backend/setup] Preparing backend environment..."
+
+if [[ ! -d "venv" ]]; then
+  echo "[backend/setup] Creating virtual environment..."
+  python3 -m venv venv
 fi
 
-# Activate virtual environment
-echo "Activating virtual environment..."
 source venv/bin/activate
-
-# Install dependencies
-echo "Installing dependencies..."
+echo "[backend/setup] Installing Python dependencies..."
 pip install -r requirements.txt
 
-echo ""
-echo "Setup complete! To run the server:"
-echo "  source venv/bin/activate"
-echo "  uvicorn main:app --reload --port 8000"
-echo ""
-echo "Or use: ./run.sh"
+echo "[backend/setup] Done."
