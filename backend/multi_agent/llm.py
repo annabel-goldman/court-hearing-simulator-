@@ -82,7 +82,7 @@ class MultiAgentLLM:
         transcript: str,
         brief_summary: str,
         questions_already_asked: List[str] = [],
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> Tuple[bool, Optional[str], int]:
         """
         Determine if an agent should ask a question based on the current transcript.
         
@@ -91,13 +91,13 @@ class MultiAgentLLM:
             transcript: Current transcript of the oral argument
             brief_summary: Summary of the briefs
             questions_already_asked: List of questions already asked by any agent
-        
+
         Returns:
-            Tuple of (should_ask: bool, question: str or None)
+            Tuple of (should_ask: bool, question: str or None, relevance: int 1-3)
         """
         client = get_openai_client()
         if not client:
-            return False, None
+            return False, None, 1
 
         system_prompt = build_agent_system_prompt(agent)
         user_prompt = build_agent_user_prompt(
@@ -131,13 +131,17 @@ class MultiAgentLLM:
                 result = json.loads(json_match.group(0))
                 should_ask = result.get("should_ask", False)
                 question = result.get("question")
-                return should_ask, question if should_ask else None
+                try:
+                    relevance = max(1, min(3, int(result.get("relevance", 1))))
+                except (TypeError, ValueError):
+                    relevance = 1
+                return should_ask, (question if should_ask else None), relevance
 
-            return False, None
+            return False, None, 1
 
         except Exception as e:
             print(f"Error in agent analysis for {agent.name}: {e}")
-            return False, None
+            return False, None, 1
 
 
 # Global instance for easy import

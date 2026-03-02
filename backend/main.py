@@ -2,6 +2,7 @@
 Court Simulator Backend - Streamlined OpenAI Version
 """
 
+import asyncio
 import os
 import json
 import logging
@@ -37,6 +38,13 @@ logger = logging.getLogger('court-simulator')
 JUDGE_MS_PER_WORD = 400
 JUDGE_MIN_SPEAKING_TIME_MS = 3000
 JUDGE_POST_SPEECH_COOLDOWN_SECONDS = 3
+
+# Minimum new words speaker must say after a question before another fires (~10s of speech).
+MIN_NEW_WORDS_AFTER_QUESTION = 20
+
+# Per-agent cooldown: agent can't re-ask within this window or until enough new content.
+AGENT_MIN_COOLDOWN_SECONDS = 60
+AGENT_MIN_NEW_WORDS = 30
 
 # -----------------------------------------------------------------------------
 # Models
@@ -121,12 +129,15 @@ class ConnectionManager:
                 'phase': 'OFF_RECORD',
                 'question_cutoff': False,
                 'next_question_allowed_at': None,
+                'interrupt_lock': asyncio.Lock(),
+                'transcript_words_at_last_question': 0,
                 'multi_agent': {
                     'enabled': False,
                     'strategy': 'round_robin',
                     'agents': [],
                     'next_agent_index': 0,
                     'max_agents_per_pass': 2,
+                    'agent_states': {},
                 }
             }
     
@@ -203,6 +214,7 @@ def _normalize_multi_agent_config(raw_config: Any) -> dict:
         "agents": agents,
         "next_agent_index": 0,
         "max_agents_per_pass": max_agents_per_pass,
+        "agent_states": {},
     }
 
 
@@ -235,6 +247,7 @@ def _mark_question_scheduled(session: dict, question: str) -> None:
     session['next_question_allowed_at'] = now + timedelta(
         seconds=speech_seconds + JUDGE_POST_SPEECH_COOLDOWN_SECONDS
     )
+    session['transcript_words_at_last_question'] = len((session.get('transcript') or '').split())
 
 # -----------------------------------------------------------------------------
 # REST Endpoints
@@ -509,6 +522,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 async def check_and_trigger_interrupt(session_id, engine, tts):
     session = manager.session_data.get(session_id, {})
+
+    # Fix 1: Per-session lock — skip this chunk if a check is already in progress.
+    lock = session.get('interrupt_lock')
+    if lock is None or lock.locked():
+        logger.info(f"[Judge][DBG] Session {session_id}: interrupt_check skipped (lock busy)")
+        return
+    async with lock:
+        await _do_check_and_trigger_interrupt(session_id, session, engine, tts)
+
+
+async def _do_check_and_trigger_interrupt(session_id, session, engine, tts):
+    """Inner implementation of interrupt check, always called while holding the session lock."""
     transcript_words = len((session.get('transcript') or '').strip().split())
     multi_agent_config = session.get("multi_agent") or {}
     logger.info(
@@ -522,6 +547,16 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
             f"[Judge][DBG] Session {session_id}: interrupt_check blocked by window "
             f"phase={session.get('phase')} cutoff={session.get('question_cutoff')} "
             f"next_allowed_at={next_allowed_at.isoformat() if isinstance(next_allowed_at, datetime) else next_allowed_at}"
+        )
+        return
+
+    # Fix 2: New-speech gate — require meaningful new content since the last question.
+    words_now = transcript_words
+    words_at_last = session.get('transcript_words_at_last_question', 0)
+    if words_now - words_at_last < MIN_NEW_WORDS_AFTER_QUESTION:
+        logger.info(
+            f"[Judge][DBG] Session {session_id}: interrupt_check blocked by new-speech gate "
+            f"words_now={words_now} words_at_last={words_at_last} need={MIN_NEW_WORDS_AFTER_QUESTION}"
         )
         return
 
@@ -553,7 +588,7 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
         seed_questions=seed_questions if seed_questions else None,
         asked_questions=asked_questions if asked_questions else None,
     )
-    
+
     if should and question:
         source = {"type": "judge_engine", "strategy": "single_judge"}
         session['questions_asked'].append({
@@ -700,19 +735,41 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         f"max_agents_per_pass={max_agents_per_pass} asked_so_far={len(asked_texts)}"
     )
 
-    selected_agent: Optional[Agent] = None
-    selected_question: Optional[str] = None
+    agent_states: dict = multi_agent_config.setdefault("agent_states", {})
     total_agents = len(agents)
+    # Fix 4: Collect all willing candidates in this pass; pick highest relevance at the end.
+    candidates = []  # List of (agent, agent_index, question, relevance)
 
     for checked_count in range(max_agents_per_pass):
         agent_index = (next_agent_index + checked_count) % total_agents
         agent = agents[agent_index]
+
+        # Fix 3: Per-agent cooldown check.
+        agent_state = agent_states.get(agent.id, {})
+        last_asked: Optional[datetime] = agent_state.get("last_asked_at")
+        words_when_asked: int = agent_state.get("words_when_asked", 0)
+        if last_asked:
+            elapsed = (datetime.now() - last_asked).total_seconds()
+            if elapsed < AGENT_MIN_COOLDOWN_SECONDS:
+                logger.info(
+                    f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
+                    f"skipped (cooldown {elapsed:.0f}s / {AGENT_MIN_COOLDOWN_SECONDS}s)"
+                )
+                continue
+            new_words = transcript_word_count - words_when_asked
+            if new_words < AGENT_MIN_NEW_WORDS:
+                logger.info(
+                    f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
+                    f"skipped (only {new_words} new words since last ask, need {AGENT_MIN_NEW_WORDS})"
+                )
+                continue
+
         logger.info(
             f"[Orchestrator][DBG] Session {session_id}: checking agent index={agent_index} "
             f"id={agent.id} name={agent.name}"
         )
         try:
-            should_ask, question = await multi_agent_service.analyze_agent_question(
+            should_ask, question, relevance = await multi_agent_service.analyze_agent_question(
                 agent=agent,
                 transcript=transcript,
                 brief_summary=brief_summary,
@@ -720,25 +777,34 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
             )
         except Exception as exc:
             logger.error(f"[Orchestrator] Agent check failed for {agent.name}: {exc}")
-            should_ask, question = False, None
+            should_ask, question, relevance = False, None, 1
         logger.info(
             f"[Orchestrator][DBG] Session {session_id}: agent result id={agent.id} "
-            f"should_ask={should_ask} question_present={bool(question and str(question).strip())}"
+            f"should_ask={should_ask} question_present={bool(question and str(question).strip())} "
+            f"relevance={relevance}"
         )
 
         if should_ask and question:
-            selected_agent = agent
-            selected_question = question
-            multi_agent_config["next_agent_index"] = (agent_index + 1) % total_agents
-            break
+            candidates.append((agent, agent_index, question, relevance))
 
-    if not selected_agent or not selected_question:
+    if not candidates:
         multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
         logger.info(
             f"[Orchestrator][DBG] Session {session_id}: no agent selected this pass; "
             f"next_index={multi_agent_config['next_agent_index']}"
         )
         return False
+
+    # Fix 4: Pick the highest-relevance candidate; ties broken by round-robin order (list position).
+    selected_agent, selected_agent_index, selected_question, selected_relevance = max(
+        candidates, key=lambda x: x[3]
+    )
+    multi_agent_config["next_agent_index"] = (selected_agent_index + 1) % total_agents
+    logger.info(
+        f"[Orchestrator][DBG] Session {session_id}: selected agent id={selected_agent.id} "
+        f"name={selected_agent.name} relevance={selected_relevance} "
+        f"from {len(candidates)} candidate(s)"
+    )
 
     source = {
         "type": "multi_agent",
@@ -754,6 +820,12 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     })
     _mark_question_scheduled(session, selected_question)
 
+    # Fix 3: Record when this agent last asked and how many words were in the transcript.
+    agent_states[selected_agent.id] = {
+        "last_asked_at": datetime.now(),
+        "words_when_asked": transcript_word_count,
+    }
+
     audio = await tts.synthesize(selected_question, voice="onyx")
     await manager.send_json(session_id, {
         "type": "judge_interrupt",
@@ -765,7 +837,8 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         }
     })
     logger.info(
-        f"[Orchestrator] Session {session_id}: {selected_agent.name} asked -> {selected_question[:80]}..."
+        f"[Orchestrator] Session {session_id}: {selected_agent.name} asked (relevance={selected_relevance}) "
+        f"-> {selected_question[:80]}..."
     )
     return True
 
@@ -854,7 +927,7 @@ async def check_multi_agent_questions(session_id: str):
     
     for agent in agents:
         try:
-            should_ask, question = await multi_agent_service.analyze_agent_question(
+            should_ask, question, _relevance = await multi_agent_service.analyze_agent_question(
                 agent=agent,
                 transcript=transcript,
                 brief_summary=brief_summary,

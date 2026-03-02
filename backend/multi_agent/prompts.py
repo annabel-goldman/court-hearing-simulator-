@@ -127,11 +127,13 @@ RECENT TRANSCRIPT:
 Based on the recent transcript, should you ({agent.name}) ask a question now?
 
 Respond in JSON format:
-{{"should_ask": true/false, "question": "Your question here or null"}}"""
+{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-3}}
+
+Where relevance is: 1=marginally relevant to your triggers, 2=relevant, 3=highly relevant."""
 
 
 # =============================================================================
 # RESPONSE FORMAT
 # =============================================================================
 
-AGENT_RESPONSE_FORMAT = """{{"should_ask": true/false, "question": "Your question here or null"}}"""
+AGENT_RESPONSE_FORMAT = """{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-3}}"""
