@@ -20,6 +20,10 @@ All three tiers expose an OpenAI-compatible /v1 endpoint via llama-server.
 When only one server is running (single-GPU setup), all tiers fall back
 to the LARGE model — the system degrades gracefully.
 
+Reachability is checked once at startup via `probe_all_tiers()` and then
+refreshed in the background every 30 s via `_background_reachability_refresh()`.
+This avoids any blocking I/O on LLM hot-path calls.
+
 Environment variables:
   MODEL_LARGE       model alias for the large server    (default: LOCAL_MODEL)
   MODEL_LARGE_URL   base URL                            (default: OPENAI_BASE_URL)
@@ -34,11 +38,14 @@ Environment variables:
 from __future__ import annotations
 
 import os
+import time
 import logging
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
 
+import anyio
+import httpx
 from dotenv import load_dotenv
 
 # Load .env from the project root
@@ -95,52 +102,120 @@ def _resolve_tier(tier: ModelTier) -> ModelEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Reachability cache  (populated at startup, refreshed in background)
+# ---------------------------------------------------------------------------
+
+# url → (is_reachable, monotonic_timestamp)
+_reachability_cache: dict[str, tuple[bool, float]] = {}
+_REACHABILITY_TTL = 60.0   # seconds before a cache entry is considered stale
+
+
+def _is_url_reachable(base_url: str) -> bool:
+    """Pure cache lookup — no network I/O.
+
+    Returns True (optimistic) if the URL has never been probed yet so that
+    the first LLM call goes through while the startup probe is in flight.
+    Call `probe_all_tiers()` at startup to populate the cache.
+    """
+    entry = _reachability_cache.get(base_url)
+    if entry is None:
+        return True   # optimistic: assume reachable until proven otherwise
+    reachable, _ = entry
+    return reachable
+
+
+async def _probe_url(base_url: str) -> bool:
+    """Async HTTP probe of a single base URL.  Non-blocking."""
+    check_url = base_url.rstrip("/").removesuffix("/v1") + "/v1/models"
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(
+                check_url,
+                headers={"Authorization": "Bearer local"},
+            )
+            return r.status_code < 500
+    except Exception:
+        return False
+
+
+async def probe_all_tiers() -> None:
+    """Probe all configured tier URLs and populate the reachability cache.
+
+    Call this once from the FastAPI lifespan before the server starts
+    accepting requests.  Skips duplicate URLs so a single-GPU setup
+    (all tiers pointing at the same server) only issues one request.
+    """
+    seen: set[str] = set()
+    for tier in ModelTier:
+        ep = _resolve_tier(tier)
+        if ep.base_url in seen:
+            continue
+        seen.add(ep.base_url)
+        reachable = await _probe_url(ep.base_url)
+        _reachability_cache[ep.base_url] = (reachable, time.monotonic())
+        status = "OK" if reachable else "UNREACHABLE"
+        logger.info("Startup probe %-6s %s → %s", tier.value.upper(), ep.base_url, status)
+
+
+async def _background_reachability_refresh() -> None:
+    """Background task: re-probe URLs whose cache entries have gone stale.
+
+    Runs forever; intended to be launched via anyio task group in the
+    FastAPI lifespan so it shuts down cleanly when the server exits.
+    """
+    while True:
+        await anyio.sleep(30)
+        now = time.monotonic()
+        seen: set[str] = set()
+        for tier in ModelTier:
+            ep = _resolve_tier(tier)
+            if ep.base_url in seen:
+                continue
+            seen.add(ep.base_url)
+            entry = _reachability_cache.get(ep.base_url)
+            if entry is None or (now - entry[1]) > _REACHABILITY_TTL:
+                reachable = await _probe_url(ep.base_url)
+                prev = _reachability_cache.get(ep.base_url, (None, 0))[0]
+                _reachability_cache[ep.base_url] = (reachable, now)
+                if prev is not None and prev != reachable:
+                    state = "back online" if reachable else "went offline"
+                    logger.warning(
+                        "Tier %s (%s) %s", tier.value.upper(), ep.base_url, state
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Effective endpoint resolution (applies reachability fallback)
+# ---------------------------------------------------------------------------
+
+def _resolve_effective_endpoint(tier: ModelTier) -> ModelEndpoint:
+    """Like _resolve_tier, but applies the reachability fallback.
+
+    If the requested tier's server is unreachable, transparently falls back
+    to LARGE.  Both the client URL and the model name come from the same
+    (possibly fallen-back) endpoint so they always match.
+    """
+    endpoint = _resolve_tier(tier)
+    if tier != ModelTier.LARGE and not _is_url_reachable(endpoint.base_url):
+        large_ep = _resolve_tier(ModelTier.LARGE)
+        logger.info(
+            "Falling back %s (%s) → LARGE (%s)",
+            tier.value, endpoint.base_url, large_ep.base_url,
+        )
+        endpoint = large_ep
+    return endpoint
+
+
+# ---------------------------------------------------------------------------
 # Cached AsyncOpenAI clients (one per unique base_url)
 # ---------------------------------------------------------------------------
 
 _clients: dict[str, object] = {}
 
-# Track which base_urls have been confirmed unreachable so we don't
-# retry health-checks on every request.
-_unreachable_urls: set[str] = set()
 
-
-def _is_url_reachable(base_url: str) -> bool:
-    """Quick connectivity check — hit the /models endpoint with a short timeout."""
-    if base_url in _unreachable_urls:
-        return False
-    import urllib.request, urllib.error
-    # /models is a lightweight endpoint every OpenAI-compatible server exposes
-    check_url = base_url.rstrip("/").removesuffix("/v1") + "/v1/models"
-    try:
-        req = urllib.request.Request(check_url, method="GET")
-        req.add_header("Authorization", "Bearer local")
-        urllib.request.urlopen(req, timeout=1.5)
-        return True
-    except Exception:
-        logger.warning("Server at %s is unreachable — will fall back to LARGE tier", base_url)
-        _unreachable_urls.add(base_url)
-        return False
-
-
-def get_client(tier: ModelTier):
-    """Return a cached AsyncOpenAI client for the given tier.
-
-    Returns None if the API key is not set (same behaviour as the
-    existing get_openai_client() functions).
-
-    If the tier's server is unreachable, transparently falls back to LARGE.
-    """
-    endpoint = _resolve_tier(tier)
+def _get_or_create_client(endpoint: ModelEndpoint):
     if not endpoint.api_key:
         return None
-
-    # If the configured URL is unreachable and this isn't already LARGE, fall back
-    if tier != ModelTier.LARGE and not _is_url_reachable(endpoint.base_url):
-        large_ep = _resolve_tier(ModelTier.LARGE)
-        logger.info("Falling back from %s (%s) → LARGE (%s)", tier.value, endpoint.base_url, large_ep.base_url)
-        endpoint = large_ep
-
     if endpoint.base_url not in _clients:
         from openai import AsyncOpenAI
         _clients[endpoint.base_url] = AsyncOpenAI(
@@ -148,28 +223,34 @@ def get_client(tier: ModelTier):
             base_url=endpoint.base_url,
         )
         logger.info(
-            "Created AsyncOpenAI client for tier=%s model=%s url=%s",
-            tier.value, endpoint.model, endpoint.base_url,
+            "Created AsyncOpenAI client model=%s url=%s",
+            endpoint.model, endpoint.base_url,
         )
     return _clients[endpoint.base_url]
 
 
-def get_model(tier: ModelTier) -> str:
-    """Return the model name/alias for the given tier.
+def get_client(tier: ModelTier):
+    """Return a cached AsyncOpenAI client for the given tier.
 
-    Falls back to LARGE model name if the tier's server is unreachable.
+    Transparently falls back to LARGE if the tier's server is unreachable.
+    Returns None if no API key is configured.
     """
-    endpoint = _resolve_tier(tier)
-    if tier != ModelTier.LARGE and not _is_url_reachable(endpoint.base_url):
-        return _resolve_tier(ModelTier.LARGE).model
-    return endpoint.model
+    return _get_or_create_client(_resolve_effective_endpoint(tier))
+
+
+def get_model(tier: ModelTier) -> str:
+    """Return the model name/alias for the given tier (after fallback)."""
+    return _resolve_effective_endpoint(tier).model
 
 
 def get_client_and_model(tier: ModelTier):
-    """Convenience: return (client, model_name) for a tier."""
-    endpoint = _resolve_tier(tier)
-    client = get_client(tier)
-    return client, endpoint.model
+    """Convenience: return (client, model_name) for a tier.
+
+    Both values come from the same resolved endpoint, so the model name
+    always matches the server the client points to — even after fallback.
+    """
+    endpoint = _resolve_effective_endpoint(tier)
+    return _get_or_create_client(endpoint), endpoint.model
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +272,7 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     "quality_assessment":   ModelTier.SMALL,
     "brief_summary":        ModelTier.SMALL,
     "seed_questions":       ModelTier.SMALL,
+    "argument_scoring":     ModelTier.SMALL,
 
     # TINY — structured extraction / timeline
     "issue_extraction":     ModelTier.TINY,

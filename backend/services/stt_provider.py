@@ -7,11 +7,12 @@ Set WHISPER_MODEL to choose the model size (default: "medium").
          medium (~1.5 GB), large-v3 (~3 GB).
 """
 
-import asyncio
 import os
 import io
 import logging
 import tempfile
+
+import anyio
 from abc import ABC, abstractmethod
 from openai import AsyncOpenAI
 
@@ -125,8 +126,7 @@ class LocalWhisperProvider(STTProvider):
             return text.strip()
 
         try:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, _run)
+            result = await anyio.to_thread.run_sync(_run)
             return result
         except Exception as e:
             logger.error("[STT] Local whisper transcription error: %s", e)

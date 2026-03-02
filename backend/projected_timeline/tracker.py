@@ -46,6 +46,7 @@ import json
 import logging
 import math
 import re
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
@@ -243,7 +244,7 @@ def _embed(texts: List[str]) -> List[List[float]]:
     return [_trigram_vector(t) for t in texts]
 
 
-def _trigram_vector(text: str) -> List[float]:
+def _trigram_vector(text: str) -> Dict[str, float]:
     """Normalised trigram frequency vector (fallback when sbert unavailable)."""
     text = text.lower()
     trigrams: Dict[str, int] = {}
@@ -510,20 +511,38 @@ class TrajectoryTracker:
 
 
 # ---------------------------------------------------------------------------
-# In-process session store  (swap for Redis/DB in production)
+# In-process session store with TTL eviction (swap for Redis/DB in production)
 # ---------------------------------------------------------------------------
 
-_SESSIONS: Dict[str, TrajectoryTracker] = {}
+# Each entry is (tracker, last_accessed_monotonic).
+# Sessions idle for more than _SESSION_TTL seconds are evicted on the next
+# create_session or get_session call.
+_SESSIONS: Dict[str, tuple[TrajectoryTracker, float]] = {}
+_SESSION_TTL = 3600.0   # 1 hour
+
+
+def _evict_stale_sessions() -> None:
+    now = time.monotonic()
+    stale = [sid for sid, (_, ts) in _SESSIONS.items() if now - ts > _SESSION_TTL]
+    for sid in stale:
+        del _SESSIONS[sid]
+        logger.info("Evicted stale tracker session %s", sid)
 
 
 def create_session(predicted: PredictedTopicSets) -> TrajectoryTracker:
+    _evict_stale_sessions()
     tracker = TrajectoryTracker(predicted)
-    _SESSIONS[tracker.session_id] = tracker
+    _SESSIONS[tracker.session_id] = (tracker, time.monotonic())
     return tracker
 
 
 def get_session(session_id: str) -> Optional[TrajectoryTracker]:
-    return _SESSIONS.get(session_id)
+    entry = _SESSIONS.get(session_id)
+    if entry is None:
+        return None
+    tracker, _ = entry
+    _SESSIONS[session_id] = (tracker, time.monotonic())   # touch timestamp
+    return tracker
 
 
 def delete_session(session_id: str) -> bool:

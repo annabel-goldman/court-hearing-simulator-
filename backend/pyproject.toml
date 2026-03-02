@@ -16,9 +16,15 @@ dependencies = [
     "httpx>=0.26.0",
     "python-multipart>=0.0.6",
     "pypdf>=3.17.0",
+    "json-repair>=0.28.0",
+]
+
+# Install local inference dependencies with: uv sync --extra local
+# These pull in CUDA/CTranslate2 wheels (~2 GB) not needed for cloud deployments.
+[project.optional-dependencies]
+local = [
     "faster-whisper>=1.0.0",
     "sentence-transformers>=2.2.0",
-    "json-repair>=0.28.0",
 ]
 
 [build-system]

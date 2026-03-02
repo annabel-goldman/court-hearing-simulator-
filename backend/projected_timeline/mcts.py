@@ -22,11 +22,12 @@ thousands per second even on CPU.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
 import random
 from typing import Callable, Dict, List, Optional
+
+import anyio
 
 logger = logging.getLogger("court-simulator.projected_timeline.mcts")
 
@@ -330,7 +331,7 @@ def run_generation(
     n_sims: int = 800,
     top_k: int = 10,
     root_label: str = "",
-) -> List[List[Dict]]:
+) -> tuple[List[List[Dict]], dict]:
     """
     Run MCTS over the topic pool and return top_k distinct ordered paths.
 
@@ -409,7 +410,7 @@ def run_projection(
     n_sims: int = 150,
     root_label: str = "",
     quality_map: Optional[Dict[str, float]] = None,
-) -> List[str]:
+) -> tuple[List[str], dict]:
     """
     Given the unaddressed topics at the current hearing state, run MCTS
     and return an ordered list of topic titles (most-likely-next first).
@@ -513,7 +514,7 @@ async def _run_mcts_streaming(
 
         # Yield to event loop periodically so SSE can flush
         if i % yield_every == 0:
-            await asyncio.sleep(0)
+            await anyio.sleep(0)
 
     return root, _seq
 
@@ -524,7 +525,7 @@ async def run_generation_streaming(
     n_sims: int = 800,
     top_k: int = 10,
     root_label: str = "",
-) -> tuple[List[List[Dict]], dict]:
+) -> tuple[list[list[dict]], dict]:
     """
     Async version of run_generation.  Calls `on_expand` for every new node
     so the SSE endpoint can stream them to the client in real time.
