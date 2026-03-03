@@ -31,7 +31,7 @@ class MultiAgentLLM:
     Handles all LLM interactions for the multi-agent system.
     """
 
-    def __init__(self, model: str = "gpt-4"):
+    def __init__(self, model: str = "gpt-4o-mini"):
         """
         Initialize the LLM service.
         

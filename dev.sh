@@ -17,6 +17,36 @@ else
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Color filter for backend output
+# Highlights judge/orchestrator decision events; dims httpx noise.
+#
+# Key patterns to watch:
+#   [★ ASKED ★]   — a question was fired (bright green)
+#   [SUMMARY]     — one-line pass result for all agents (bold white)
+#   [EVAL]        — pass started, shows transcript snippet (cyan)
+#   [CANDIDATE]   — agent wants to ask and passed threshold (yellow)
+#   [PASS]        — agent evaluated but won't ask this pass (dim)
+#   blocked by    — gate blocked evaluation (dim yellow)
+#   429           — rate limit hit (red)
+# ---------------------------------------------------------------------------
+_colorize_backend() {
+  awk '
+    /\[★ ASKED ★\]/   { printf "\033[1;32m%s\033[0m\n", $0; next }
+    /\[SUMMARY\]/     { printf "\033[1;37m%s\033[0m\n", $0; next }
+    /\[EVAL\]/        { printf "\033[36m%s\033[0m\n",   $0; next }
+    /\[CANDIDATE\]/   { printf "\033[33m%s\033[0m\n",   $0; next }
+    /\[PASS\]/        { printf "\033[2m%s\033[0m\n",    $0; next }
+    /blocked by/      { printf "\033[2;33m%s\033[0m\n", $0; next }
+    /skipping eval/   { printf "\033[2;33m%s\033[0m\n", $0; next }
+    /429 Too Many/    { printf "\033[1;31m%s\033[0m\n", $0; next }
+    /Retrying/        { printf "\033[31m%s\033[0m\n",   $0; next }
+    /HTTP Request/    { printf "\033[2m%s\033[0m\n",    $0; next }
+    /connection open|connection closed/ { printf "\033[2m%s\033[0m\n", $0; next }
+    { print }
+  '
+}
+
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM
@@ -47,7 +77,7 @@ echo "[dev] Starting backend on http://localhost:8000"
 (
   cd "$ROOT_DIR/backend"
   bash run.sh
-) &
+) 2>&1 | _colorize_backend &
 BACKEND_PID=$!
 
 echo "[dev] Starting frontend on http://localhost:5173"
@@ -60,6 +90,7 @@ FRONTEND_PID=$!
 echo "[dev] Backend PID: $BACKEND_PID"
 echo "[dev] Frontend PID: $FRONTEND_PID"
 echo "[dev] Press Ctrl+C to stop both services."
+echo "[dev] Judge debug legend: [EVAL]=pass start [CANDIDATE]=wants to ask [SUMMARY]=pass result [★ ASKED ★]=question fired"
 
 while true; do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then

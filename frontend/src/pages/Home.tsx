@@ -65,6 +65,7 @@ export default function Home() {
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
   const [loadingA, setLoadingA] = useState(false)
   const [loadingB, setLoadingB] = useState(false)
+  const [loadingSample, setLoadingSample] = useState(false)
   const [dragOverA, setDragOverA] = useState(false)
   const [dragOverB, setDragOverB] = useState(false)
   const [landingActivated, setLandingActivated] = useState(false)
@@ -522,6 +523,38 @@ export default function Home() {
     if (inputRefB.current) inputRefB.current.value = ''
   }
 
+  const loadSampleBriefs = async () => {
+    if (intakeLocked || loadingSample) return
+    setLoadingSample(true)
+    setLoadingA(true)
+    setLoadingB(true)
+    setError('')
+    try {
+      const BASE = import.meta.env.BASE_URL
+      const [resA, resB] = await Promise.all([
+        fetch(`${BASE}sample-briefs/petitioner-2024.pdf`),
+        fetch(`${BASE}sample-briefs/respondent-2024.pdf`),
+      ])
+      if (!resA.ok || !resB.ok) throw new Error('Could not fetch sample briefs')
+      const [blobA, blobB] = await Promise.all([resA.blob(), resB.blob()])
+      const fileObjA = new File([blobA], 'Petitioner-Brief-Harvard-2024.pdf', { type: 'application/pdf' })
+      const fileObjB = new File([blobB], 'Respondent-Brief-Harvard-2024.pdf', { type: 'application/pdf' })
+      const [textA, textB] = await Promise.all([
+        extractTextFromPdf(fileObjA),
+        extractTextFromPdf(fileObjB),
+      ])
+      setFileA({ name: fileObjA.name, text: textA })
+      setFileB({ name: fileObjB.name, text: textB })
+      playUploadSound()
+    } catch (err) {
+      setError(`Failed to load sample briefs: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      setLoadingSample(false)
+      setLoadingA(false)
+      setLoadingB(false)
+    }
+  }
+
   const enterDeskStage = async () => {
     await unlockAudio()
     playUploadSound()
@@ -680,10 +713,23 @@ export default function Home() {
             )}
           </div>
 
+          {!fileA && !fileB && !intakeLocked && (
+            <div className="sample-briefs-row">
+              <button
+                type="button"
+                className="sample-briefs-btn"
+                onClick={loadSampleBriefs}
+                disabled={loadingSample}
+              >
+                {loadingSample ? 'Loading sample briefs…' : 'Use Harvard Law 2024 sample briefs'}
+              </button>
+            </div>
+          )}
+
           <div className="session-duration-row">
             <span className="session-duration-label">Session length</span>
             <div className="session-duration-pills">
-              {[60, 120, 180, 300, 600].map((secs) => (
+              {[60, 120, 180, 300, 600, 900].map((secs) => (
                 <button
                   key={secs}
                   type="button"

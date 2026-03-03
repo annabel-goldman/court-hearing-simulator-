@@ -698,6 +698,35 @@ body {
   min-height: 320px;
 }
 
+.sample-briefs-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+
+.sample-briefs-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: #475569;
+  transition: color 0.15s;
+}
+
+.sample-briefs-btn:hover:not(:disabled) {
+  color: #cbd5e1;
+}
+
+.sample-briefs-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .session-duration-row {
   display: flex;
   align-items: center;

@@ -40,6 +40,7 @@ DEDUP_SIMILARITY_THRESHOLD = 0.85
 # This gates against "everything is relevant" LLM inflation.
 MIN_RELEVANCE_TO_ASK = 7
 
+
 # Judge speech pacing should align with frontend timing.
 JUDGE_MS_PER_WORD = 400
 JUDGE_MIN_SPEAKING_TIME_MS = 3000
@@ -759,10 +760,17 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
 
     agent_states: dict = multi_agent_config.setdefault("agent_states", {})
     total_agents = len(agents)
-    # Fix 4: Collect all willing candidates in this pass; pick highest relevance at the end.
     candidates = []  # List of (agent, agent_index, question, relevance)
-    # Track per-agent evaluation results for the sentiment broadcast.
     evaluated_in_pass: dict = {}  # agent_id -> {relevance, should_ask, on_cooldown}
+
+    # Log a snippet of what was recently said to help correlate with agent decisions.
+    recent_snippet = transcript[-120:].replace('\n', ' ').strip()
+    words_since_last = transcript_word_count - session.get('transcript_words_at_last_question', 0)
+    logger.info(
+        f"[Orchestrator][EVAL] Session {session_id}: "
+        f"new_words={words_since_last} questions_asked={len(asked_texts)} "
+        f"recent=\"...{recent_snippet}\""
+    )
 
     for checked_count in range(max_agents_per_pass):
         agent_index = (next_agent_index + checked_count) % total_agents
@@ -804,20 +812,21 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         except Exception as exc:
             logger.error(f"[Orchestrator] Agent check failed for {agent.name}: {exc}")
             should_ask, question, relevance = False, None, 1
-        logger.info(
-            f"[Orchestrator][DBG] Session {session_id}: agent result id={agent.id} "
-            f"should_ask={should_ask} question_present={bool(question and str(question).strip())} "
-            f"relevance={relevance}"
-        )
         evaluated_in_pass[agent.id] = {"relevance": relevance, "should_ask": should_ask, "on_cooldown": False}
 
         if should_ask and question and relevance >= MIN_RELEVANCE_TO_ASK:
+            logger.info(
+                f"[Orchestrator][CANDIDATE] {agent.name}: rel={relevance} wants_to_ask=YES "
+                f"q=\"{str(question).strip()[:80]}\""
+            )
             candidates.append((agent, agent_index, question, relevance))
         elif should_ask and question and relevance < MIN_RELEVANCE_TO_ASK:
             logger.info(
-                f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
-                f"below relevance threshold (relevance={relevance} < {MIN_RELEVANCE_TO_ASK}), skipping"
+                f"[Orchestrator][PASS] {agent.name}: rel={relevance} wants_to_ask=YES "
+                f"-> below threshold ({MIN_RELEVANCE_TO_ASK}), skipping"
             )
+        else:
+            logger.info(f"[Orchestrator][PASS] {agent.name}: rel={relevance} wants_to_ask=NO")
 
     # Broadcast agent sentiment scores so the frontend can show live eagerness.
     score_payload = [
@@ -832,6 +841,22 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         for ag in agents
     ]
     await manager.send_json(session_id, {"type": "agent_scores", "data": {"scores": score_payload}})
+
+    # One-line pass summary — easy to grep for.
+    summary_parts = []
+    for ag in agents:
+        e = evaluated_in_pass.get(ag.id)
+        if e is None:
+            summary_parts.append(f"{ag.name}[skip]")
+        elif e["on_cooldown"]:
+            summary_parts.append(f"{ag.name}[COOL]")
+        elif e["should_ask"] and (e["relevance"] or 0) >= MIN_RELEVANCE_TO_ASK:
+            summary_parts.append(f"{ag.name}[WANT:{e['relevance']}]")
+        elif e["should_ask"]:
+            summary_parts.append(f"{ag.name}[low:{e['relevance']}]")
+        else:
+            summary_parts.append(f"{ag.name}[no:{e['relevance']}]")
+    logger.info(f"[Orchestrator][SUMMARY] {' | '.join(summary_parts)}")
 
     if not candidates:
         multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
@@ -941,8 +966,8 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         }
     })
     logger.info(
-        f"[Orchestrator] Session {session_id}: {selected_agent.name} asked (relevance={selected_relevance}) "
-        f"-> {selected_question[:80]}..."
+        f"[Orchestrator][★ ASKED ★] {selected_agent.name} (rel={selected_relevance}): "
+        f"{selected_question}"
     )
     return True
 
