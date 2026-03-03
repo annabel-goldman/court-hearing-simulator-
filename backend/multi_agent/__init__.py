@@ -30,13 +30,16 @@ from .models import Agent
 from .service import MultiAgentService, multi_agent_service
 from .storage import AgentStorage, agent_storage
 from .llm import MultiAgentLLM, multi_agent_llm
+from .similarity import get_embedding, is_semantic_duplicate
 
 __all__ = [
     "Agent",
     "MultiAgentService",
     "multi_agent_service",
-    "AgentStorage", 
+    "AgentStorage",
     "agent_storage",
     "MultiAgentLLM",
     "multi_agent_llm",
+    "get_embedding",
+    "is_semantic_duplicate",
 ]

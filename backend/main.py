@@ -23,7 +23,7 @@ from services.judge_engine import JudgeEngine
 from services.tts_provider import get_tts_provider
 from services.stt_provider import get_stt_provider
 from services.case_ingestion import CaseIngestionService
-from multi_agent import multi_agent_service, Agent
+from multi_agent import multi_agent_service, Agent, get_embedding, is_semantic_duplicate
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +33,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger('court-simulator')
 
+
+DEDUP_SIMILARITY_THRESHOLD = 0.85
 
 # Judge speech pacing should align with frontend timing.
 JUDGE_MS_PER_WORD = 400
@@ -126,6 +128,7 @@ class ConnectionManager:
             self.session_data[session_id] = {
                 'transcript': '',
                 'questions_asked': [],
+                'question_embeddings': [],
                 'phase': 'OFF_RECORD',
                 'question_cutoff': False,
                 'next_question_allowed_at': None,
@@ -590,12 +593,19 @@ async def _do_check_and_trigger_interrupt(session_id, session, engine, tts):
     )
 
     if should and question:
+        stored_embeddings = session.get('question_embeddings', [])
+        embedding = await get_embedding(question)
+        if embedding and is_semantic_duplicate(embedding, stored_embeddings, DEDUP_SIMILARITY_THRESHOLD):
+            logger.info(f"[Judge][DBG] Session {session_id}: question is semantically duplicate, skipping")
+            return
         source = {"type": "judge_engine", "strategy": "single_judge"}
         session['questions_asked'].append({
             "question": question,
             "source": source,
             "timestamp": datetime.now().isoformat(),
         })
+        if embedding:
+            session['question_embeddings'].append(embedding)
         _mark_question_scheduled(session, question)
         audio = await tts.synthesize(question, voice="onyx")
         await manager.send_json(session_id, {
@@ -655,12 +665,20 @@ async def trigger_silence_interrupt(session_id: str, engine: JudgeEngine, tts) -
     if not question:
         question = "Counsel, you've paused. What is your strongest legal point right now?"
 
+    stored_embeddings = session.get('question_embeddings', [])
+    silence_embedding = await get_embedding(question)
+    if silence_embedding and is_semantic_duplicate(silence_embedding, stored_embeddings, DEDUP_SIMILARITY_THRESHOLD):
+        logger.info(f"[Judge][DBG] Session {session_id}: silence question is semantically duplicate, skipping")
+        return
+
     source = {"type": "judge_engine", "strategy": "silence_trigger"}
     session["questions_asked"].append({
         "question": question,
         "source": source,
         "timestamp": datetime.now().isoformat(),
     })
+    if silence_embedding:
+        session['question_embeddings'].append(silence_embedding)
     _mark_question_scheduled(session, question)
 
     # Keep the judge context in sync so follow-up questions can avoid repetition.
@@ -795,15 +813,36 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         )
         return False
 
+    # Semantic dedup: filter candidates whose question is too similar to any previously asked question.
+    stored_embeddings = session.get('question_embeddings', [])
+    non_duplicate_candidates = []
+    for agent, agent_index, question, relevance in candidates:
+        embedding = await get_embedding(question)
+        if embedding is None or not is_semantic_duplicate(embedding, stored_embeddings, DEDUP_SIMILARITY_THRESHOLD):
+            non_duplicate_candidates.append((agent, agent_index, question, relevance, embedding))
+        else:
+            logger.info(
+                f"[Orchestrator][DBG] Session {session_id}: candidate from {agent.name} "
+                f"is semantically duplicate, skipping"
+            )
+
+    if not non_duplicate_candidates:
+        multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
+        logger.info(
+            f"[Orchestrator][DBG] Session {session_id}: all candidates were semantic duplicates; "
+            f"next_index={multi_agent_config['next_agent_index']}"
+        )
+        return False
+
     # Fix 4: Pick the highest-relevance candidate; ties broken by round-robin order (list position).
-    selected_agent, selected_agent_index, selected_question, selected_relevance = max(
-        candidates, key=lambda x: x[3]
+    selected_agent, selected_agent_index, selected_question, selected_relevance, selected_embedding = max(
+        non_duplicate_candidates, key=lambda x: x[3]
     )
     multi_agent_config["next_agent_index"] = (selected_agent_index + 1) % total_agents
     logger.info(
         f"[Orchestrator][DBG] Session {session_id}: selected agent id={selected_agent.id} "
         f"name={selected_agent.name} relevance={selected_relevance} "
-        f"from {len(candidates)} candidate(s)"
+        f"from {len(non_duplicate_candidates)} non-duplicate candidate(s)"
     )
 
     source = {
@@ -818,6 +857,8 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         "source": source,
         "timestamp": datetime.now().isoformat(),
     })
+    if selected_embedding:
+        session['question_embeddings'].append(selected_embedding)
     _mark_question_scheduled(session, selected_question)
 
     # Fix 3: Record when this agent last asked and how many words were in the transcript.
