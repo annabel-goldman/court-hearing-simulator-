@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 from services.judge_engine import JudgeEngine
+from services.opponent_engine import OpponentEngine
 from services.tts_provider import get_tts_provider
 from services.stt_provider import get_stt_provider
 from services.case_ingestion import CaseIngestionService
@@ -39,6 +40,41 @@ from model_router import (
     log_config as log_model_config,
     probe_all_tiers,
     _background_reachability_refresh,
+    apply_runtime_override,
+    clear_runtime_override,
+    ModelTier,
+    extract_content,
+    task_extra_body,
+)
+from services.judge_config import (
+    load_config as load_judge_config,
+    save_config as save_judge_config,
+    get_default_config as get_default_judge_config,
+    RewardDimension as JudgeRewardDimension,
+    ExternalLLMConfig as JudgeExternalLLMConfig,
+    JudgeConfig,
+    config_to_dict as judge_config_to_dict,
+)
+from services.opponent_config import (
+    load_config as load_opponent_config,
+    save_config as save_opponent_config,
+    get_default_config as get_default_opponent_config,
+    OpponentConfig,
+    config_to_dict as opponent_config_to_dict,
+)
+from services.media_config import (
+    load_tts_config, save_tts_config,
+    get_default_tts_config,
+    load_stt_config, save_stt_config,
+    get_default_stt_config,
+    TTSConfig, STTConfig,
+    config_to_dict as media_config_to_dict,
+)
+from services.model_config import (
+    load_model_config, save_model_config,
+    get_default_model_config,
+    ModelRuntimeConfig, TierConfig,
+    config_to_dict as model_config_to_dict,
 )
 
 # Configure logging
@@ -113,6 +149,55 @@ class AgentConfig(BaseModel):
     example_questions: List[str]
     extra_prompt: str
     version: Optional[int] = None
+
+class RewardDimensionModel(BaseModel):
+    name: str
+    weight: float
+    description: str
+
+class ExternalLLMConfigModel(BaseModel):
+    enabled: bool = False
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    tier_override: str = "LARGE"
+
+class JudgeConfigRequest(BaseModel):
+    judge_prompt: str
+    scoring_prompt_template: str
+    reward_dimensions: List[RewardDimensionModel]
+    external_llm: ExternalLLMConfigModel = ExternalLLMConfigModel()
+
+class OpponentConfigRequest(BaseModel):
+    system_prompt: str
+    aggressiveness: float = 0.7
+    enabled_types: List[str] = ["rebuttal", "exploitation", "affirmative"]
+
+class TTSConfigRequest(BaseModel):
+    enabled: bool = True
+    api_key: str = ""
+    base_url: str = ""
+    voice: str = "onyx"
+    model: str = "tts-1"
+
+class STTConfigRequest(BaseModel):
+    provider: str = "openai"
+    api_key: str = ""
+    base_url: str = ""
+    whisper_model: str = "medium"
+    device: str = "cuda"
+    compute_type: str = "float16"
+
+class TierConfigRequest(BaseModel):
+    enabled: bool = False
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+class ModelRuntimeConfigRequest(BaseModel):
+    large: TierConfigRequest = TierConfigRequest()
+    small: TierConfigRequest = TierConfigRequest()
+    tiny:  TierConfigRequest = TierConfigRequest()
 
 # -----------------------------------------------------------------------------
 # App Setup
@@ -210,6 +295,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 global_judge_engine = JudgeEngine()
+global_opponent_engine = OpponentEngine()
 
 
 # -----------------------------------------------------------------------------
@@ -260,6 +346,11 @@ async def synthesize_question(request: SynthesisRequest):
 async def get_scores(session_id: str):
     """Return cumulative argument scores for both sides of a judge session."""
     return global_judge_engine.get_session_scores(session_id)
+
+@app.get("/api/opponent/{session_id}")
+async def get_opponent_summary(session_id: str):
+    """Return the opponent engine's argument history for a session."""
+    return global_opponent_engine.get_session_summary(session_id)
 
 @app.post("/api/tts")
 async def text_to_speech(request: TTSRequest):
@@ -406,9 +497,10 @@ async def generate_judge_intro(request: JudgeIntroRequest):
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=600,
+            extra_body=task_extra_body("judge_intro"),
         )
-        intro_text = resp.choices[0].message.content.strip().strip('"')
+        intro_text = extract_content(resp).strip('"')
     except Exception as e:
         logger.error("Judge intro generation failed: %s", e)
         intro_text = (
@@ -425,6 +517,247 @@ async def generate_judge_intro(request: JudgeIntroRequest):
         audio = ""
 
     return {"text": intro_text, "audio": audio, "format": tts_provider.audio_format}
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def _redact_api_keys(d):
+    """Recursively replace every 'api_key' value with '' before sending to the client."""
+    if isinstance(d, dict):
+        return {k: ("" if k == "api_key" else _redact_api_keys(v)) for k, v in d.items()}
+    return d
+
+
+# -----------------------------------------------------------------------------
+# Judge Configuration endpoints
+# -----------------------------------------------------------------------------
+
+@app.get("/api/judge-config")
+async def get_judge_config():
+    """Return the current judge configuration (loaded from disk)."""
+    cfg = await anyio.to_thread.run_sync(load_judge_config)
+    return _redact_api_keys(judge_config_to_dict(cfg))
+
+
+@app.get("/api/judge-config/default")
+async def get_default_judge_config_endpoint():
+    """Return the hardcoded default judge configuration (never reads disk)."""
+    return _redact_api_keys(judge_config_to_dict(get_default_judge_config()))
+
+
+@app.post("/api/judge-config")
+async def save_judge_config_endpoint(req: JudgeConfigRequest):
+    """Validate and persist judge configuration; apply/clear runtime LLM overrides."""
+    # Validate reward dimensions
+    if not req.reward_dimensions:
+        raise HTTPException(status_code=422, detail="reward_dimensions must not be empty")
+    if any(d.weight <= 0 for d in req.reward_dimensions):
+        raise HTTPException(status_code=422, detail="All reward dimension weights must be > 0")
+    weight_sum = sum(d.weight for d in req.reward_dimensions)
+    if abs(weight_sum - 1.0) > 0.01:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Reward dimension weights must sum to 1.0 (got {weight_sum:.4f})"
+        )
+
+    ext = req.external_llm
+    if ext.enabled:
+        if not ext.base_url.strip():
+            raise HTTPException(status_code=422, detail="external_llm.base_url is required when enabled")
+        if not ext.api_key.strip():
+            raise HTTPException(status_code=422, detail="external_llm.api_key is required when enabled")
+        if not ext.model.strip():
+            raise HTTPException(status_code=422, detail="external_llm.model is required when enabled")
+        if ext.tier_override not in ("LARGE", "SMALL", "BOTH"):
+            raise HTTPException(status_code=422, detail="tier_override must be LARGE, SMALL, or BOTH")
+
+    # Build dataclass objects
+    cfg = JudgeConfig(
+        judge_prompt=req.judge_prompt,
+        scoring_prompt_template=req.scoring_prompt_template,
+        reward_dimensions=[
+            JudgeRewardDimension(name=d.name, weight=d.weight, description=d.description)
+            for d in req.reward_dimensions
+        ],
+        external_llm=JudgeExternalLLMConfig(
+            enabled=ext.enabled,
+            base_url=ext.base_url,
+            api_key=ext.api_key,
+            model=ext.model,
+            tier_override=ext.tier_override,
+        ),
+    )
+
+    await anyio.to_thread.run_sync(lambda: save_judge_config(cfg))
+
+    # Apply or clear runtime model-tier overrides
+    if ext.enabled:
+        tier_map = {
+            "LARGE": [ModelTier.LARGE],
+            "SMALL": [ModelTier.SMALL],
+            "BOTH":  [ModelTier.LARGE, ModelTier.SMALL],
+        }
+        for tier in tier_map[ext.tier_override]:
+            apply_runtime_override(tier, ext.base_url, ext.model, ext.api_key)
+    else:
+        clear_runtime_override(ModelTier.LARGE)
+        clear_runtime_override(ModelTier.SMALL)
+
+    return _redact_api_keys(judge_config_to_dict(cfg))
+
+
+# -----------------------------------------------------------------------------
+# Opponent Configuration endpoints
+# -----------------------------------------------------------------------------
+
+@app.get("/api/opponent-config")
+async def get_opponent_config():
+    """Return the current opponent configuration (loaded from disk)."""
+    cfg = await anyio.to_thread.run_sync(load_opponent_config)
+    return opponent_config_to_dict(cfg)
+
+
+@app.get("/api/opponent-config/default")
+async def get_default_opponent_config_endpoint():
+    """Return the hardcoded default opponent configuration (no disk I/O)."""
+    return opponent_config_to_dict(get_default_opponent_config())
+
+
+@app.post("/api/opponent-config")
+async def save_opponent_config_endpoint(req: OpponentConfigRequest):
+    """Validate and persist opponent configuration."""
+    # Validate aggressiveness range
+    if not (0.0 <= req.aggressiveness <= 1.0):
+        raise HTTPException(status_code=422, detail="aggressiveness must be between 0.0 and 1.0")
+
+    # Validate enabled_types
+    valid_types = {"rebuttal", "exploitation", "affirmative"}
+    for t in req.enabled_types:
+        if t not in valid_types:
+            raise HTTPException(status_code=422, detail=f"Invalid response type: {t}")
+    if not req.enabled_types:
+        raise HTTPException(status_code=422, detail="At least one response type must be enabled")
+
+    cfg = OpponentConfig(
+        system_prompt=req.system_prompt,
+        aggressiveness=req.aggressiveness,
+        enabled_types=req.enabled_types,
+    )
+    await anyio.to_thread.run_sync(lambda: save_opponent_config(cfg))
+    return opponent_config_to_dict(cfg)
+
+
+# -----------------------------------------------------------------------------
+# TTS Configuration endpoints
+# -----------------------------------------------------------------------------
+
+@app.get("/api/tts-config")
+async def get_tts_config_endpoint():
+    cfg = await anyio.to_thread.run_sync(load_tts_config)
+    return _redact_api_keys(media_config_to_dict(cfg))
+
+@app.get("/api/tts-config/default")
+async def get_default_tts_config_endpoint():
+    return _redact_api_keys(media_config_to_dict(get_default_tts_config()))
+
+@app.post("/api/tts-config")
+async def save_tts_config_endpoint(req: TTSConfigRequest):
+    valid_voices = {"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "shimmer", "verse"}
+    if req.voice not in valid_voices:
+        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(valid_voices)}")
+    if not req.model.strip():
+        raise HTTPException(status_code=422, detail="model must not be empty")
+    cfg = TTSConfig(
+        enabled=req.enabled,
+        api_key=req.api_key,
+        base_url=req.base_url,
+        voice=req.voice,
+        model=req.model,
+    )
+    await anyio.to_thread.run_sync(lambda: save_tts_config(cfg))
+    return _redact_api_keys(media_config_to_dict(cfg))
+
+
+# -----------------------------------------------------------------------------
+# STT Configuration endpoints
+# -----------------------------------------------------------------------------
+
+@app.get("/api/stt-config")
+async def get_stt_config_endpoint():
+    cfg = await anyio.to_thread.run_sync(load_stt_config)
+    return _redact_api_keys(media_config_to_dict(cfg))
+
+@app.get("/api/stt-config/default")
+async def get_default_stt_config_endpoint():
+    return _redact_api_keys(media_config_to_dict(get_default_stt_config()))
+
+@app.post("/api/stt-config")
+async def save_stt_config_endpoint(req: STTConfigRequest):
+    if req.provider not in ("openai", "local"):
+        raise HTTPException(status_code=422, detail="provider must be 'openai' or 'local'")
+    valid_local_models = {"tiny", "base", "small", "medium", "large-v3"}
+    if req.provider == "local" and req.whisper_model not in valid_local_models:
+        raise HTTPException(status_code=422, detail=f"whisper_model must be one of {sorted(valid_local_models)}")
+    if req.device not in ("cuda", "cpu"):
+        raise HTTPException(status_code=422, detail="device must be 'cuda' or 'cpu'")
+    valid_compute = {"float16", "int8_float16", "int8"}
+    if req.compute_type not in valid_compute:
+        raise HTTPException(status_code=422, detail=f"compute_type must be one of {sorted(valid_compute)}")
+    cfg = STTConfig(
+        provider=req.provider,
+        api_key=req.api_key,
+        base_url=req.base_url,
+        whisper_model=req.whisper_model,
+        device=req.device,
+        compute_type=req.compute_type,
+    )
+    await anyio.to_thread.run_sync(lambda: save_stt_config(cfg))
+    return _redact_api_keys(media_config_to_dict(cfg))
+
+
+# -----------------------------------------------------------------------------
+# Model tier runtime configuration endpoints
+# -----------------------------------------------------------------------------
+
+@app.get("/api/model-config")
+async def get_model_config_endpoint():
+    cfg = await anyio.to_thread.run_sync(load_model_config)
+    return _redact_api_keys(model_config_to_dict(cfg))
+
+@app.get("/api/model-config/default")
+async def get_default_model_config_endpoint():
+    return _redact_api_keys(model_config_to_dict(get_default_model_config()))
+
+@app.post("/api/model-config")
+async def save_model_config_endpoint(req: ModelRuntimeConfigRequest):
+    """Apply per-tier runtime overrides and persist to disk."""
+    tier_map = {
+        ModelTier.LARGE: req.large,
+        ModelTier.SMALL: req.small,
+        ModelTier.TINY:  req.tiny,
+    }
+    for tier, tcfg in tier_map.items():
+        if tcfg.enabled:
+            if not tcfg.base_url.strip():
+                raise HTTPException(status_code=422, detail=f"{tier.value}.base_url is required when enabled")
+            if not tcfg.model.strip():
+                raise HTTPException(status_code=422, detail=f"{tier.value}.model is required when enabled")
+            apply_runtime_override(tier, tcfg.base_url, tcfg.model, tcfg.api_key)
+        else:
+            clear_runtime_override(tier)
+
+    cfg = ModelRuntimeConfig(
+        large=TierConfig(enabled=req.large.enabled, base_url=req.large.base_url,
+                         api_key=req.large.api_key, model=req.large.model),
+        small=TierConfig(enabled=req.small.enabled, base_url=req.small.base_url,
+                         api_key=req.small.api_key, model=req.small.model),
+        tiny= TierConfig(enabled=req.tiny.enabled,  base_url=req.tiny.base_url,
+                         api_key=req.tiny.api_key,  model=req.tiny.model),
+    )
+    await anyio.to_thread.run_sync(lambda: save_model_config(cfg))
+    return _redact_api_keys(model_config_to_dict(cfg))
 
 
 # -----------------------------------------------------------------------------
@@ -663,11 +996,19 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                         # Initialize session with agents and brief summary
                         agents_data = payload.get('agents', [])
                         agents = [Agent.from_dict(a) for a in agents_data]
+                        brief_summary = payload.get('brief_summary', '')
+                        opposing_brief = payload.get('opposing_brief', '')
                         multi_agent_manager.session_data[session_id].update({
                             'agents': agents,
-                            'brief_summary': payload.get('brief_summary', ''),
+                            'brief_summary': brief_summary,
+                            'opposing_brief': opposing_brief,
                             'phase': 'READY'
                         })
+                        # Initialise opponent engine with the opposing brief
+                        if opposing_brief:
+                            global_opponent_engine.init_session(
+                                session_id, opposing_brief, brief_summary,
+                            )
                         await multi_agent_manager.send_json(session_id, {
                             "type": "config_ack",
                             "data": {"status": "ready", "agent_count": len(agents)}
@@ -723,6 +1064,60 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                         )
                                     tg.start_soon(_fire_questions)
 
+                                    # Fire-and-forget argument scoring — runs in background
+                                    # so it never adds latency to the receive loop.
+                                    async def _fire_score(text=flushed, sid=session_id):
+                                        s = multi_agent_manager.session_data.get(sid, {})
+                                        brief = (s.get('brief_summary') or '').strip() or None
+                                        last_q_obj = ((s.get('questions_asked') or []) + [None])[-1]
+                                        last_q_text = last_q_obj.get('question') if last_q_obj else None
+                                        score = await global_judge_engine.score_argument(
+                                            sid, 'appellant', text,
+                                            brief_summary=brief,
+                                            judge_question_answered=last_q_text,
+                                        )
+                                        if score:
+                                            await multi_agent_manager.send_json(sid, {
+                                                "type": "argument_score",
+                                                "data": {
+                                                    "speaker": score.speaker,
+                                                    "clarity": round(score.clarity, 1),
+                                                    "legal_reasoning": round(score.legal_reasoning, 1),
+                                                    "responsiveness": round(score.responsiveness, 1),
+                                                    "persuasiveness": round(score.persuasiveness, 1),
+                                                    "overall": round(score.overall, 1),
+                                                    "feedback": score.feedback,
+                                                },
+                                            })
+                                    tg.start_soon(_fire_score)
+
+                                    # Fire-and-forget opponent response — adaptive respondent
+                                    # rebuttal using the opposing brief as context.
+                                    async def _fire_opponent(text=flushed, sid=session_id, ts=tracker_state, pn=predicted_next):
+                                        traj_ctx = (
+                                            _build_trajectory_context(ts, pn or [])
+                                            if ts else None
+                                        )
+                                        opp = await global_opponent_engine.generate_response(
+                                            sid, text, trajectory_context=traj_ctx,
+                                        )
+                                        if opp:
+                                            tts = get_tts_provider()
+                                            audio_b64 = await tts.synthesize(opp.argument)
+                                            await multi_agent_manager.send_json(sid, {
+                                                "type": "opponent_response",
+                                                "data": {
+                                                    "response_type": opp.response_type,
+                                                    "argument": opp.argument,
+                                                    "strategy_note": opp.strategy_note,
+                                                    "topic": opp.topic,
+                                                    "strength": round(opp.strength, 1),
+                                                    "timestamp": datetime.now().isoformat(),
+                                                    "audio": audio_b64 or None,
+                                                    "audio_format": tts.audio_format if audio_b64 else None,
+                                                },
+                                            })
+                                    tg.start_soon(_fire_opponent)
                                 # Silence-flush timer: if no new audio arrives within
                                 # SILENCE_FLUSH_TIMEOUT seconds, auto-flush the remaining
                                 # buffer so agents can respond to a natural pause.
@@ -834,10 +1229,12 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                         })
 
     except WebSocketDisconnect:
-        multi_agent_manager.disconnect(session_id)
+        pass
     except Exception as e:
         logger.error(f"Multi-agent WebSocket error: {e}")
+    finally:
         multi_agent_manager.disconnect(session_id)
+        global_opponent_engine.evict_session(session_id)
 
 
 async def generate_counter_argument(
@@ -864,9 +1261,10 @@ async def generate_counter_argument(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=150,
+        max_tokens=500,
+        extra_body=task_extra_body("counter_argument"),
     )
-    return resp.choices[0].message.content.strip()
+    return extract_content(resp)
 
 
 def _format_agenda_confidences(state) -> list:
@@ -1121,6 +1519,71 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
     return state, predicted_next
 
 
+async def _select_best_question(
+    candidates: list,
+    transcript: str,
+    brief_summary: str,
+) -> tuple:
+    """Use the TINY model to pick the best question from agent candidates.
+
+    Parameters
+    ----------
+    candidates : list of (Agent, question_str)
+    transcript : recent advocate speech
+    brief_summary : judicial summary for context
+
+    Returns (agent, question) — the selected winner.  Falls back to
+    random.choice if the TINY model is unavailable or parsing fails.
+    """
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else (None, None)
+
+    client, model = get_task_client("question_selection")
+    if not client:
+        return random.choice(candidates)
+
+    q_list = "\n".join(
+        f"{i + 1}. [{agent.name}]: {question}"
+        for i, (agent, question) in enumerate(candidates)
+    )
+
+    prompt = (
+        "You are selecting the single best judicial question to ask during "
+        "a moot-court hearing.\n\n"
+        f"RECENT TRANSCRIPT:\n{transcript[-800:]}\n\n"
+        f"CASE SUMMARY:\n{brief_summary[:400]}\n\n"
+        f"CANDIDATE QUESTIONS:\n{q_list}\n\n"
+        "Pick the question that is most:\n"
+        "1. Relevant to what the advocate just argued\n"
+        "2. Substantive and probing\n"
+        "3. Not redundant with recent discussion\n\n"
+        "Respond with ONLY the number (e.g. '1' or '2'). Nothing else."
+    )
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=10,
+            extra_body=task_extra_body("question_selection"),
+        )
+        content = extract_content(response)
+        match = re.search(r"(\d+)", content)
+        if match:
+            idx = int(match.group(1)) - 1
+            if 0 <= idx < len(candidates):
+                logger.info(
+                    "[QuestionSelect] TINY chose candidate %d/%d (%s)",
+                    idx + 1, len(candidates), candidates[idx][0].name,
+                )
+                return candidates[idx]
+    except Exception as e:
+        logger.warning("[QuestionSelect] TINY selection failed: %s — falling back to random", e)
+
+    return random.choice(candidates)
+
+
 async def check_multi_agent_questions(session_id: str, tracker_state=None, predicted_next=None):
     """Check each agent to see if they want to ask a question.
 
@@ -1135,13 +1598,13 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
       of the last agent interrupt.
     - Minimum speech: at least MIN_WORDS_BEFORE_INTERRUPT words must be in the
       transcript before any agent fires.
-    - One-per-cycle: only the first agent that wants to ask fires (prevents
-      overlapping TTS).  The winning agent's question is synthesized to TTS
-      audio and sent alongside the text.
+    - One-per-cycle: a random agent that wants to ask fires (prevents
+      overlapping TTS and adds variety).  The winning agent's question is
+      synthesized to TTS audio and sent alongside the text.
     """
     session = multi_agent_manager.session_data.get(session_id, {})
 
-    # ── Hard constraints — all synchronous, no lock needed ────────────────
+    # ── Quick pre-checks (no lock needed) ─────────────────────────────────
     phase = session.get('phase')
     if phase != 'RECORDING':
         logger.debug("[MultiAgent] Skip interrupt check — phase=%s (need RECORDING)", phase)
@@ -1153,14 +1616,6 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
         logger.debug("[MultiAgent] Skip interrupt — only %d words (need %d)",
                      word_count, multi_agent_manager.MIN_WORDS_BEFORE_INTERRUPT)
         return
-
-    last_interrupt = session.get('last_agent_interrupt_time')
-    if last_interrupt is not None:
-        elapsed = (datetime.now() - last_interrupt).total_seconds()
-        if elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
-            logger.debug("[MultiAgent] Skip interrupt — cooldown %.1fs / %ds",
-                         elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
-            return
 
     # ── Concurrency guard: anyio.Lock with a 30 s timeout ────────────────
     # Only one evaluation cycle runs at a time — prevents a silence-flush
@@ -1178,6 +1633,17 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
 
     # Re-acquire for the duration of the actual evaluation
     async with lock:
+        # ── Re-check cooldown INSIDE the lock ─────────────────────────────
+        # A concurrent call might have fired an agent question between our
+        # initial pre-check and acquiring this lock, so we must re-verify.
+        last_interrupt = session.get('last_agent_interrupt_time')
+        if last_interrupt is not None:
+            elapsed = (datetime.now() - last_interrupt).total_seconds()
+            if elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
+                logger.debug("[MultiAgent] Skip interrupt — cooldown %.1fs / %ds (re-checked inside lock)",
+                             elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
+                return
+
         logger.info("[MultiAgent] Interrupt pre-checks passed (phase=%s, words=%d, agents=%d)",
                     phase, word_count, len(session.get('agents', [])))
 
@@ -1218,18 +1684,23 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
             for i, agent in enumerate(agents):
                 eval_tg.start_soon(_eval_agent, i, agent)
 
-        # Pick the first agent (by original list order) that wants to interrupt
+        # Use TINY model to select the best question from candidates —
+        # adds intelligent selection so the court hears the most relevant
+        # question rather than a random pick.
+        candidates = [(agent, question) for agent, should_ask, question in results
+                      if should_ask and question]
         winner_agent, winner_question = None, None
-        for agent, should_ask, question in results:
-            if should_ask and question:
-                winner_agent, winner_question = agent, question
-                break
+        if candidates:
+            winner_agent, winner_question = await _select_best_question(
+                candidates, transcript, brief_summary,
+            )
 
-        if winner_agent and winner_question:
+        if candidates:
             # Mark interrupt time immediately to prevent overlapping calls
             session['last_agent_interrupt_time'] = datetime.now()
+            now_iso = datetime.now().isoformat()
 
-            # Synthesize TTS audio for the agent's question
+            # Synthesize TTS audio only for the selected winner
             audio_b64 = ""
             audio_format = "opus"
             try:
@@ -1239,22 +1710,33 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
             except Exception as e:
                 logger.warning("[MultiAgent] TTS synthesis failed for %s: %s", winner_agent.name, e)
 
-            question_data = {
-                "agent_id":     winner_agent.id,
-                "agent_name":   winner_agent.name,
-                "color":        winner_agent.color,
-                "question":     winner_question,
-                "timestamp":    datetime.now().isoformat(),
-                "audio":        audio_b64,
-                "audio_format": audio_format,
-            }
-            session['questions_asked'].append(question_data)
+            # Send ALL candidate questions to the frontend (for the per-agent
+            # question grid), but mark only the winner as "selected" so the
+            # Judge Activity feed shows a single voice per cycle.
+            for agent, question in candidates:
+                is_winner = (agent.id == winner_agent.id)
+                question_data = {
+                    "agent_id":     agent.id,
+                    "agent_name":   agent.name,
+                    "color":        agent.color,
+                    "question":     question,
+                    "timestamp":    now_iso,
+                    "selected":     is_winner,
+                    "audio":        audio_b64 if is_winner else "",
+                    "audio_format": audio_format if is_winner else "",
+                }
+                if is_winner:
+                    session['questions_asked'].append(question_data)
+                await multi_agent_manager.send_json(session_id, {
+                    "type": "agent_question",
+                    "data": question_data,
+                })
 
-            await multi_agent_manager.send_json(session_id, {
-                "type": "agent_question",
-                "data": question_data,
-            })
-            logger.info("[MultiAgent] %s interrupted: %s…", winner_agent.name, winner_question[:60])
+            # Record the winner's question into the opponent engine so it can
+            # exploit weaknesses that the panel has identified.
+            global_opponent_engine.record_judge_question(session_id, winner_question)
+            logger.info("[MultiAgent] %s selected (of %d candidates): %s…",
+                        winner_agent.name, len(candidates), winner_question[:60])
 
             # Refresh the agenda panel after the agent interrupts.
             # We do NOT feed the agent question to the tracker as a "judge" turn —

@@ -92,15 +92,12 @@ export function AgentSimulation() {
   const handleBriefsReady = useCallback((user: BriefData, opposing: BriefData) => {
     setUserBrief(user);
     setOpposingBrief(opposing);
-  }, []);
-
-  const handleSummaryGenerated = useCallback((summary: string) => {
-    setBriefSummary(summary);
+    setBriefSummary('An appellate moot-court hearing.');
     setPhase('READY');
   }, []);
 
   const handleStartSimulation = useCallback(async () => {
-    if (!briefSummary || agents.length === 0) return;
+    if (agents.length === 0) return;
 
     if (!isConnected) {
       connect();
@@ -156,7 +153,6 @@ export function AgentSimulation() {
           <div className="ma-main__column">
             <BriefUpload
               onBriefsReady={handleBriefsReady}
-              onSummaryGenerated={handleSummaryGenerated}
             />
 
             {!isLoadingAgents && (
@@ -178,7 +174,7 @@ export function AgentSimulation() {
 
                 {phase === 'SETUP' && (
                   <p className="ma-section__help">
-                    Upload both briefs and generate a summary to enable recording.
+                    Upload both briefs and press Start to enable recording.
                   </p>
                 )}
 

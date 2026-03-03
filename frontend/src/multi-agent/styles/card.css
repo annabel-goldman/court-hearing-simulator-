@@ -6,8 +6,11 @@
 
 .ma-card {
   background-color: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
   border-radius: var(--ma-radius-lg);
   padding: var(--ma-space-lg);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .ma-card--dark {
@@ -35,4 +38,7 @@
 
 .ma-card__content {
   color: var(--ma-text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }

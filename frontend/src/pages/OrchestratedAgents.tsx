@@ -20,29 +20,38 @@ import type {
   Agent,
   AgendaUpdate,
   AgentQuestion,
+  ArgumentScore,
   BriefData,
+  ChatMessage,
   CounterArgument,
   MCTSNode,
   MCTSTree,
+  OpponentResponse,
   SimulationPhase,
 } from '../multi-agent/types';
-import { Card, CardHeader, CardContent, Alert } from '../multi-agent/components/ui';
+import { Alert } from '../multi-agent/components/ui';
 import {
   RecordingControls,
   RecordingStatus,
   TranscriptDisplay,
   QuestionFeed,
-  ActiveAgents,
 } from '../multi-agent/components/features';
 import { BriefUpload } from '../multi-agent/components/BriefUpload';
 import { AgentEditor } from '../multi-agent/components/AgentEditor';
 import { useMultiAgentSocket } from '../multi-agent/hooks/useMultiAgentSocket';
 import { useMediaRecording } from '../multi-agent/hooks/useMediaRecording';
 import { AgendaPanel } from '../orchestrated-agents/AgendaPanel';
-import { CounterArgumentFeed } from '../orchestrated-agents/CounterArgumentFeed';
+import { JudgeConfigPanel } from '../orchestrated-agents/JudgeConfigPanel';
+import { OpponentConfigPanel } from '../orchestrated-agents/OpponentConfigPanel';
+import { SystemConfigPanel } from '../orchestrated-agents/SystemConfigPanel';
+import { JudgeActivityFeed } from '../orchestrated-agents/JudgeActivityFeed';
+import { ScoreLog } from '../orchestrated-agents/ScoreLog';
+import { OpponentFeed } from '../orchestrated-agents/OpponentFeed';
 import { MCTSTreeViz } from '../orchestrated-agents/MCTSTreeViz';
 import type { AgendaItem, PredictedTopic } from '../multi-agent/types';
 import '../multi-agent/styles/index.css';
+import '../orchestrated-agents/agenda.css';
+import '../orchestrated-agents/system-config.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -53,27 +62,31 @@ function generateSessionId(): string {
 export default function OrchestratedAgents() {
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [phase, setPhase] = useState<SimulationPhase>('SETUP');
+  const [setupCollapsed, setSetupCollapsed] = useState(false);
 
   const [, setUserBrief] = useState<BriefData | null>(null);
-  const [, setOpposingBrief] = useState<BriefData | null>(null);
+  const [opposingBriefText, setOpposingBriefText] = useState<string>('');
   const [briefSummary, setBriefSummary] = useState<string>('');
-
-  // Round-robin counter for auto-assigning agents to agenda items
-  const agentRRIndexRef = useRef(0);
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
 
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
   const [isGeneratingAgenda, setIsGeneratingAgenda] = useState(false);
-  const [agendaError, setAgendaError] = useState<string | null>(null);
+  const [, setAgendaError] = useState<string | null>(null);
   const [generationStatus, setGenerationStatus] = useState<string>('');
   // Raw API response kept so we can send it to the backend tracker on start
   const [predictedTopicSets, setPredictedTopicSets] = useState<unknown>(null);
 
   const [transcript, setTranscript] = useState<string>('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const currentSpeechRef = useRef('');
+  const chatIdRef = useRef(0);
   const [questions, setQuestions] = useState<AgentQuestion[]>([]);
   const [counterArguments, setCounterArguments] = useState<CounterArgument[]>([]);
+  const [opponentResponses, setOpponentResponses] = useState<OpponentResponse[]>([]);
+  const [scores, setScores] = useState<ArgumentScore[]>([]);
+  const [inactiveAgentIds, setInactiveAgentIds] = useState<Set<string>>(new Set());
   const [agendaUpdate, setAgendaUpdate] = useState<AgendaUpdate | null>(null);
   const [mctsTree, setMctsTree] = useState<MCTSTree | null>(null);
 
@@ -94,8 +107,32 @@ export default function OrchestratedAgents() {
   const [judgeIntroText, setJudgeIntroText] = useState<string | null>(null);
   const judgeAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ── Agent interruption audio ──────────────────────────────────────────
-  const agentAudioRef = useRef<HTMLAudioElement | null>(null);
+  // ── Shared audio queue — serializes agent questions + opponent responses ─
+  const audioQueueRef   = useRef<Array<() => Promise<void>>>([]);
+  const audioPlayingRef = useRef(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // drainAudioQueueRef is reassigned each render so the recursive call always
+  // uses the latest closure (avoids stale-ref issues with useCallback + recursion).
+  const drainAudioQueueRef = useRef<() => void>(() => {});
+  drainAudioQueueRef.current = () => {
+    if (audioPlayingRef.current || audioQueueRef.current.length === 0) return;
+    audioPlayingRef.current = true;
+    const next = audioQueueRef.current.shift()!;
+    next().finally(() => {
+      currentAudioRef.current = null;
+      audioPlayingRef.current = false;
+      drainAudioQueueRef.current();
+    });
+  };
+
+  const enqueueAudio = useCallback((playFn: () => Promise<void>) => {
+    audioQueueRef.current.push(playFn);
+    drainAudioQueueRef.current();
+  }, []);
+
+  // ── Guard against double-click on Start Hearing ───────────────────────
+  const startingRef = useRef(false);
 
   useEffect(() => {
     if (phase === 'RECORDING') {
@@ -129,35 +166,49 @@ export default function OrchestratedAgents() {
   }, []);
 
   const handleTranscriptUpdate = useCallback((text: string) => {
-    setTranscript((prev) => prev + ' ' + text);
+    currentSpeechRef.current += ' ' + text;
+    setTranscript(currentSpeechRef.current);
+  }, []);
+
+  /** Freeze the current live speech into a chat message and reset for next segment. */
+  const freezeCurrentSpeech = useCallback(() => {
+    const trimmed = currentSpeechRef.current.trim();
+    if (trimmed) {
+      const id = ++chatIdRef.current;
+      setChatMessages(prev => [...prev, { id, role: 'user', text: trimmed, timestamp: Date.now() }]);
+    }
+    currentSpeechRef.current = '';
+    setTranscript('');
   }, []);
 
   const handleAgentQuestion = useCallback((question: AgentQuestion) => {
     setQuestions((prev) => [...prev, question]);
 
-    // Play TTS audio if the backend included it (interruption logic)
-    if (question.audio) {
-      // Stop any currently-playing agent audio
-      if (agentAudioRef.current) {
-        agentAudioRef.current.pause();
-        agentAudioRef.current = null;
-      }
-
-      const format = question.audio_format || 'opus';
-      const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-      const mime = mimeMap[format] || 'audio/ogg';
-      const blob = new Blob(
-        [Uint8Array.from(atob(question.audio), c => c.charCodeAt(0))],
-        { type: mime },
-      );
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      agentAudioRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(url);
-      audio.onerror = () => URL.revokeObjectURL(url);
-      audio.play().catch((e) => console.warn('[AgentAudio] Playback failed:', e));
+    // Freeze current speech when a judge interrupts; do NOT add to chatMessages —
+    // the "Your Transcript" panel only shows the advocate's own speech.
+    if (question.selected !== false) {
+      freezeCurrentSpeech();
     }
-  }, []);
+
+    // Enqueue TTS audio for serialized playback (won't overlap opponent audio)
+    if (question.audio) {
+      enqueueAudio(() => new Promise<void>((resolve) => {
+        const format = question.audio_format || 'mp3';
+        const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
+        const mime = mimeMap[format] || 'audio/mpeg';
+        const blob = new Blob(
+          [Uint8Array.from(atob(question.audio!), c => c.charCodeAt(0))],
+          { type: mime },
+        );
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudioRef.current = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.play().catch(() => resolve());
+      }));
+    }
+  }, [freezeCurrentSpeech, enqueueAudio]);
 
   const handlePhaseUpdate = useCallback((newPhase: SimulationPhase) => {
     setPhase(newPhase);
@@ -175,6 +226,47 @@ export default function OrchestratedAgents() {
     setCounterArguments((prev) => [...prev, arg]);
   }, []);
 
+  const handleArgumentScore = useCallback((score: ArgumentScore) => {
+    setScores((prev) => [...prev, score]);
+  }, []);
+
+  const handleOpponentResponse = useCallback((response: OpponentResponse) => {
+    setOpponentResponses((prev) => [...prev, response]);
+
+    // Freeze current speech so the advocate's argument is segmented; do NOT add
+    // the opponent response to chatMessages — transcript only shows user speech.
+    freezeCurrentSpeech();
+
+    // Enqueue TTS audio if the backend included it
+    if (response.audio) {
+      enqueueAudio(() => new Promise<void>((resolve) => {
+        const format = response.audio_format || 'mp3';
+        const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
+        const mime = mimeMap[format] || 'audio/mpeg';
+        const blob = new Blob(
+          [Uint8Array.from(atob(response.audio!), c => c.charCodeAt(0))],
+          { type: mime },
+        );
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        currentAudioRef.current = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+        audio.play().catch(() => resolve());
+      }));
+    }
+  }, [freezeCurrentSpeech, enqueueAudio]);
+
+  const toggleAgentActive = useCallback((id: string) => {
+    setInactiveAgentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const activeAgents = agents.filter(a => !inactiveAgentIds.has(a.id));
+
   const { isConnected, connect, disconnect, sendConfig, sendAudio, setPhase: sendPhase, updateAgents, sendAgenda } =
     useMultiAgentSocket({
       sessionId,
@@ -183,6 +275,8 @@ export default function OrchestratedAgents() {
       onPhaseUpdate: handlePhaseUpdate,
       onAgendaUpdate: handleAgendaUpdate,
       onCounterArgument: handleCounterArgument,
+      onArgumentScore: handleArgumentScore,
+      onOpponentResponse: handleOpponentResponse,
     });
 
   const { startRecording, stopRecording, error: recordingError } = useMediaRecording({
@@ -191,12 +285,11 @@ export default function OrchestratedAgents() {
 
   const handleBriefsReady = useCallback(async (user: BriefData, opposing: BriefData) => {
     setUserBrief(user);
-    setOpposingBrief(opposing);
+    setOpposingBriefText(opposing.text);
     setAgendaError(null);
     setIsGeneratingAgenda(true);
     setGenerationStatus('Starting…');
     setAgendaItems([]);
-    agentRRIndexRef.current = 0;
 
     // Reset queue and seed an empty tree so the viz panel mounts immediately
     pendingNodesRef.current = [];
@@ -221,7 +314,11 @@ export default function OrchestratedAgents() {
         const newEdges = batch
           .filter(n => n.p !== -1)
           .map(n => ({ source: n.p, target: n.id }));
-        return { nodes: [...prev.nodes, ...newNodes], edges: [...prev.edges, ...newEdges] };
+        const existingIds = new Set(prev.nodes.map(n => n.id));
+        const uniqueNodes = newNodes.filter(n => !existingIds.has(n.id));
+        const existingEdgeKeys = new Set(prev.edges.map(e => `${e.source}-${e.target}`));
+        const uniqueEdges = newEdges.filter(e => !existingEdgeKeys.has(`${e.source}-${e.target}`));
+        return { nodes: [...prev.nodes, ...uniqueNodes], edges: [...prev.edges, ...uniqueEdges] };
       });
     }, FLUSH_MS);
 
@@ -273,11 +370,6 @@ export default function OrchestratedAgents() {
               prediction_id: number; lens: string; rationale: string; topics: PredictedTopic[];
             };
             if (ag.topics.length > 0 && ag.rationale !== 'Parse error.') {
-              // Auto-assign an agent (round-robin)
-              const assignedAgent = agents.length > 0
-                ? agents[agentRRIndexRef.current++ % agents.length]
-                : null;
-
               setAgendaItems(prev => [
                 ...prev,
                 {
@@ -285,7 +377,7 @@ export default function OrchestratedAgents() {
                   lens: ag.lens,
                   rationale: ag.rationale,
                   topics: ag.topics,
-                  agentId: assignedAgent?.id ?? null,
+                  agentId: null,
                 },
               ]);
 
@@ -349,12 +441,12 @@ export default function OrchestratedAgents() {
               }>) ?? []
             )
               .filter(p => p.topics.length > 0 && p.rationale !== 'Parse error.')
-              .map((p, i) => ({
+              .map((p) => ({
                 id: String(p.prediction_id),
                 lens: p.lens,
                 rationale: p.rationale,
                 topics: p.topics,
-                agentId: agents.length > 0 ? agents[i % agents.length].id : null,
+                agentId: null,
               }));
 
             setAgendaItems(items);
@@ -377,16 +469,14 @@ export default function OrchestratedAgents() {
     }
   }, []);
 
-  const handleSummaryGenerated = useCallback((summary: string) => {
-    setBriefSummary(summary);
-    setPhase('READY');
-  }, []);
 
   const handleStartSimulation = useCallback(async () => {
     if (agents.length === 0) {
       console.warn('[handleStartSimulation] No agents loaded');
       return;
     }
+    if (startingRef.current) return;  // prevent double-click
+    startingRef.current = true;
 
     // ── Phase 1: Connect WebSocket and send config ────────────────────
     if (!isConnected) {
@@ -394,7 +484,7 @@ export default function OrchestratedAgents() {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     
-    sendConfig(agents, briefSummary);
+    sendConfig(activeAgents, briefSummary, opposingBriefText);
     if (predictedTopicSets && agendaItems.length > 0) {
       sendAgenda(predictedTopicSets, agendaItems);
     }
@@ -488,11 +578,13 @@ export default function OrchestratedAgents() {
     } catch (e) {
       console.error('Recording start failed:', e);
       setPhase('READY');
+    } finally {
+      startingRef.current = false;
     }
   }, [
-    briefSummary, agents, isConnected, connect, sendConfig,
+    briefSummary, activeAgents, isConnected, connect, sendConfig,
     predictedTopicSets, agendaItems, sendAgenda,
-    startRecording, sendPhase,
+    startRecording, sendPhase, opposingBriefText,
   ]);
 
   const handleStopSimulation = useCallback(() => {
@@ -504,8 +596,13 @@ export default function OrchestratedAgents() {
   const handleResetSession = useCallback(() => {
     setPhase('READY');
     setTranscript('');
+    setChatMessages([]);
+    currentSpeechRef.current = '';
+    chatIdRef.current = 0;
     setQuestions([]);
     setCounterArguments([]);
+    setOpponentResponses([]);
+    setScores([]);
     setAgendaUpdate(null);
     setMctsTree(null);
   }, []);
@@ -515,6 +612,7 @@ export default function OrchestratedAgents() {
     // Stop any in-flight recording / connection
     stopRecording();
     disconnect();
+    startingRef.current = false;
 
     // Stop any playing judge audio
     if (judgeAudioRef.current) {
@@ -522,10 +620,12 @@ export default function OrchestratedAgents() {
       judgeAudioRef.current = null;
     }
 
-    // Stop any playing agent audio
-    if (agentAudioRef.current) {
-      agentAudioRef.current.pause();
-      agentAudioRef.current = null;
+    // Stop any playing queued audio (agent question or opponent response)
+    audioQueueRef.current = [];
+    audioPlayingRef.current = false;
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
     }
 
     // Cancel any running MCTS flush timer
@@ -533,14 +633,13 @@ export default function OrchestratedAgents() {
     pendingNodesRef.current = [];
     previewIdRef.current = 10001;
     seenPreviewTopicsRef.current.clear();
-    agentRRIndexRef.current = 0;
 
     // Reset all state back to initial — including a fresh session ID so the
     // backend doesn't confuse old and new session data.
     setSessionId(generateSessionId());
     setPhase('SETUP');
     setUserBrief(null);
-    setOpposingBrief(null);
+    setOpposingBriefText('');
     setBriefSummary('');
     setAgendaItems([]);
     setIsGeneratingAgenda(false);
@@ -548,8 +647,14 @@ export default function OrchestratedAgents() {
     setGenerationStatus('');
     setPredictedTopicSets(null);
     setTranscript('');
+    setChatMessages([]);
+    currentSpeechRef.current = '';
+    chatIdRef.current = 0;
     setQuestions([]);
     setCounterArguments([]);
+    setOpponentResponses([]);
+    setScores([]);
+    setInactiveAgentIds(new Set());
     setAgendaUpdate(null);
     setMctsTree(null);
     setElapsedSeconds(0);
@@ -559,13 +664,20 @@ export default function OrchestratedAgents() {
   const handleAgentsChange = useCallback(
     (newAgents: Agent[]) => {
       setAgents(newAgents);
-      if (isConnected) updateAgents(newAgents);
+      if (isConnected) updateAgents(newAgents.filter(a => !inactiveAgentIds.has(a.id)));
     },
-    [isConnected, updateAgents]
+    [isConnected, updateAgents, inactiveAgentIds]
   );
 
+  // Sync active-agent toggles to backend while a session is live
+  useEffect(() => {
+    if (isConnected && agents.length > 0) {
+      updateAgents(agents.filter(a => !inactiveAgentIds.has(a.id)));
+    }
+  }, [inactiveAgentIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="ma-page">
+    <div className="ma-page ma-invisible-scroll">
       {/* ── Header ── */}
       <header className="ma-header">
         <div className="ma-header__inner">
@@ -576,16 +688,16 @@ export default function OrchestratedAgents() {
             </p>
           </div>
           <div className="ma-header__status">
-            <nav style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <nav className="oa-header-nav">
               <Link
                 to="/multi-agent"
-                style={{ color: 'var(--ma-text-muted)', fontSize: '0.875rem', textDecoration: 'none' }}
+                className="oa-header-nav__link"
               >
                 Multi-Agent Practice
               </Link>
               <Link
                 to="/orchestrated-agents"
-                style={{ color: 'var(--ma-info)', fontSize: '0.875rem', textDecoration: 'none' }}
+                className="oa-header-nav__link oa-header-nav__link--active"
               >
                 Orchestrated Agents
               </Link>
@@ -613,11 +725,38 @@ export default function OrchestratedAgents() {
         </div>
       </header>
 
+      {/* ── Setup & Configuration (full-width, collapsible) ── */}
+      <div className={`oa-setup-section oa-setup-section--fullwidth${
+        setupCollapsed || phase === 'RECORDING' || phase === 'INTRO' ? ' oa-setup-section--collapsed' : ''
+      }`}>
+        <button
+          className="oa-setup-section__toggle"
+          onClick={() => setSetupCollapsed(c => !c)}
+        >
+          <span className="oa-setup-section__label">Setup &amp; Configuration</span>
+          <span className="oa-setup-section__chevron">▼</span>
+        </button>
+        <div className="oa-setup-section__body oa-setup-section__body--horizontal">
+          <BriefUpload
+            onBriefsReady={handleBriefsReady}
+          />
+
+          {!isLoadingAgents && (
+            <AgentEditor agents={agents} onAgentsChange={handleAgentsChange} />
+          )}
+
+          <JudgeConfigPanel />
+          <OpponentConfigPanel />
+          <SystemConfigPanel />
+        </div>
+      </div>
+
       {/* ── Main grid ── */}
       <main className="ma-main">
         <div className="ma-main__grid">
           {/* Left column */}
           <div className="ma-main__column">
+            {/* ── Live Tracking (always visible) ── */}
             <AgendaPanel
               agents={agents}
               items={agendaItems}
@@ -655,77 +794,34 @@ export default function OrchestratedAgents() {
                 ?? {}
               }
             />
-
-            <BriefUpload
-              onBriefsReady={handleBriefsReady}
-              onSummaryGenerated={handleSummaryGenerated}
-            />
-
-            {!isLoadingAgents && (
-              <AgentEditor agents={agents} onAgentsChange={handleAgentsChange} />
-            )}
           </div>
 
-          {/* Right column */}
-          <div className="ma-main__column ma-main__column--right">
+          {/* Middle column — Your argument + parallel agent evaluations */}
+          <div className="ma-main__column ma-main__column--mid">
             {/* Judge Introduction Banner */}
             {phase === 'INTRO' && (
-              <Card>
-                <CardContent>
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '1rem',
-                    padding: '1.5rem 1rem',
-                    textAlign: 'center',
-                  }}>
-                    <div style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #f0c040, #e6a817)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 24,
-                      boxShadow: '0 0 20px rgba(240, 192, 64, 0.3)',
-                      animation: 'ma-pulse 1.5s infinite',
-                    }}>
-                      ⚖️
-                    </div>
+              <div className="oa-panel">
+                <div className="oa-panel__body">
+                  <div className="oa-judge-intro">
+                    <div className="oa-judge-intro__icon">⚖️</div>
                     <div>
-                      <p style={{
-                        color: '#f0c040',
-                        fontWeight: 600,
-                        fontSize: '0.875rem',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.1em',
-                        marginBottom: '0.75rem',
-                      }}>
-                        Chief Justice Speaking
-                      </p>
-                      <p style={{
-                        color: 'rgba(255, 255, 255, 0.9)',
-                        fontSize: '0.95rem',
-                        lineHeight: 1.6,
-                        fontStyle: 'italic',
-                        maxWidth: 480,
-                        margin: '0 auto',
-                      }}>
-                        {judgeIntroText
-                          ? `"${judgeIntroText}"`
-                          : 'The court is assembling…'}
+                      <p className="oa-judge-intro__speaker">Chief Justice Speaking</p>
+                      <p className="oa-judge-intro__text">
+                        {judgeIntroText ? `"${judgeIntroText}"` : 'The court is assembling…'}
                       </p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
 
-            <Card>
-              <CardHeader action={<RecordingStatus phase={phase} />}>Recording</CardHeader>
-              <CardContent>
+            {/* ── Your Argument ── */}
+            <div className="oa-panel">
+              <div className="oa-panel__header">
+                <span className="oa-panel__title">Your Argument</span>
+                <div className="oa-panel__action"><RecordingStatus phase={phase} /></div>
+              </div>
+              <div className="oa-panel__body">
                 {recordingError && <Alert variant="error">{recordingError}</Alert>}
 
                 {phase === 'SETUP' && (
@@ -742,24 +838,77 @@ export default function OrchestratedAgents() {
                   onReset={handleResetSession}
                 />
 
-                <TranscriptDisplay transcript={transcript} />
-                <ActiveAgents agents={agents} />
-              </CardContent>
-            </Card>
+                <TranscriptDisplay transcript={transcript} chatMessages={chatMessages} />
 
-            <Card>
-              <CardHeader>Agent Questions</CardHeader>
-              <CardContent>
-                <QuestionFeed questions={questions} />
-              </CardContent>
-            </Card>
+                {/* ── Toggleable agent chips ── */}
+                {agents.length > 0 && (
+                  <div className="oa-agent-toggles">
+                    <p className="oa-agent-toggles__label">Active Judges — click to toggle</p>
+                    <div className="oa-agent-toggles__list">
+                      {agents.map(agent => {
+                        const active = !inactiveAgentIds.has(agent.id);
+                        return (
+                          <button
+                            key={agent.id}
+                            className={`oa-agent-toggle${active ? '' : ' oa-agent-toggle--off'}`}
+                            style={{ borderColor: active ? agent.color : undefined }}
+                            onClick={() => toggleAgentActive(agent.id)}
+                            title={active ? 'Click to deactivate' : 'Click to activate'}
+                          >
+                            <span
+                              className="oa-agent-toggle__dot"
+                              style={{ background: active ? agent.color : undefined }}
+                            />
+                            {agent.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
 
-            <Card>
-              <CardHeader>Counter-Arguments</CardHeader>
-              <CardContent>
-                <CounterArgumentFeed counterArguments={counterArguments} />
-              </CardContent>
-            </Card>
+            {/* ── Agent Questions (parallel evaluations) ── */}
+            <div className="oa-panel">
+              <div className="oa-panel__header">
+                <span className="oa-panel__title">Agent Questions</span>
+              </div>
+              <div className="oa-panel__body">
+                <QuestionFeed agents={agents} questions={questions} />
+              </div>
+            </div>
+
+            {/* ── Argument Scores ── */}
+            <div className="oa-panel">
+              <div className="oa-panel__header">
+                <span className="oa-panel__title">Argument Scores</span>
+              </div>
+              <div className="oa-panel__body">
+                <ScoreLog scores={scores} />
+              </div>
+            </div>
+          </div>
+
+          {/* Right column — Judge output + Opponent output */}
+          <div className="ma-main__column ma-main__column--right">
+            <div className="oa-panel">
+              <div className="oa-panel__header">
+                <span className="oa-panel__title">Judge Activity</span>
+              </div>
+              <div className="oa-panel__body">
+                <JudgeActivityFeed questions={questions} counterArguments={counterArguments} />
+              </div>
+            </div>
+
+            <div className="oa-panel">
+              <div className="oa-panel__header">
+                <span className="oa-panel__title">Opposing Counsel</span>
+              </div>
+              <div className="oa-panel__body">
+                <OpponentFeed responses={opponentResponses} />
+              </div>
+            </div>
           </div>
         </div>
       </main>

@@ -88,7 +88,7 @@ export function AgendaPanel({
           </div>
         ) : items.length === 0 ? (
           <p className="oa-agenda__empty">
-            Upload both briefs and generate a summary to see the projected hearing agenda.
+            Upload both briefs and press Start to see the projected hearing agenda.
           </p>
         ) : (
           <div className="oa-agenda">
@@ -120,7 +120,7 @@ export function AgendaPanel({
             >
               <option value="">Jump to judicial lens…</option>
               {items.map((item, i) => (
-                <option key={item.id} value={item.id}>
+                <option key={`${i}-${item.id}`} value={item.id}>
                   {i + 1}. {item.lens}
                 </option>
               ))}
@@ -142,7 +142,7 @@ export function AgendaPanel({
 
                 return (
                   <div
-                    key={item.id}
+                    key={`${index}-${item.id}`}
                     id={`agenda-item-${item.id}`}
                     className={[
                       'oa-timeline__item',
@@ -203,7 +203,7 @@ export function AgendaPanel({
 
                                   return (
                                     <div
-                                      key={topic.order}
+                                      key={`${item.id}-${topic.order}-${topic.title}`}
                                       className={[
                                         'oa-topic',
                                         isAddressed && !isWeak ? 'oa-topic--addressed' : '',

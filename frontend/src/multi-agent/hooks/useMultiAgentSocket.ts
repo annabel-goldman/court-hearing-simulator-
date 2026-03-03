@@ -8,7 +8,9 @@ import type {
   AgendaItem,
   AgendaUpdate,
   AgentQuestion,
+  ArgumentScore,
   CounterArgument,
+  OpponentResponse,
   SimulationPhase,
   MultiAgentSocketMessage,
 } from '../types';
@@ -23,13 +25,15 @@ interface UseMultiAgentSocketProps {
   onPhaseUpdate?: (phase: SimulationPhase) => void;
   onAgendaUpdate?: (update: AgendaUpdate) => void;
   onCounterArgument?: (arg: CounterArgument) => void;
+  onArgumentScore?: (score: ArgumentScore) => void;
+  onOpponentResponse?: (response: OpponentResponse) => void;
 }
 
 interface UseMultiAgentSocketReturn {
   isConnected: boolean;
   connect: () => void;
   disconnect: () => void;
-  sendConfig: (agents: Agent[], briefSummary: string) => void;
+  sendConfig: (agents: Agent[], briefSummary: string, opposingBrief?: string) => void;
   sendAudio: (audioBase64: string) => void;
   setPhase: (phase: SimulationPhase) => void;
   updateAgents: (agents: Agent[]) => void;
@@ -43,12 +47,37 @@ export function useMultiAgentSocket({
   onPhaseUpdate,
   onAgendaUpdate,
   onCounterArgument,
+  onArgumentScore,
+  onOpponentResponse,
 }: UseMultiAgentSocketProps): UseMultiAgentSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
+  // Store callbacks in refs so `connect` never needs to be recreated when
+  // handler identity changes.  This keeps the WebSocket stable across renders.
+  const cbRef = useRef({
+    onTranscriptUpdate,
+    onAgentQuestion,
+    onPhaseUpdate,
+    onAgendaUpdate,
+    onCounterArgument,
+    onArgumentScore,
+    onOpponentResponse,
+  });
+  cbRef.current = {
+    onTranscriptUpdate,
+    onAgentQuestion,
+    onPhaseUpdate,
+    onAgendaUpdate,
+    onCounterArgument,
+    onArgumentScore,
+    onOpponentResponse,
+  };
+
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Guard both OPEN and CONNECTING states to prevent duplicate sockets
+    const state = wsRef.current?.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
 
     const ws = new WebSocket(`${WS_BASE}/ws/multi-agent/${sessionId}`);
 
@@ -69,22 +98,29 @@ export function useMultiAgentSocket({
     ws.onmessage = (event) => {
       try {
         const message: MultiAgentSocketMessage = JSON.parse(event.data);
+        const cb = cbRef.current;
 
         switch (message.type) {
           case 'transcript_update':
-            onTranscriptUpdate?.(message.data.text as string);
+            cb.onTranscriptUpdate?.(message.data.text as string);
             break;
           case 'agent_question':
-            onAgentQuestion?.(message.data as unknown as AgentQuestion);
+            cb.onAgentQuestion?.(message.data as unknown as AgentQuestion);
             break;
           case 'phase_update':
-            onPhaseUpdate?.(message.data.phase as SimulationPhase);
+            cb.onPhaseUpdate?.(message.data.phase as SimulationPhase);
             break;
           case 'agenda_update':
-            onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
+            cb.onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
             break;
           case 'agent_counter_argument':
-            onCounterArgument?.(message.data as unknown as CounterArgument);
+            cb.onCounterArgument?.(message.data as unknown as CounterArgument);
+            break;
+          case 'argument_score':
+            cb.onArgumentScore?.(message.data as unknown as ArgumentScore);
+            break;
+          case 'opponent_response':
+            cb.onOpponentResponse?.(message.data as unknown as OpponentResponse);
             break;
           case 'config_ack':
             console.log('[MultiAgentSocket] Config acknowledged:', message.data);
@@ -104,7 +140,7 @@ export function useMultiAgentSocket({
     };
 
     wsRef.current = ws;
-  }, [sessionId, onTranscriptUpdate, onAgentQuestion, onPhaseUpdate, onAgendaUpdate, onCounterArgument]);
+  }, [sessionId]);  // Only depends on sessionId — callbacks read from ref
 
   const disconnect = useCallback(() => {
     wsRef.current?.close();
@@ -118,8 +154,8 @@ export function useMultiAgentSocket({
     }
   }, []);
 
-  const sendConfig = useCallback((agents: Agent[], briefSummary: string) => {
-    sendMessage('config', { agents, brief_summary: briefSummary });
+  const sendConfig = useCallback((agents: Agent[], briefSummary: string, opposingBrief?: string) => {
+    sendMessage('config', { agents, brief_summary: briefSummary, opposing_brief: opposingBrief || '' });
   }, [sendMessage]);
 
   const sendAudio = useCallback((audioBase64: string) => {

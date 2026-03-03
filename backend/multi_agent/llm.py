@@ -25,7 +25,7 @@ from .prompts import (
 # Load environment variables
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
 
-from model_router import get_task_client
+from model_router import get_task_client, extract_content, task_extra_body
 
 
 class MultiAgentLLM:
@@ -72,9 +72,10 @@ class MultiAgentLLM:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.3,
-                max_tokens=600
+                max_tokens=600,
+                extra_body=task_extra_body("brief_summary"),
             )
-            return response.choices[0].message.content.strip()
+            return extract_content(response) or "Summary unavailable."
         except Exception as e:
             print(f"Error summarizing briefs: {e}")
             return f"Error generating summary: {str(e)}"
@@ -124,20 +125,14 @@ class MultiAgentLLM:
                 ],
                 temperature=0.7,
                 max_tokens=200,
-                # Disable Qwen3 thinking mode: the full token budget was being spent
+                # Disable thinking for SMALL tier: the full token budget was being spent
                 # on <think>...</think> blocks, leaving 0 tokens for the actual
                 # ASK:/QUESTION: response.  /no_think in the prompt is a soft hint;
                 # enable_thinking=False is the hard disable via llama-server.
-                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+                extra_body=task_extra_body("agent_analysis"),
             )
 
-            raw = response.choices[0].message.content or ""
-            # Strip Qwen3 <think>...</think> blocks that consume token budget
-            content = re.sub(r'<think>[\s\S]*?</think>', '', raw).strip()
-            # If stripping left nothing, try the raw text (partial think block)
-            if not content and raw.strip():
-                # Remove an unclosed <think> tag (model ran out of tokens mid-think)
-                content = re.sub(r'<think>[\s\S]*', '', raw).strip()
+            content = extract_content(response)
             logger.info("[MultiAgent LLM] %s raw response (%d chars): %s",
                         agent.name, len(content), content[:300])
 

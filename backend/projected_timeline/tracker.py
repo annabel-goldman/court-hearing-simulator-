@@ -74,7 +74,7 @@ QUALITY_WEAK_THRESHOLD   = 0.4   # below this → topic is "weak" (needs follow-
 # LLM quality-assessment backend — uses SMALL tier via model_router
 # ---------------------------------------------------------------------------
 
-from model_router import get_task_client
+from model_router import get_task_client, extract_content, task_extra_body
 
 
 _QUALITY_SYSTEM = (
@@ -129,11 +129,10 @@ async def _assess_quality_llm(
             ],
             temperature=0.1,
             max_tokens=120,
-            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+            extra_body=task_extra_body("quality_assessment"),
         )
-        raw = response.choices[0].message.content.strip()
-        # Strip <think>…</think> and markdown fences
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = extract_content(response)
+        # Strip markdown fences
         raw = re.sub(r"```(?:json)?\s*", "", raw)
         raw = re.sub(r"```\s*$", "", raw, flags=re.MULTILINE)
 

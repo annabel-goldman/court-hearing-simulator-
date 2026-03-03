@@ -1,0 +1,20 @@
+{
+  "large": {
+    "enabled": false,
+    "base_url": "",
+    "api_key": "",
+    "model": ""
+  },
+  "small": {
+    "enabled": false,
+    "base_url": "",
+    "api_key": "",
+    "model": ""
+  },
+  "tiny": {
+    "enabled": false,
+    "base_url": "",
+    "api_key": "",
+    "model": ""
+  }
+}

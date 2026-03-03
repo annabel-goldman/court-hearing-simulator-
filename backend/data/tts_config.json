@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "api_key": "",
+  "base_url": "https://openrouter.ai/api/v1",
+  "voice": "onyx",
+  "model": "openai/gpt-audio-mini"
+}

@@ -189,12 +189,20 @@ async def _background_reachability_refresh() -> None:
 # ---------------------------------------------------------------------------
 
 def _resolve_effective_endpoint(tier: ModelTier) -> ModelEndpoint:
-    """Like _resolve_tier, but applies the reachability fallback.
+    """Like _resolve_tier, but applies runtime overrides and the reachability fallback.
 
-    If the requested tier's server is unreachable, transparently falls back
-    to LARGE.  Both the client URL and the model name come from the same
-    (possibly fallen-back) endpoint so they always match.
+    Priority order:
+      1. Runtime override (_runtime_overrides) — set by the external LLM config feature
+      2. Env-var resolution with reachability fallback to LARGE
+
+    Both the client URL and the model name come from the same resolved endpoint
+    so they always match — even after fallback.
     """
+    # 1. Runtime override takes absolute priority
+    if tier in _runtime_overrides:
+        return _runtime_overrides[tier]
+
+    # 2. Normal env-var resolution + reachability fallback
     endpoint = _resolve_tier(tier)
     if tier != ModelTier.LARGE and not _is_url_reachable(endpoint.base_url):
         large_ep = _resolve_tier(ModelTier.LARGE)
@@ -204,6 +212,47 @@ def _resolve_effective_endpoint(tier: ModelTier) -> ModelEndpoint:
         )
         endpoint = large_ep
     return endpoint
+
+
+# ---------------------------------------------------------------------------
+# Runtime overrides — set by the Judge Config external LLM feature
+# ---------------------------------------------------------------------------
+
+# Maps a ModelTier to a custom ModelEndpoint supplied at runtime (e.g. via
+# POST /api/judge-config with external_llm.enabled=true).  These take
+# priority over env-var resolution AND reachability fallback, so the user's
+# chosen endpoint is always used when an override is active.
+_runtime_overrides: dict[ModelTier, ModelEndpoint] = {}
+
+
+def apply_runtime_override(
+    tier: ModelTier, base_url: str, model: str, api_key: str
+) -> None:
+    """Install a runtime endpoint override for the given tier.
+
+    Pre-creates the AsyncOpenAI client so the first subsequent LLM call
+    is not delayed by client construction.  Marks the URL as reachable
+    optimistically — the background refresh will detect real failures
+    within 30 s.
+
+    Thread-safe in CPython (dict assignment is atomic under the GIL).
+    """
+    endpoint = ModelEndpoint(model=model, base_url=base_url, api_key=api_key)
+    _runtime_overrides[tier] = endpoint
+    # Pre-create client (lazy import handled inside _get_or_create_client)
+    _get_or_create_client(endpoint)
+    # Mark reachable so the fallback logic doesn't immediately route elsewhere
+    _reachability_cache[base_url] = (True, time.monotonic())
+    logger.info(
+        "Runtime override applied for %s → model=%s url=%s",
+        tier.value.upper(), model, base_url,
+    )
+
+
+def clear_runtime_override(tier: ModelTier) -> None:
+    """Remove the runtime override for a tier, reverting to env-var resolution."""
+    _runtime_overrides.pop(tier, None)
+    logger.info("Runtime override cleared for %s", tier.value.upper())
 
 
 # ---------------------------------------------------------------------------
@@ -273,10 +322,12 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     "brief_summary":        ModelTier.SMALL,
     "seed_questions":       ModelTier.SMALL,
     "argument_scoring":     ModelTier.SMALL,
+    "opponent_response":    ModelTier.SMALL,
 
-    # TINY — structured extraction / timeline
+    # TINY — structured extraction / timeline / selection
     "issue_extraction":     ModelTier.TINY,
     "agenda_generation":    ModelTier.TINY,
+    "question_selection":   ModelTier.TINY,
 }
 
 
@@ -284,6 +335,92 @@ def get_task_client(task: str):
     """Return (client, model_name) for a named task."""
     tier = TASK_TIER_MAP.get(task, ModelTier.LARGE)
     return get_client_and_model(tier)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for thinking-model compatibility
+# ---------------------------------------------------------------------------
+
+def is_local_endpoint(tier: ModelTier) -> bool:
+    """Return True if the resolved endpoint for *tier* is a local llama-server.
+
+    Used to decide whether to pass ``chat_template_kwargs`` in extra_body —
+    that parameter is llama-server-specific and ignored (or misinterpreted)
+    by remote APIs such as OpenRouter.
+    """
+    base_url = _resolve_effective_endpoint(tier).base_url
+    return any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0"))
+
+
+def local_extra_body(tier: ModelTier) -> dict:
+    """Return the extra_body dict for thinking-mode control.
+
+    LARGE tier: always returns ``{}`` — thinking is **allowed** so the
+    judge model can reason deeply before answering.  ``extract_content()``
+    strips ``<think>`` blocks from the response transparently.
+
+    SMALL / TINY on local llama-server: ``{"chat_template_kwargs": {"enable_thinking": False}}``
+    SMALL / TINY on remote endpoints (OpenRouter, OpenAI, …):
+        ``{"chat_template_kwargs": {"enable_thinking": False}}`` — OpenRouter passes
+        this through to Qwen3 natively; other remote models ignore unknown extra_body keys.
+    """
+    if tier == ModelTier.LARGE:
+        return {}  # allow thinking for quality-critical judge work
+    return {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def task_extra_body(task: str) -> dict:
+    """Return the extra_body dict for a named task.
+
+    Looks up the task's tier in ``TASK_TIER_MAP`` and delegates to
+    ``local_extra_body``.  Convenience wrapper so call sites don't
+    need to resolve the tier themselves.
+    """
+    tier = TASK_TIER_MAP.get(task, ModelTier.LARGE)
+    return local_extra_body(tier)
+
+
+def extract_content(response) -> str:
+    """Extract the text reply from a chat completion response.
+
+    Handles both standard (``message.content``) and thinking-model responses
+    where ``content`` may be ``None`` or empty and the actual output lives in
+    a vendor-specific field such as ``reasoning_content`` or ``reasoning``
+    (common on OpenRouter and some local servers).
+
+    Strips both complete ``<think>…</think>`` blocks **and** unclosed
+    ``<think>`` prefixes (model exhausted its token budget mid-reasoning).
+
+    Returns an empty string if nothing useful is found.
+    """
+    import re as _re
+
+    def _strip_think(text: str) -> str:
+        """Remove closed and unclosed <think> blocks from *text*."""
+        text = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL).strip()
+        # Handle unclosed <think> (model ran out of tokens mid-reasoning)
+        if "<think>" in text:
+            text = _re.sub(r"<think>[\s\S]*", "", text).strip()
+        return text
+
+    msg = response.choices[0].message
+    content = (msg.content or "").strip()
+    if content:
+        content = _strip_think(content)
+        if content:
+            return content
+
+    # Fallback: check non-standard reasoning/thinking fields that thinking
+    # models (DeepSeek-R1, Qwen3-thinking, GLM-4.5) may populate instead.
+    extras: dict = getattr(msg, "model_extra", None) or {}
+    for key in ("reasoning_content", "reasoning", "thinking"):
+        val = extras.get(key) or getattr(msg, key, None)
+        if val and isinstance(val, str) and val.strip():
+            cleaned = _strip_think(val)
+            if cleaned:
+                return cleaned
+
+    return ""
 
 
 # ---------------------------------------------------------------------------

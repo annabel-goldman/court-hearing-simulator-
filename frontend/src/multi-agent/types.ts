@@ -22,6 +22,7 @@ export interface AgentQuestion {
   color: string;
   question: string;
   timestamp: string;
+  selected?: boolean;     // true = chosen to interrupt (shown in Judge Activity)
   audio?: string;         // Base64-encoded TTS audio (opus)
   audio_format?: string;  // e.g. 'opus'
 }
@@ -92,6 +93,16 @@ export interface AgendaUpdate {
   regeneration_needed?: boolean;  // backend signals when agendas should be regenerated
 }
 
+export interface ArgumentScore {
+  speaker: string;            // "appellant" | "respondent"
+  clarity: number;            // 0-10
+  legal_reasoning: number;    // 0-10
+  responsiveness: number;     // 0-10
+  persuasiveness: number;     // 0-10
+  overall: number;            // 0-10
+  feedback: string;
+}
+
 export interface CounterArgument {
   agent_id: string;
   agent_name: string;
@@ -99,6 +110,26 @@ export interface CounterArgument {
   topic: string;
   counter_argument: string;
   timestamp: string;
+}
+
+export interface OpponentResponse {
+  response_type: 'rebuttal' | 'exploitation' | 'affirmative';
+  argument: string;
+  strategy_note: string;
+  topic: string;
+  strength: number;
+  timestamp: string;
+  audio?: string;         // Base64-encoded TTS audio
+  audio_format?: string;  // e.g. 'mp3'
+}
+
+export interface ChatMessage {
+  id: number;
+  role: 'user' | 'judge' | 'opponent';
+  text: string;
+  agentName?: string;
+  agentColor?: string;
+  timestamp: number;
 }
 
 // ── Orchestrated‑agent agenda types ────────────────────────────────────────

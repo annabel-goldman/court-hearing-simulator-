@@ -1,0 +1,148 @@
+/**
+ * Score Log — sl-* classes
+ * Uses --ma-* design tokens from multi-agent/styles/variables.css
+ */
+
+/* ── Root ───────────────────────────────────────────────────────────────── */
+
+.sl-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-sm);
+}
+
+.sl-log__placeholder {
+  color: var(--ma-text-dim);
+  font-style: italic;
+  font-size: 0.875rem;
+  padding: var(--ma-space-sm) 0;
+}
+
+/* ── Entry ──────────────────────────────────────────────────────────────── */
+
+.sl-entry {
+  background: var(--ma-bg-secondary);
+  border-radius: var(--ma-radius-md);
+  border-left: 3px solid transparent;
+  padding: var(--ma-space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+  animation: sl-fade-in 0.2s ease;
+}
+
+@keyframes sl-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.sl-entry--appellant {
+  border-left-color: var(--ma-info);
+}
+
+.sl-entry--respondent {
+  border-left-color: var(--ma-opponent, #e67e22);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.sl-entry__header {
+  display: flex;
+  align-items: center;
+  gap: var(--ma-space-sm);
+}
+
+.sl-speaker {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--ma-radius-sm);
+}
+
+.sl-speaker--appellant {
+  background: rgba(99, 179, 237, 0.15);
+  color: var(--ma-info);
+}
+
+.sl-speaker--respondent {
+  background: var(--ma-opponent-bg, rgba(230, 126, 34, 0.15));
+  color: var(--ma-opponent, #e67e22);
+}
+
+.sl-overall {
+  flex-shrink: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  min-width: 2rem;
+  text-align: center;
+  line-height: 1;
+}
+
+.sl-overall--high  { color: var(--ma-success); }
+.sl-overall--mid   { color: #e0b040; }
+.sl-overall--low   { color: var(--ma-error); }
+
+.sl-feedback {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: var(--ma-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Dimension bars ─────────────────────────────────────────────────────── */
+
+.sl-dims {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem var(--ma-space-sm);
+}
+
+.sl-dim {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sl-dim__label {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--ma-text-dim);
+  width: 5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.sl-dim__track {
+  flex: 1;
+  height: 0.3rem;
+  background: var(--ma-bg-tertiary);
+  border-radius: var(--ma-radius-full);
+  overflow: hidden;
+}
+
+.sl-dim__fill {
+  height: 100%;
+  border-radius: var(--ma-radius-full);
+  background: var(--ma-info);
+  transition: width 0.3s ease;
+}
+
+.sl-dim__fill--respondent {
+  background: var(--ma-opponent, #e67e22);
+}
+
+.sl-dim__value {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--ma-text-muted);
+  width: 1.4rem;
+  text-align: right;
+}

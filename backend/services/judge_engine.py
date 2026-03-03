@@ -16,6 +16,22 @@ from dotenv import load_dotenv
 # Load environment variables from the root .env file
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
 
+# ---------------------------------------------------------------------------
+# Config cache — avoids re-reading judge_config.json on every LLM call.
+# Config is re-read when the cached value is older than _JUDGE_CFG_TTL seconds,
+# which is short enough to pick up UI saves promptly without disk I/O per call.
+# ---------------------------------------------------------------------------
+_judge_cfg_cache: dict = {}
+_JUDGE_CFG_TTL = 30  # seconds
+
+def _get_cached_judge_config():
+    from services.judge_config import load_config
+    now = time.time()
+    if now - _judge_cfg_cache.get("ts", 0) > _JUDGE_CFG_TTL:
+        _judge_cfg_cache["cfg"] = load_config()
+        _judge_cfg_cache["ts"] = now
+    return _judge_cfg_cache["cfg"]
+
 
 @dataclass
 class ArgumentScore:
@@ -49,7 +65,7 @@ def get_openai_client():
     return _openai_client
 
 # Model router integration — used for all judge LLM calls
-from model_router import get_task_client
+from model_router import get_task_client, extract_content, task_extra_body
 
 
 class MootCourtContext:
@@ -165,7 +181,12 @@ class JudgeEngine:
         return self.contexts[session_id]
     
     def _get_judge_system_prompt(self) -> str:
-        """Get the system prompt for the judge based on personality."""
+        """Get the system prompt for the judge, loaded from config with hardcoded fallback."""
+        cfg = _get_cached_judge_config()
+        if cfg.judge_prompt.strip():
+            return cfg.judge_prompt
+
+        # Hardcoded fallback (used only when config prompt is empty)
         base_prompt = """You are a federal appellate court judge presiding over a moot court argument.
 Your role is to:
 1. Listen carefully to the advocate's argument
@@ -181,13 +202,13 @@ Guidelines:
 - Don't interrupt too frequently (allow advocate to develop points)
 - Questions should be substantive and relevant to the case
 - Use natural judicial language and tone"""
-        
+
         personality_additions = {
             "strict": "\n\nYou are a strict, demanding judge who challenges arguments rigorously and expects precise legal reasoning.",
             "lenient": "\n\nYou are a more lenient judge who gives advocates room to explain but still asks clarifying questions when needed.",
             "socratic": "\n\nYou use the Socratic method, asking questions to guide the advocate to discover weaknesses in their own argument."
         }
-        
+
         return base_prompt + personality_additions.get(self.judge_personality, "")
 
     _OMIT_SECTION = "\n__OMIT_SECTION__"
@@ -333,10 +354,11 @@ Respond in JSON format:
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
-                max_tokens=300
+                max_tokens=1024,
+                extra_body=task_extra_body("judge_interrupt"),
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = extract_content(response)
             
             # Remove markdown code blocks if present
             if content.startswith("```"):
@@ -405,11 +427,12 @@ Format as a professional judicial summary."""
                     {"role": "system", "content": system_prompt or default_system},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3, # Low temperature for factual summary
-                max_tokens=500
+                temperature=0.3,
+                max_tokens=500,
+                extra_body=task_extra_body("brief_summary"),
             )
-            
-            return response.choices[0].message.content.strip()
+
+            return extract_content(response) or "Judicial summary unavailable."
             
         except Exception as e:
             print(f"Error summarizing briefs: {e}")
@@ -455,10 +478,11 @@ Return as JSON array:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=1000,
+                extra_body=task_extra_body("seed_questions"),
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = extract_content(response)
             print(f"[SeedQuestions] Raw OpenAI response:\n{content[:500]}...")
             
             # Extract JSON array from markdown code blocks if present
@@ -532,11 +556,12 @@ Return as JSON array:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=800,
+                extra_body=task_extra_body("synthesize_question"),
             )
-            
-            content = response.choices[0].message.content.strip()
-            
+
+            content = extract_content(response)
+
             # Extract JSON
             json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
             if json_match:
@@ -575,11 +600,17 @@ Return as JSON array:
 
         context = self.get_or_create_context(session_id)
 
-        parts = [
-            "You are a moot court judge evaluating an advocate's oral argument.\n"
-            "Score the following argument turn on four dimensions (0–10 each), then give an overall score.\n\n"
-        ]
+        cfg = _get_cached_judge_config()
+        dims = cfg.reward_dimensions
 
+        dim_lines = "\n".join(
+            f"  {d.name:<22} — {d.description}" for d in dims
+        )
+        formula = " + ".join(f"{d.name}×{d.weight}" for d in dims)
+        example_fields = ", ".join(f'"{d.name}": 7.0' for d in dims)
+        system_msg = cfg.scoring_prompt_template.strip() or "You are an expert moot court evaluator. Reply with JSON only."
+
+        parts: list[str] = []
         if brief_summary:
             parts.append(f"BRIEF SUMMARY (case context):\n{brief_summary[:400]}\n\n")
         if topic:
@@ -590,16 +621,12 @@ Return as JSON array:
         parts.append(
             f"SPEAKER: {speaker.upper()}\n"
             f"ARGUMENT:\n{utterance[:1200]}\n\n"
-            "Score each dimension 0-10 (decimals allowed):\n"
-            "  clarity         — how clearly and precisely the point is stated\n"
-            "  legal_reasoning — correct use of precedent, statutes, or legal logic\n"
-            "  responsiveness  — directly addresses the judge's question / the disputed issue\n"
-            "  persuasiveness  — overall persuasive impact on the bench\n\n"
-            "overall = weighted average: clarity×0.2 + legal_reasoning×0.35 + responsiveness×0.25 + persuasiveness×0.2\n\n"
+            f"Score each dimension 0-10 (decimals allowed):\n"
+            f"{dim_lines}\n\n"
+            f"overall = weighted average: {formula}\n\n"
             "Also provide a one-sentence 'feedback' coaching note for the advocate.\n\n"
-            "Respond with valid JSON only:\n"
-            '{"clarity": 7.5, "legal_reasoning": 6.0, "responsiveness": 8.0, '
-            '"persuasiveness": 7.0, "overall": 7.0, "feedback": "..."}'
+            "Respond with valid JSON only — no markdown:\n"
+            f"{{{example_fields}, \"overall\": 7.0, \"feedback\": \"...\"}}"
         )
 
         prompt = "".join(parts)
@@ -612,14 +639,15 @@ Return as JSON array:
             response = await client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You are an expert moot court evaluator. Reply with JSON only."},
+                    {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
-                max_tokens=200,
+                max_tokens=250,
+                extra_body=task_extra_body("argument_scoring"),
             )
 
-            content = response.choices[0].message.content.strip()
+            content = extract_content(response)
 
             # Strip markdown code fences
             if content.startswith("```"):
@@ -632,6 +660,8 @@ Return as JSON array:
 
             raw = json.loads(content)
 
+            # Map configured dim names → the four fixed ArgumentScore fields.
+            # If user renamed dims, fall back to 5.0 for any unrecognised name.
             score = ArgumentScore(
                 speaker=speaker,
                 utterance_preview=utterance[:120],

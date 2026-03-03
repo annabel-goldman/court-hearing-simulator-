@@ -36,7 +36,7 @@ logger = logging.getLogger("court-simulator.projected_timeline")
 # Model routing — uses TINY tier for lightweight structured extraction
 # ---------------------------------------------------------------------------
 
-from model_router import get_task_client
+from model_router import get_task_client, ModelTier, local_extra_body, extract_content
 
 
 def _get_model() -> str:
@@ -180,9 +180,9 @@ async def _extract_issues(client, appellant: str, appellee: str) -> dict:
         ],
         temperature=0.2,
         max_tokens=800,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        extra_body=local_extra_body(ModelTier.TINY),
     )
-    raw = response.choices[0].message.content.strip()
+    raw = extract_content(response)
     return _parse_json(raw, fallback={
         "case_summary": "Case summary unavailable.",
         "key_legal_issues": [],
@@ -276,10 +276,10 @@ async def _generate_agenda(
         ],
         temperature=0.6,
         max_tokens=1500,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        extra_body=local_extra_body(ModelTier.TINY),
     )
 
-    raw = response.choices[0].message.content.strip()
+    raw = extract_content(response)
     logger.info("Lens %s — raw response start: %r", lens_def["lens"], raw[:300])
     data = _parse_json(raw, fallback={"rationale": "Parse error.", "topics": []})
 

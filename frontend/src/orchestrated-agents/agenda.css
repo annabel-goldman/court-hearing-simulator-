@@ -602,11 +602,32 @@
   margin: 0;
 }
 
+.oa-feed__show-more {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0;
+  background: none;
+  border: 1px dashed var(--ma-border, #444);
+  border-radius: 6px;
+  color: var(--ma-accent, #60a5fa);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.oa-feed__show-more:hover {
+  background: var(--ma-bg-secondary, rgba(255,255,255,0.04));
+  border-color: var(--ma-accent, #60a5fa);
+}
+
 .oa-feed__item {
   border-left: 3px solid;
   padding: 0.75rem 1rem;
   border-radius: 0 6px 6px 0;
   background: var(--ma-bg-secondary, var(--ma-surface));
+  min-width: 0;
+  overflow: hidden;
 }
 
 .oa-feed__header {
@@ -643,4 +664,342 @@
   color: var(--ma-text-primary);
   margin: 0;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.oa-feed__type-badge {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--ma-radius-sm, 4px);
+}
+
+.oa-feed__type-badge--question {
+  background: rgba(99, 179, 237, 0.15);
+  color: var(--ma-info);
+}
+
+.oa-feed__type-badge--counter {
+  background: var(--ma-opponent-bg, rgba(230, 126, 34, 0.15));
+  color: var(--ma-opponent, #e67e22);
+}
+
+.oa-feed__time {
+  font-size: 0.65rem;
+  color: var(--ma-text-dim);
+  margin-left: auto;
+}
+
+/* ── Opponent feed extras ───────────────────────────────────────────────── */
+
+.oa-opponent__strength-bar {
+  flex: 0 0 50px;
+  height: 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-left: auto;
+}
+
+.oa-opponent__strength-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.oa-feed__strategy {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--ma-text-dim);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.oa-feed__badge {
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Agent toggle chips ─────────────────────────────────────────────────── */
+
+.oa-agent-toggles {
+  margin-top: var(--ma-space-sm);
+}
+
+.oa-agent-toggles__label {
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: var(--ma-text-muted);
+  margin: 0 0 var(--ma-space-xs);
+}
+
+.oa-agent-toggles__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ma-space-xs);
+}
+
+.oa-agent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--ma-bg-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--ma-radius-full, 999px);
+  color: var(--ma-text-primary);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.25rem 0.6rem;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.oa-agent-toggle:hover {
+  background: var(--ma-bg-tertiary);
+}
+
+.oa-agent-toggle--off {
+  opacity: 0.35;
+  color: var(--ma-text-dim);
+  text-decoration: line-through;
+}
+
+.oa-agent-toggle__dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--ma-text-dim);
+  flex-shrink: 0;
+}
+
+/* ── Collapsible setup section ─────────────────────────────────────────── */
+
+.oa-setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.oa-setup-section__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md, 0.5rem);
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.6rem 1rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.oa-setup-section__toggle:hover {
+  color: var(--ma-text-primary);
+  border-color: var(--ma-border-muted);
+}
+
+.oa-setup-section__label {
+  pointer-events: none;
+}
+
+.oa-setup-section__chevron {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  pointer-events: none;
+}
+
+.oa-setup-section--collapsed .oa-setup-section__chevron {
+  transform: rotate(-90deg);
+}
+
+.oa-setup-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.2s ease;
+  max-height: 5000px;
+  opacity: 1;
+}
+
+.oa-setup-section--collapsed .oa-setup-section__body {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+/* ── Full-width setup strip ──────────────────────────────────────────────── */
+
+.oa-setup-section--fullwidth {
+  max-width: 100rem;
+  margin: 0 auto;
+  padding: var(--ma-space-xl) var(--ma-space-lg) var(--ma-space-md);
+}
+
+.oa-setup-section__body--horizontal {
+  flex-direction: row;
+  align-items: start;
+  flex-wrap: wrap;
+  gap: var(--ma-space-lg);
+}
+
+.oa-setup-section__body--horizontal > * {
+  flex: 1 1 260px;
+  min-width: 220px;
+  margin-top: 0;
+}
+
+/* ── Right-column section groups ───────────────────────────────────────── */
+
+.oa-section-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.oa-section-group__label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ma-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+  border-left: 2px solid var(--ma-info);
+  padding-left: 0.5rem;
+}
+
+/* ── Unified content panel (replaces Card/CardHeader/CardContent) ─────────── */
+/* Matches the compact visual language of the config panels.                   */
+
+.oa-panel {
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.oa-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--ma-border-default);
+  gap: var(--ma-space-sm);
+  flex-shrink: 0;
+}
+
+.oa-panel__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ma-text-muted);
+  margin: 0;
+  flex: 1;
+}
+
+.oa-panel__action {
+  flex-shrink: 0;
+}
+
+.oa-panel__body {
+  padding: var(--ma-space-md);
+  color: var(--ma-text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  flex: 1;
+}
+
+/* ── Nav links in header ───────────────────────────────────────────────────── */
+
+.oa-header-nav {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.oa-header-nav__link {
+  color: var(--ma-text-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.oa-header-nav__link:hover {
+  color: var(--ma-text-primary);
+}
+
+.oa-header-nav__link--active {
+  color: var(--ma-info);
+}
+
+/* ── Judge Introduction Banner ─────────────────────────────────────────────── */
+
+.oa-judge-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+.oa-judge-intro__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f0c040, #e6a817);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 0 20px rgba(240, 192, 64, 0.3);
+  animation: ma-pulse 1.5s infinite;
+}
+
+.oa-judge-intro__speaker {
+  color: #f0c040;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.75rem;
+}
+
+.oa-judge-intro__text {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  font-style: italic;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* ── Opponent feed badge (inline-style replacement) ────────────────────────── */
+
+.oa-feed__badge--opponent {
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.7em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }

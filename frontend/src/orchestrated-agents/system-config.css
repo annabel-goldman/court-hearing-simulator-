@@ -1,0 +1,334 @@
+/**
+ * System Configuration Panel — scp-* classes
+ * Uses --ma-* design tokens from multi-agent/styles/variables.css
+ *
+ * Accent colour: violet (#8b5cf6) — distinct from judge (blue) and opponent (orange)
+ */
+
+/* ── Panel wrapper ─────────────────────────────────────────────────────── */
+
+.scp-panel {
+  margin-top: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Collapsible header button ─────────────────────────────────────────── */
+
+.scp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid #8b5cf6;
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.scp-header:hover {
+  color: var(--ma-text-primary);
+  background: var(--ma-bg-tertiary);
+}
+
+.scp-header--open {
+  color: var(--ma-text-primary);
+}
+
+.scp-header__label {
+  flex: 1;
+}
+
+.scp-header__chevron {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  color: var(--ma-text-dim);
+}
+
+.scp-header--open .scp-header__chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible body ──────────────────────────────────────────────────── */
+
+.scp-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.2s ease;
+  max-height: 3000px;
+  opacity: 1;
+  margin-top: 0.5rem;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid #8b5cf6;
+  border-radius: var(--ma-radius-md);
+}
+
+.scp-body--collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.scp-body__inner {
+  padding: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Tab bar ───────────────────────────────────────────────────────────── */
+
+.scp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--ma-border-default);
+  gap: 0;
+}
+
+.scp-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.scp-tab:hover {
+  color: var(--ma-text-primary);
+}
+
+.scp-tab--active {
+  color: #8b5cf6;
+  border-bottom-color: #8b5cf6;
+  font-weight: 600;
+}
+
+/* ── Tab content ───────────────────────────────────────────────────────── */
+
+.scp-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Labels & help ─────────────────────────────────────────────────────── */
+
+.scp-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ma-text-secondary);
+  margin-bottom: var(--ma-space-xs);
+}
+
+.scp-help {
+  font-size: 0.75rem;
+  color: var(--ma-text-muted);
+  line-height: 1.4;
+}
+
+.scp-error-text {
+  font-size: 0.75rem;
+  color: var(--ma-error);
+}
+
+/* ── Inputs & selects ──────────────────────────────────────────────────── */
+
+.scp-input {
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-size: 0.82rem;
+  padding: 0.3rem var(--ma-space-sm);
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.scp-input:focus {
+  border-color: #8b5cf6;
+  outline: none;
+}
+
+.scp-select {
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-size: 0.82rem;
+  padding: 0.3rem var(--ma-space-sm);
+  transition: border-color 0.15s;
+  cursor: pointer;
+  width: 100%;
+}
+
+.scp-select:focus {
+  border-color: #8b5cf6;
+  outline: none;
+}
+
+/* ── Field ─────────────────────────────────────────────────────────────── */
+
+.scp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+}
+
+/* ── Toggle (enable/disable) ───────────────────────────────────────────── */
+
+.scp-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ma-space-sm);
+}
+
+.scp-toggle {
+  position: relative;
+  width: 2.5rem;
+  height: 1.4rem;
+  background: var(--ma-bg-tertiary);
+  border-radius: var(--ma-radius-full);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.scp-toggle--on {
+  background: #8b5cf6;
+}
+
+.scp-toggle__thumb {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  background: #fff;
+  border-radius: var(--ma-radius-full);
+  transition: transform 0.2s;
+}
+
+.scp-toggle--on .scp-toggle__thumb {
+  transform: translateX(1.1rem);
+}
+
+.scp-toggle-label {
+  font-size: 0.85rem;
+  color: var(--ma-text-secondary);
+}
+
+/* ── Tier rows (Models tab) ────────────────────────────────────────────── */
+
+.scp-tier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-sm);
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  background: var(--ma-bg-primary);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  transition: border-color 0.15s;
+}
+
+.scp-tier--enabled {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.scp-tier__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ma-space-sm);
+}
+
+.scp-tier__name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ma-text-secondary);
+}
+
+.scp-tier__desc {
+  font-size: 0.7rem;
+  color: var(--ma-text-dim);
+  flex: 1;
+}
+
+.scp-tier__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--ma-space-sm);
+}
+
+.scp-tier__fields--full {
+  grid-template-columns: 1fr;
+}
+
+/* ── Provider radio buttons (STT tab) ──────────────────────────────────── */
+
+.scp-radios {
+  display: flex;
+  gap: var(--ma-space-sm);
+}
+
+.scp-radio-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--ma-bg-primary);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--ma-text-secondary);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.scp-radio-option:hover {
+  border-color: var(--ma-border-muted);
+  background: var(--ma-bg-tertiary);
+}
+
+.scp-radio-option input[type="radio"] {
+  accent-color: #8b5cf6;
+  flex-shrink: 0;
+}
+
+.scp-radio-option--selected {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+  color: var(--ma-text-primary);
+}
+
+/* ── Actions bar ───────────────────────────────────────────────────────── */
+
+.scp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ma-space-sm);
+  padding-top: var(--ma-space-sm);
+  border-top: 1px solid var(--ma-border-default);
+}
