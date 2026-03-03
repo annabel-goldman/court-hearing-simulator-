@@ -42,6 +42,7 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
   const [userBrief, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBrief, setOpposingBrief] = useState<BriefData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
 
   const handleFileUpload = useCallback(async (file: File, type: 'user' | 'opposing') => {
     try {
@@ -61,10 +62,11 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
   }, []);
 
   const handleStart = useCallback(() => {
-    if (!userBrief || !opposingBrief) return;
+    if (!userBrief || !opposingBrief || isStarting) return;
+    setIsStarting(true);
     setError(null);
     onBriefsReady(userBrief, opposingBrief);
-  }, [userBrief, opposingBrief, onBriefsReady]);
+  }, [userBrief, opposingBrief, isStarting, onBriefsReady]);
 
   const canStart = userBrief && opposingBrief;
 
@@ -101,6 +103,7 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
             variant="primary"
             size="lg"
             fullWidth
+            disabled={isStarting}
             onClick={handleStart}
           >
             Start

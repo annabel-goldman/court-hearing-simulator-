@@ -23,6 +23,7 @@ interface OpponentConfig {
   system_prompt: string;
   aggressiveness: number;
   enabled_types: string[];
+  voice_id: string;
 }
 
 type Tab = 'prompt' | 'strategy';
@@ -47,6 +48,7 @@ export function OpponentConfigPanel() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveError, setSaveError] = useState('');
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (saveStatus === 'success') {
       successTimerRef.current = setTimeout(() => setSaveStatus('idle'), 3000);
@@ -138,6 +140,7 @@ export function OpponentConfigPanel() {
           : [...c.enabled_types, typeId],
       };
     });
+
 
   // ── Aggressiveness label ──────────────────────────────────────────────
 

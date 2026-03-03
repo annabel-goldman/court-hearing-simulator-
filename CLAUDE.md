@@ -26,7 +26,7 @@ Every architectural decision serves latency and naturalness:
 | Package manager | **`uv`** — always `uv run` and `uv sync` |
 | Frontend | React + TypeScript + Vite (`frontend/`) |
 | LLM inference | Local llama-server (OpenAI-compatible, 3 ports) |
-| STT | faster-whisper (local GPU) or OpenAI Whisper API |
+| STT | faster-whisper (local GPU) or OpenAI Whisper API (Gladia Live optional/experimental) |
 | TTS | OpenAI TTS (opus format) or local compatible endpoint |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` (fallback: TF-IDF trigrams) |
 

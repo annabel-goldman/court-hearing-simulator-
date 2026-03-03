@@ -149,6 +149,53 @@ export default function OrchestratedAgents() {
     return () => { if (mctsFlushRef.current) clearInterval(mctsFlushRef.current); };
   }, []);
 
+  const [voices, setVoices] = useState<{ id: string; name: string }[]>([]);
+  const [opponentVoiceId, setOpponentVoiceId] = useState('');
+  const [judgeVoiceId, setJudgeVoiceId] = useState('');
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/tts/voices`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setVoices)
+      .catch(() => {});
+    fetch(`${API_URL}/api/opponent-config`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => { if (cfg?.voice_id !== undefined) setOpponentVoiceId(cfg.voice_id); })
+      .catch(() => {});
+    fetch(`${API_URL}/api/tts-config`)
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => { if (cfg?.voice !== undefined) setJudgeVoiceId(cfg.voice); })
+      .catch(() => {});
+  }, []);
+
+  const handleOpponentVoiceChange = useCallback(async (voiceId: string) => {
+    setOpponentVoiceId(voiceId);
+    try {
+      const cfg = await fetch(`${API_URL}/api/opponent-config`).then(r => r.json());
+      await fetch(`${API_URL}/api/opponent-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, voice_id: voiceId }),
+      });
+    } catch (e) {
+      console.error('Failed to save opponent voice:', e);
+    }
+  }, []);
+
+  const handleJudgeVoiceChange = useCallback(async (voiceId: string) => {
+    setJudgeVoiceId(voiceId);
+    try {
+      const cfg = await fetch(`${API_URL}/api/tts-config`).then(r => r.json());
+      await fetch(`${API_URL}/api/tts-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cfg, voice: voiceId }),
+      });
+    } catch (e) {
+      console.error('Failed to save judge voice:', e);
+    }
+  }, []);
+
   useEffect(() => {
     async function loadAgents() {
       try {
@@ -893,8 +940,21 @@ export default function OrchestratedAgents() {
           {/* Right column — Judge output + Opponent output */}
           <div className="ma-main__column ma-main__column--right">
             <div className="oa-panel">
-              <div className="oa-panel__header">
+              <div className="oa-panel__header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span className="oa-panel__title">Judge Activity</span>
+                {voices.length > 0 && (
+                  <select
+                    value={judgeVoiceId}
+                    onChange={e => handleJudgeVoiceChange(e.target.value)}
+                    title="Voice for judge panel (winning agent)"
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.3rem', background: 'var(--oa-bg-panel, #1a1f2e)', color: 'var(--oa-text-secondary, #9ca3af)', border: '1px solid var(--oa-border, #2d3548)', borderRadius: '4px', maxWidth: '130px' }}
+                  >
+                    <option value="">default voice</option>
+                    {voices.map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="oa-panel__body">
                 <JudgeActivityFeed questions={questions} counterArguments={counterArguments} />
@@ -902,8 +962,21 @@ export default function OrchestratedAgents() {
             </div>
 
             <div className="oa-panel">
-              <div className="oa-panel__header">
+              <div className="oa-panel__header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span className="oa-panel__title">Opposing Counsel</span>
+                {voices.length > 0 && (
+                  <select
+                    value={opponentVoiceId}
+                    onChange={e => handleOpponentVoiceChange(e.target.value)}
+                    title="Voice for opposing counsel"
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.3rem', background: 'var(--oa-bg-panel, #1a1f2e)', color: 'var(--oa-text-secondary, #9ca3af)', border: '1px solid var(--oa-border, #2d3548)', borderRadius: '4px', maxWidth: '130px' }}
+                  >
+                    <option value="">default voice</option>
+                    {voices.map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
               <div className="oa-panel__body">
                 <OpponentFeed responses={opponentResponses} />

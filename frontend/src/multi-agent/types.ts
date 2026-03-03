@@ -14,6 +14,7 @@ export interface Agent {
   created_at?: string;
   is_default?: boolean;
   is_custom?: boolean;  // True if this agent can be deleted
+  voice_id?: string;    // TTS voice ID; "" or undefined = provider default
 }
 
 export interface AgentQuestion {

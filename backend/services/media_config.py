@@ -26,6 +26,7 @@ _STT_PATH = Path(__file__).parent.parent / "data" / "stt_config.json"
 @dataclass
 class TTSConfig:
     enabled: bool = True
+    provider: str = "openai"   # "openai" | "cartesia"
     api_key: str = ""
     base_url: str = ""
     voice: str = "onyx"
@@ -48,8 +49,19 @@ class STTConfig:
 # ---------------------------------------------------------------------------
 
 def get_default_tts_config() -> TTSConfig:
+    tts_provider = os.getenv("TTS_PROVIDER", "openai").lower().strip()
+    if tts_provider == "cartesia":
+        return TTSConfig(
+            enabled=True,
+            provider="cartesia",
+            api_key=os.getenv("CARTESIA_API_KEY", os.getenv("TTS_API_KEY", "")),
+            base_url="",
+            voice=os.getenv("CARTESIA_VOICE_ID", ""),
+            model=os.getenv("TTS_MODEL", "sonic-2"),
+        )
     return TTSConfig(
         enabled=True,
+        provider="openai",
         api_key=os.getenv("TTS_API_KEY", os.getenv("OPENAI_API_KEY", "")),
         base_url=os.getenv("TTS_BASE_URL", os.getenv("OPENAI_BASE_URL", "")),
         voice="onyx",
@@ -60,12 +72,12 @@ def get_default_tts_config() -> TTSConfig:
 def get_default_stt_config() -> STTConfig:
     return STTConfig(
         provider=os.getenv("STT_PROVIDER", "openai"),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        base_url=os.getenv("OPENAI_BASE_URL", ""),
-        model="openai/gpt-audio-mini",
-        whisper_model=os.getenv("WHISPER_MODEL", "medium"),
-        device=os.getenv("WHISPER_DEVICE", "cuda"),
-        compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "float16"),
+        api_key=os.getenv("GROQ_API_KEY", os.getenv("STT_API_KEY", os.getenv("OPENAI_API_KEY", ""))),
+        base_url=os.getenv("GROQ_BASE_URL", os.getenv("STT_BASE_URL", os.getenv("OPENAI_BASE_URL", ""))),
+        model="whisper-large-v3-turbo",
+        whisper_model="medium",
+        device="cuda",
+        compute_type="float16",
     )
 
 
@@ -80,7 +92,12 @@ def load_tts_config() -> TTSConfig:
         with _TTS_PATH.open("r", encoding="utf-8") as fh:
             raw = json.load(fh)
         valid = TTSConfig.__dataclass_fields__
-        return TTSConfig(**{k: v for k, v in raw.items() if k in valid})
+        cfg = TTSConfig(**{k: v for k, v in raw.items() if k in valid})
+        # Env var always wins for provider selection
+        env_provider = os.getenv("TTS_PROVIDER", "").lower().strip()
+        if env_provider:
+            cfg.provider = env_provider
+        return cfg
     except Exception as exc:
         logger.warning("Failed to load tts_config.json, using defaults: %s", exc)
         return get_default_tts_config()
@@ -102,7 +119,12 @@ def load_stt_config() -> STTConfig:
         with _STT_PATH.open("r", encoding="utf-8") as fh:
             raw = json.load(fh)
         valid = STTConfig.__dataclass_fields__
-        return STTConfig(**{k: v for k, v in raw.items() if k in valid})
+        cfg = STTConfig(**{k: v for k, v in raw.items() if k in valid})
+        # Env var always wins for provider selection
+        env_provider = os.getenv("STT_PROVIDER", "").lower().strip()
+        if env_provider:
+            cfg.provider = env_provider
+        return cfg
     except Exception as exc:
         logger.warning("Failed to load stt_config.json, using defaults: %s", exc)
         return get_default_stt_config()

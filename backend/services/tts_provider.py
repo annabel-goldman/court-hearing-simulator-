@@ -121,6 +121,70 @@ class OpenAITTSProvider(TTSProvider):
             return base64.b64encode(audio_bytes).decode("utf-8")
 
 
+class CartesiaTTSProvider(TTSProvider):
+    """Cartesia TTS provider using the /tts/bytes endpoint.
+
+    Env vars:
+      CARTESIA_API_KEY  — required
+      CARTESIA_VOICE_ID — voice UUID (find one at app.cartesia.ai/voices)
+                          defaults to a0e99841-438c-4a64-b679-ae501e7d6091
+      TTS_MODEL         — Cartesia model ID (default: sonic-2)
+    """
+
+    audio_format: str = "mp3"
+    _API_URL = "https://api.cartesia.ai/tts/bytes"
+    _CARTESIA_VERSION = "2024-06-10"
+    _DEFAULT_VOICE = "a0e99841-438c-4a64-b679-ae501e7d6091"
+    _DEFAULT_MODEL = "sonic-2"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        voice_id: str | None = None,
+        model: str | None = None,
+    ):
+        self._api_key  = (api_key  or "").strip() or os.getenv("CARTESIA_API_KEY", "")
+        self._voice_id = (voice_id or "").strip() or os.getenv("CARTESIA_VOICE_ID", self._DEFAULT_VOICE)
+        self._model    = (model    or "").strip() or os.getenv("TTS_MODEL", self._DEFAULT_MODEL)
+
+        if not self._api_key:
+            logger.warning("CartesiaTTSProvider: CARTESIA_API_KEY not set — TTS will return empty.")
+        else:
+            logger.info("TTS enabled — Cartesia (model=%s, voice=%s)", self._model, self._voice_id)
+
+    async def synthesize(self, text: str, voice: str = "default") -> str:
+        if not self._api_key or not text.strip():
+            return ""
+
+        import httpx
+        import base64
+
+        # `voice` arg here is an override; for Cartesia it must be a UUID
+        resolved_voice = voice if (voice != "default" and len(voice) > 8) else self._voice_id
+
+        payload = {
+            "model_id": self._model,
+            "transcript": text,
+            "voice": {"mode": "id", "id": resolved_voice},
+            "output_format": {"container": "mp3", "sample_rate": 24000, "bit_rate": 128000},
+            "language": "en",
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Cartesia-Version": self._CARTESIA_VERSION,
+            "Content-Type": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(self._API_URL, json=payload, headers=headers)
+                resp.raise_for_status()
+                return base64.b64encode(resp.content).decode("utf-8")
+        except Exception as e:
+            logger.error("[TTS] Cartesia synthesis failed: %s", e)
+            return ""
+
+
 def get_tts_provider(provider_name: str = "openai") -> TTSProvider:
     """Return a TTS provider, applying runtime config from media_config if available."""
     try:
@@ -128,6 +192,13 @@ def get_tts_provider(provider_name: str = "openai") -> TTSProvider:
         cfg = load_tts_config()
         if not cfg.enabled:
             return _DisabledTTSProvider()
+        provider = getattr(cfg, "provider", "openai").lower().strip()
+        if provider == "cartesia":
+            return CartesiaTTSProvider(
+                api_key=cfg.api_key or None,
+                voice_id=cfg.voice or None,
+                model=cfg.model or None,
+            )
         return OpenAITTSProvider(
             api_key_override=cfg.api_key or None,
             base_url_override=cfg.base_url or None,
@@ -136,4 +207,7 @@ def get_tts_provider(provider_name: str = "openai") -> TTSProvider:
         )
     except Exception as exc:
         logger.warning("Could not load TTS runtime config (%s), using env-var defaults", exc)
+        name = (provider_name or os.getenv("TTS_PROVIDER", "openai")).lower().strip()
+        if name == "cartesia":
+            return CartesiaTTSProvider()
         return OpenAITTSProvider()

@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 import anyio.to_thread
+import httpx
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -172,6 +173,7 @@ class OpponentConfigRequest(BaseModel):
     system_prompt: str
     aggressiveness: float = 0.7
     enabled_types: List[str] = ["rebuttal", "exploitation", "affirmative"]
+    voice_id: str = ""
 
 class TTSConfigRequest(BaseModel):
     enabled: bool = True
@@ -455,6 +457,40 @@ async def multi_agent_summarize(request: MultiAgentSummarizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _extract_final_draft(text: str) -> str:
+    """Strip inline 'Thinking Process' / draft analysis that some models emit as plain text.
+
+    Some thinking-capable models (e.g. DeepSeek-R1 via OpenRouter) write their
+    chain-of-thought as numbered sections ("1. **Analyze...**", "2. **Drafting...**")
+    rather than inside <think> tags, so extract_content's tag-stripping won't catch it.
+    This function detects that pattern and returns only the last coherent speech block.
+    """
+    if not re.search(r'Thinking Process|(?m)^\d+\.\s+\*\*', text):
+        return text
+
+    # Strategy 1: extract speech blocks that appear between a section header and
+    # a metadata line (*Word Count*, *Sentence Count*, *Constraint*, next numbered section).
+    drafts = re.findall(
+        r'\d+\.\s+\*\*[^*\n]+\*\*:?\s*([\s\S]+?)(?=\*Word Count|\*Sentence|\*Constraint|\n\d+\.|\Z)',
+        text,
+    )
+    if drafts:
+        candidate = drafts[-1].strip().strip('"')
+        candidate = re.sub(r'\n\*[^\n]*', '', candidate).strip()
+        if len(candidate) > 20:
+            return candidate
+
+    # Strategy 2: take everything after the last bold section header
+    m = re.search(r'\d+\.\s+\*\*[^*\n]+\*\*:?\s*([\s\S]+)$', text)
+    if m:
+        candidate = m.group(1).strip().strip('"')
+        candidate = re.sub(r'\n\*[^\n]*', '', candidate).strip()
+        if len(candidate) > 20:
+            return candidate
+
+    return text
+
+
 @app.post("/api/multi-agent/judge-intro")
 async def generate_judge_intro(request: JudgeIntroRequest):
     """Generate a judge's opening introduction for the hearing and return TTS audio."""
@@ -478,8 +514,12 @@ async def generate_judge_intro(request: JudgeIntroRequest):
             + "; ".join(request.agenda_topics[:8]) + "."
         )
 
+    system_msg = (
+        "You are the Chief Justice of an appellate moot-court panel. "
+        "Output ONLY the opening statement — no analysis, no revision steps, "
+        "no word counts, no commentary. Speak directly and formally."
+    )
     prompt = (
-        "You are the Chief Justice presiding over an appellate moot-court hearing. "
         "Write a brief, authoritative opening statement (3-5 sentences) to begin the hearing. "
         "Summarize the case in one sentence, note the key issues the court will examine, "
         "and invite counsel for the petitioner to begin.\n\n"
@@ -495,12 +535,15 @@ async def generate_judge_intro(request: JudgeIntroRequest):
     try:
         resp = await client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.7,
             max_tokens=600,
             extra_body=task_extra_body("judge_intro"),
         )
-        intro_text = extract_content(resp).strip('"')
+        intro_text = _extract_final_draft(extract_content(resp).strip('"'))
     except Exception as e:
         logger.error("Judge intro generation failed: %s", e)
         intro_text = (
@@ -644,6 +687,7 @@ async def save_opponent_config_endpoint(req: OpponentConfigRequest):
         system_prompt=req.system_prompt,
         aggressiveness=req.aggressiveness,
         enabled_types=req.enabled_types,
+        voice_id=req.voice_id,
     )
     await anyio.to_thread.run_sync(lambda: save_opponent_config(cfg))
     return opponent_config_to_dict(cfg)
@@ -664,9 +708,10 @@ async def get_default_tts_config_endpoint():
 
 @app.post("/api/tts-config")
 async def save_tts_config_endpoint(req: TTSConfigRequest):
-    valid_voices = {"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "shimmer", "verse"}
-    if req.voice not in valid_voices:
-        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(valid_voices)}")
+    _openai_voices = {"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "shimmer", "verse"}
+    provider = os.getenv("TTS_PROVIDER", "openai").lower()
+    if provider != "cartesia" and req.voice and req.voice not in _openai_voices:
+        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(_openai_voices)}")
     if not req.model.strip():
         raise HTTPException(status_code=422, detail="model must not be empty")
     cfg = TTSConfig(
@@ -678,6 +723,30 @@ async def save_tts_config_endpoint(req: TTSConfigRequest):
     )
     await anyio.to_thread.run_sync(lambda: save_tts_config(cfg))
     return _redact_api_keys(media_config_to_dict(cfg))
+
+
+@app.get("/api/tts/voices")
+async def get_tts_voices():
+    """Return available TTS voices for the active provider."""
+    provider = os.getenv("TTS_PROVIDER", "openai").lower().strip()
+    if provider == "cartesia":
+        api_key = os.getenv("CARTESIA_API_KEY", "")
+        if not api_key:
+            return []
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://api.cartesia.ai/voices",
+                    headers={"Authorization": f"Bearer {api_key}", "Cartesia-Version": "2024-06-10"},
+                )
+                resp.raise_for_status()
+                return [{"id": v["id"], "name": v["name"]} for v in resp.json()]
+        except Exception as e:
+            logger.warning("Failed to fetch Cartesia voices: %s", e)
+            return []
+    # OpenAI / fallback
+    return [{"id": n, "name": n.capitalize()}
+            for n in ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "shimmer", "verse"]]
 
 
 # -----------------------------------------------------------------------------
@@ -798,6 +867,8 @@ class MultiAgentConnectionManager:
             'phase': 'SETUP',
             'last_agent_interrupt_time': None,  # datetime of last TTS interrupt
             '_last_active': time.monotonic(),   # for TTL eviction (network-drop guard)
+            # PCM audio buffer: accumulate small chunks before sending to STT
+            '_pcm_buffer': b'',
             # MCTS projection state
             'projection_flush_count': 0,   # total sentence-buffer flushes processed
             'last_mcts_flush': 0,          # flush count when MCTS last ran
@@ -818,6 +889,7 @@ class MultiAgentConnectionManager:
             sess['_last_active'] = time.monotonic()
 
     def evict_stale(self) -> None:
+        from services.stt_provider import GladiaLiveProvider
         now = time.monotonic()
         stale = [
             sid for sid, s in self.session_data.items()
@@ -825,6 +897,10 @@ class MultiAgentConnectionManager:
             and sid not in self.active_connections
         ]
         for sid in stale:
+            # Release the Gladia concurrent session slot before dropping state
+            stt = self.session_data[sid].get('_stt_provider')
+            if isinstance(stt, GladiaLiveProvider):
+                stt.stop_session(sid)
             del self.session_data[sid]
             logger.info("Evicted stale multi-agent session %s", sid)
 
@@ -964,6 +1040,130 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
             },
         })
 
+async def _process_ma_transcript(sid: str, transcript: str) -> None:
+    """Process a new STT transcript through the multi-agent pipeline.
+
+    Called by the audio handler (local Whisper path) and the Gladia live
+    transcript-drain task so the pipeline logic only lives in one place.
+    """
+    s = multi_agent_manager.session_data.get(sid)
+    if s is None:
+        return
+    tg = s.get('_tg')
+
+    s['transcript'] = s.get('transcript', '') + ' ' + transcript
+    await multi_agent_manager.send_json(sid, {
+        "type": "transcript_update",
+        "data": {"text": transcript},
+    })
+
+    buf = s.get('sentence_buffer', '') + ' ' + transcript
+    s['sentence_buffer'] = buf.lstrip()
+
+    # Cancel any pending sentence-silence scope — new words just arrived
+    old_scope: anyio.CancelScope | None = s.get('_silence_scope')
+    if old_scope is not None:
+        old_scope.cancel()
+
+    parts = multi_agent_manager._SENTENCE_BOUNDARY_RE.split(s['sentence_buffer'])
+    complete_sentences: list[str] = []
+    if len(parts) > 1:
+        complete_sentences = parts[:-1]
+        s['sentence_buffer'] = parts[-1]
+    elif len(s['sentence_buffer'].split()) >= multi_agent_manager.SENTENCE_BUFFER_FLUSH_WORDS:
+        complete_sentences = [s['sentence_buffer']]
+        s['sentence_buffer'] = ''
+
+    if complete_sentences and tg:
+        flushed = ' '.join(complete_sentences)
+        logger.info("[MultiAgent] Sentence buffer flushed (%d words): %s…",
+                    len(flushed.split()), flushed[:80])
+        tracker_state, predicted_next = await check_tracker_and_counter(sid, flushed)
+
+        async def _fire_questions(ts=tracker_state, pn=predicted_next):
+            await check_multi_agent_questions(sid, tracker_state=ts, predicted_next=pn)
+        tg.start_soon(_fire_questions)
+
+        async def _fire_score(text=flushed):
+            s2 = multi_agent_manager.session_data.get(sid, {})
+            brief = (s2.get('brief_summary') or '').strip() or None
+            last_q_obj = ((s2.get('questions_asked') or []) + [None])[-1]
+            last_q_text = last_q_obj.get('question') if last_q_obj else None
+            score = await global_judge_engine.score_argument(
+                sid, 'appellant', text,
+                brief_summary=brief,
+                judge_question_answered=last_q_text,
+            )
+            if score:
+                await multi_agent_manager.send_json(sid, {
+                    "type": "argument_score",
+                    "data": {
+                        "speaker": score.speaker,
+                        "clarity": round(score.clarity, 1),
+                        "legal_reasoning": round(score.legal_reasoning, 1),
+                        "responsiveness": round(score.responsiveness, 1),
+                        "persuasiveness": round(score.persuasiveness, 1),
+                        "overall": round(score.overall, 1),
+                        "feedback": score.feedback,
+                    },
+                })
+        tg.start_soon(_fire_score)
+
+        async def _fire_opponent(text=flushed, ts=tracker_state, pn=predicted_next):
+            traj_ctx = _build_trajectory_context(ts, pn or []) if ts else None
+            opp = await global_opponent_engine.generate_response(
+                sid, text, trajectory_context=traj_ctx,
+            )
+            if opp:
+                tts_p = get_tts_provider()
+                opp_cfg = await anyio.to_thread.run_sync(load_opponent_config)
+                audio_b64 = await tts_p.synthesize(opp.argument, voice=opp_cfg.voice_id or "default")
+                await multi_agent_manager.send_json(sid, {
+                    "type": "opponent_response",
+                    "data": {
+                        "response_type": opp.response_type,
+                        "argument": opp.argument,
+                        "strategy_note": opp.strategy_note,
+                        "topic": opp.topic,
+                        "strength": round(opp.strength, 1),
+                        "timestamp": datetime.now().isoformat(),
+                        "audio": audio_b64 or None,
+                        "audio_format": tts_p.audio_format if audio_b64 else None,
+                    },
+                })
+        tg.start_soon(_fire_opponent)
+
+    # Sentence-silence timer: flush the remaining buffer if no new text arrives
+    if s.get('sentence_buffer', '').strip() and tg:
+        new_scope = anyio.CancelScope()
+        s['_silence_scope'] = new_scope
+
+        async def _silence_flush(_scope=new_scope):
+            with _scope:
+                await anyio.sleep(multi_agent_manager.SILENCE_FLUSH_TIMEOUT)
+            if _scope.cancelled_caught:
+                return
+            s2 = multi_agent_manager.session_data.get(sid, {})
+            remaining = s2.get('sentence_buffer', '').strip()
+            if remaining and s2.get('phase') == 'RECORDING':
+                logger.info("[MultiAgent] Silence timeout — flushing buffer (%d words): %s…",
+                            len(remaining.split()), remaining[:80])
+                s2['sentence_buffer'] = ''
+                try:
+                    ts, pn = await check_tracker_and_counter(sid, remaining)
+                    inner_tg = s2.get('_tg')
+                    if inner_tg:
+                        async def _fire_silence_questions(ts=ts, pn=pn):
+                            await check_multi_agent_questions(
+                                sid, tracker_state=ts, predicted_next=pn,
+                            )
+                        inner_tg.start_soon(_fire_silence_questions)
+                except Exception as exc:
+                    logger.warning("[MultiAgent] Silence flush failed: %s", exc)
+
+        tg.start_soon(_silence_flush)
+
+
 # -----------------------------------------------------------------------------
 # Multi-Agent WebSocket
 # -----------------------------------------------------------------------------
@@ -973,6 +1173,8 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for multi-agent simulation."""
     await multi_agent_manager.connect(session_id, websocket)
     stt_provider = get_stt_provider()
+    # Store provider in session so evict_stale can clean up Gladia sessions
+    multi_agent_manager.session_data[session_id]['_stt_provider'] = stt_provider
 
     try:
         # Open a task group for the lifetime of this WebSocket connection.
@@ -1016,143 +1218,71 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
 
                     elif msg_type == "audio":
                         audio_bytes = base64.b64decode(payload.get("audio", ""))
-                        if audio_bytes and len(audio_bytes) > 100:
-                            transcript = await stt_provider.transcribe(audio_bytes, "webm")
-                            if transcript.strip():
-                                # Always append to the running transcript and notify
-                                multi_agent_manager.session_data[session_id]['transcript'] += " " + transcript
-                                await multi_agent_manager.send_json(session_id, {
-                                    "type": "transcript_update",
-                                    "data": {"text": transcript}
-                                })
+                        if audio_bytes and len(audio_bytes) > 10:
+                            from services.stt_provider import GladiaLiveProvider
+                            if isinstance(stt_provider, GladiaLiveProvider):
+                                stt_provider.send_audio(session_id, audio_bytes)
+                            else:
+                                # Batch mode: accumulate PCM chunks (~256 ms each)
+                                # into a buffer and transcribe once we have ~2.5 s.
+                                from services.stt_provider import pcm_rms_energy
+                                _PCM_BUFFER_BYTES = 80000  # ~2.5 s at 16 kHz 16-bit mono
+                                _PCM_ENERGY_GATE  = 150    # RMS threshold; silence ≈ 10–50
 
-                                # ── Sentence buffer ──────────────────────────
-                                # Accumulate STT fragments until a sentence boundary
-                                # (., !, ?) or a word-count flush threshold is reached.
+                                rms = pcm_rms_energy(audio_bytes)
                                 sess = multi_agent_manager.session_data[session_id]
-                                buf = sess['sentence_buffer'] + ' ' + transcript
-                                sess['sentence_buffer'] = buf.lstrip()
+                                if rms < _PCM_ENERGY_GATE:
+                                    # Silent chunk — if buffer has content, flush it
+                                    # (speaker may have paused), otherwise skip.
+                                    if len(sess.get('_pcm_buffer', b'')) < 8000:
+                                        continue
 
-                                # Cancel any pending silence-flush scope (new audio arrived)
-                                old_scope: anyio.CancelScope | None = sess.get('_silence_scope')
-                                if old_scope is not None:
-                                    old_scope.cancel()
-
-                                # Split on sentence-ending punctuation
-                                parts = multi_agent_manager._SENTENCE_BOUNDARY_RE.split(sess['sentence_buffer'])
-                                complete_sentences: list[str] = []
-
-                                if len(parts) > 1:
-                                    complete_sentences = parts[:-1]
-                                    sess['sentence_buffer'] = parts[-1]
-                                elif len(sess['sentence_buffer'].split()) >= multi_agent_manager.SENTENCE_BUFFER_FLUSH_WORDS:
-                                    complete_sentences = [sess['sentence_buffer']]
-                                    sess['sentence_buffer'] = ''
-
-                                # Only run tracker + agent interruption on complete sentences.
-                                if complete_sentences:
-                                    flushed = ' '.join(complete_sentences)
-                                    logger.info("[MultiAgent] Sentence buffer flushed (%d words): %s…",
-                                                len(flushed.split()), flushed[:80])
-                                    tracker_state, predicted_next = await check_tracker_and_counter(session_id, flushed)
-                                    # Fire-and-forget: agent evaluation can take 10-30s on a
-                                    # single GPU.  tg.start_soon keeps it concurrent without
-                                    # blocking the receive loop; _eval_lock prevents storms.
-                                    async def _fire_questions(ts=tracker_state, pn=predicted_next):
-                                        await check_multi_agent_questions(
-                                            session_id, tracker_state=ts, predicted_next=pn,
-                                        )
-                                    tg.start_soon(_fire_questions)
-
-                                    # Fire-and-forget argument scoring — runs in background
-                                    # so it never adds latency to the receive loop.
-                                    async def _fire_score(text=flushed, sid=session_id):
-                                        s = multi_agent_manager.session_data.get(sid, {})
-                                        brief = (s.get('brief_summary') or '').strip() or None
-                                        last_q_obj = ((s.get('questions_asked') or []) + [None])[-1]
-                                        last_q_text = last_q_obj.get('question') if last_q_obj else None
-                                        score = await global_judge_engine.score_argument(
-                                            sid, 'appellant', text,
-                                            brief_summary=brief,
-                                            judge_question_answered=last_q_text,
-                                        )
-                                        if score:
-                                            await multi_agent_manager.send_json(sid, {
-                                                "type": "argument_score",
-                                                "data": {
-                                                    "speaker": score.speaker,
-                                                    "clarity": round(score.clarity, 1),
-                                                    "legal_reasoning": round(score.legal_reasoning, 1),
-                                                    "responsiveness": round(score.responsiveness, 1),
-                                                    "persuasiveness": round(score.persuasiveness, 1),
-                                                    "overall": round(score.overall, 1),
-                                                    "feedback": score.feedback,
-                                                },
-                                            })
-                                    tg.start_soon(_fire_score)
-
-                                    # Fire-and-forget opponent response — adaptive respondent
-                                    # rebuttal using the opposing brief as context.
-                                    async def _fire_opponent(text=flushed, sid=session_id, ts=tracker_state, pn=predicted_next):
-                                        traj_ctx = (
-                                            _build_trajectory_context(ts, pn or [])
-                                            if ts else None
-                                        )
-                                        opp = await global_opponent_engine.generate_response(
-                                            sid, text, trajectory_context=traj_ctx,
-                                        )
-                                        if opp:
-                                            tts = get_tts_provider()
-                                            audio_b64 = await tts.synthesize(opp.argument)
-                                            await multi_agent_manager.send_json(sid, {
-                                                "type": "opponent_response",
-                                                "data": {
-                                                    "response_type": opp.response_type,
-                                                    "argument": opp.argument,
-                                                    "strategy_note": opp.strategy_note,
-                                                    "topic": opp.topic,
-                                                    "strength": round(opp.strength, 1),
-                                                    "timestamp": datetime.now().isoformat(),
-                                                    "audio": audio_b64 or None,
-                                                    "audio_format": tts.audio_format if audio_b64 else None,
-                                                },
-                                            })
-                                    tg.start_soon(_fire_opponent)
-                                # Silence-flush timer: if no new audio arrives within
-                                # SILENCE_FLUSH_TIMEOUT seconds, auto-flush the remaining
-                                # buffer so agents can respond to a natural pause.
-                                if sess['sentence_buffer'].strip():
-                                    new_scope = anyio.CancelScope()
-                                    sess['_silence_scope'] = new_scope
-
-                                    async def _silence_flush(sid: str = session_id, _scope: anyio.CancelScope = new_scope):
-                                        with _scope:
-                                            await anyio.sleep(multi_agent_manager.SILENCE_FLUSH_TIMEOUT)
-                                        if _scope.cancelled_caught:
-                                            return  # new audio arrived — don't flush
-                                        s = multi_agent_manager.session_data.get(sid, {})
-                                        remaining = s.get('sentence_buffer', '').strip()
-                                        if remaining and s.get('phase') == 'RECORDING':
-                                            logger.info("[MultiAgent] Silence timeout — flushing buffer (%d words): %s…",
-                                                        len(remaining.split()), remaining[:80])
-                                            s['sentence_buffer'] = ''
-                                            try:
-                                                ts, pn = await check_tracker_and_counter(sid, remaining)
-                                                inner_tg = s.get('_tg')
-                                                if inner_tg:
-                                                    async def _fire_silence_questions(ts=ts, pn=pn):
-                                                        await check_multi_agent_questions(
-                                                            sid, tracker_state=ts, predicted_next=pn,
-                                                        )
-                                                    inner_tg.start_soon(_fire_silence_questions)
-                                            except Exception as exc:
-                                                logger.warning("[MultiAgent] Silence flush failed: %s", exc)
-
-                                    tg.start_soon(_silence_flush)
+                                sess['_pcm_buffer'] = sess.get('_pcm_buffer', b'') + audio_bytes
+                                if len(sess['_pcm_buffer']) >= _PCM_BUFFER_BYTES:
+                                    pcm_chunk = sess['_pcm_buffer']
+                                    sess['_pcm_buffer'] = b''
+                                    transcript = await stt_provider.transcribe(pcm_chunk, "pcm")
+                                    if transcript.strip():
+                                        await _process_ma_transcript(session_id, transcript.strip())
 
                     elif msg_type == "phase_change":
                         new_phase = payload.get("phase")
                         sess = multi_agent_manager.session_data[session_id]
+
+                        # When entering RECORDING with Gladia live: start the live session
+                        # and a background task that drains transcript results into the pipeline.
+                        if new_phase == 'RECORDING':
+                            from services.stt_provider import GladiaLiveProvider
+                            if isinstance(stt_provider, GladiaLiveProvider):
+                                gladia_ok = await stt_provider.start_session(session_id)
+
+                                if gladia_ok:
+                                    async def _drain_gladia(sid: str = session_id):
+                                        """Poll Gladia for final transcripts and feed them to the pipeline."""
+                                        from services.stt_provider import GladiaLiveProvider as _GLP
+                                        try:
+                                            while True:
+                                                await anyio.sleep(0.1)
+                                                s = multi_agent_manager.session_data.get(sid, {})
+                                                if s.get('phase') not in ('RECORDING',):
+                                                    break
+                                                if not isinstance(stt_provider, _GLP):
+                                                    break
+                                                tx = stt_provider.get_transcript(sid)
+                                                if tx:
+                                                    await _process_ma_transcript(sid, tx)
+                                        except Exception as exc:
+                                            logger.error("[GladiaLive] Drain task error for %s: %s", sid, exc, exc_info=True)
+
+                                    tg.start_soon(_drain_gladia)
+                                else:
+                                    logger.error("[MultiAgent] Gladia live session failed to start for %s — STT unavailable", session_id)
+                                    await multi_agent_manager.send_json(session_id, {
+                                        "type": "stt_error",
+                                        "data": {
+                                            "message": "Speech-to-text is temporarily unavailable (rate limit). Please wait ~30 seconds and try again.",
+                                        },
+                                    })
 
                         # Flush any remaining sentence buffer when leaving RECORDING.
                         # Cancel the silence-flush scope first so it doesn't also
@@ -1161,6 +1291,22 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             old_scope: anyio.CancelScope | None = sess.get('_silence_scope')
                             if old_scope is not None:
                                 old_scope.cancel()
+                            # Stop Gladia live session if active
+                            from services.stt_provider import GladiaLiveProvider
+                            if isinstance(stt_provider, GladiaLiveProvider):
+                                stt_provider.stop_session(session_id)
+                            # Drain any buffered PCM before flushing the text buffer
+                            leftover_pcm = sess.get('_pcm_buffer', b'')
+                            if leftover_pcm and len(leftover_pcm) > 1000:
+                                sess['_pcm_buffer'] = b''
+                                try:
+                                    tail_text = await stt_provider.transcribe(leftover_pcm, "pcm")
+                                    if tail_text.strip():
+                                        await _process_ma_transcript(session_id, tail_text.strip())
+                                except Exception as exc:
+                                    logger.warning("[MultiAgent] PCM drain on phase change failed: %s", exc)
+                            else:
+                                sess['_pcm_buffer'] = b''
                             remaining = sess.get('sentence_buffer', '').strip()
                             if remaining:
                                 logger.info("[MultiAgent] Phase→%s: flushing remaining buffer (%d words)",
@@ -1230,9 +1376,14 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        logger.error(f"Multi-agent WebSocket error: {e}")
+    except BaseException as e:
+        logger.error("Multi-agent WebSocket error: %s", e, exc_info=True)
     finally:
+        # Release the Gladia concurrent session slot on any disconnect so the
+        # next session start doesn't hit the 429 concurrent-session limit.
+        from services.stt_provider import GladiaLiveProvider
+        if isinstance(stt_provider, GladiaLiveProvider):
+            stt_provider.stop_session(session_id)
         multi_agent_manager.disconnect(session_id)
         global_opponent_engine.evict_session(session_id)
 
@@ -1620,149 +1771,157 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
     # ── Concurrency guard: anyio.Lock with a 30 s timeout ────────────────
     # Only one evaluation cycle runs at a time — prevents a silence-flush
     # and a sentence-boundary flush from firing 2×N simultaneous LLM calls.
-    # move_on_after ensures a hung LLM call can never permanently block
-    # future evaluations.
+    # The lock covers ONLY the LLM evaluation + winner selection + time-marking;
+    # TTS synthesis and WS sends happen outside so the lock is released before
+    # the next caller starts waiting (evaluation ~13s vs TTS ~5s — dropping
+    # the hold time prevents 30 s probe timeouts on back-to-back flushes).
     lock: anyio.Lock = session.get('_eval_lock') or anyio.Lock()
+
+    # Outputs captured inside the lock, consumed after release.
+    winner_agent    = None
+    winner_question = None
+    candidates      = []
+    now_iso         = None
+
     with anyio.move_on_after(30) as lock_scope:
         async with lock:
-            pass  # successfully acquired — fall through to evaluation below
+            # ── Re-check cooldown INSIDE the lock ─────────────────────────
+            # A concurrent call might have fired an agent question between our
+            # initial pre-check and acquiring this lock, so we must re-verify.
+            last_interrupt = session.get('last_agent_interrupt_time')
+            if last_interrupt is not None:
+                elapsed = (datetime.now() - last_interrupt).total_seconds()
+                if elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
+                    logger.debug("[MultiAgent] Skip interrupt — cooldown %.1fs / %ds (re-checked inside lock)",
+                                 elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
+                    return
+
+            logger.info("[MultiAgent] Interrupt pre-checks passed (phase=%s, words=%d, agents=%d)",
+                        phase, word_count, len(session.get('agents', [])))
+
+            agents        = session.get('agents', [])
+            brief_summary = session.get('brief_summary', '')
+            asked_texts   = [q.get('question', '') for q in session.get('questions_asked', [])]
+
+            # Build initial trajectory context from the supplied tracker state
+            trajectory_context = (
+                _build_trajectory_context(tracker_state, predicted_next or [])
+                if tracker_state else None
+            )
+
+            # ── Agent evaluation — all agents concurrently, first yes wins ──
+            # anyio task groups (trio-compatible structured concurrency).
+            # Each slot is pre-filled with a "no" sentinel so ordering is
+            # preserved even if tasks complete out of order.
+            results: list = [(a, False, None) for a in agents]
+
+            async def _eval_agent(idx: int, agent) -> None:
+                try:
+                    logger.info("[MultiAgent] Evaluating agent '%s' (id=%s) for interrupt…", agent.name, agent.id)
+                    should_ask, question = await multi_agent_service.analyze_agent_question(
+                        agent=agent,
+                        transcript=transcript,
+                        brief_summary=brief_summary,
+                        questions_already_asked=asked_texts,
+                        trajectory_context=trajectory_context,
+                    )
+                    logger.info("[MultiAgent] Agent '%s' → should_ask=%s, question=%s",
+                                agent.name, should_ask, (question[:60] + '…') if question else None)
+                    results[idx] = (agent, should_ask, question)
+                except Exception as e:
+                    logger.error("Error checking agent %s: %s", agent.name, e)
+                    # results[idx] stays (agent, False, None)
+
+            async with anyio.create_task_group() as eval_tg:
+                for i, agent in enumerate(agents):
+                    eval_tg.start_soon(_eval_agent, i, agent)
+
+            # Use TINY model to select the best question from candidates —
+            # adds intelligent selection so the court hears the most relevant
+            # question rather than a random pick.
+            candidates = [(agent, question) for agent, should_ask, question in results
+                          if should_ask and question]
+            if candidates:
+                winner_agent, winner_question = await _select_best_question(
+                    candidates, transcript, brief_summary,
+                )
+                # Mark interrupt time NOW (inside the lock) so any concurrent
+                # caller that acquires the lock next sees the cooldown and exits
+                # without running another full evaluation cycle.
+                session['last_agent_interrupt_time'] = datetime.now()
+                now_iso = datetime.now().isoformat()
 
     if lock_scope.cancelled_caught:
         logger.warning("[MultiAgent] Skip interrupt — eval lock timed out (hung LLM call?)")
         return
 
-    # Re-acquire for the duration of the actual evaluation
-    async with lock:
-        # ── Re-check cooldown INSIDE the lock ─────────────────────────────
-        # A concurrent call might have fired an agent question between our
-        # initial pre-check and acquiring this lock, so we must re-verify.
-        last_interrupt = session.get('last_agent_interrupt_time')
-        if last_interrupt is not None:
-            elapsed = (datetime.now() - last_interrupt).total_seconds()
-            if elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
-                logger.debug("[MultiAgent] Skip interrupt — cooldown %.1fs / %ds (re-checked inside lock)",
-                             elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
-                return
+    # ── Post-lock: TTS synthesis + WS sends ───────────────────────────────
+    # The eval lock is now RELEASED.  TTS and network I/O run here so they
+    # never block the next evaluation cycle from starting.
+    if candidates and winner_agent and winner_question:
+        # Synthesize TTS audio only for the selected winner
+        audio_b64 = ""
+        audio_format = "opus"
+        try:
+            tts = get_tts_provider()
+            audio_b64 = await tts.synthesize(winner_question)
+            audio_format = tts.audio_format
+        except Exception as e:
+            logger.warning("[MultiAgent] TTS synthesis failed for %s: %s", winner_agent.name, e)
 
-        logger.info("[MultiAgent] Interrupt pre-checks passed (phase=%s, words=%d, agents=%d)",
-                    phase, word_count, len(session.get('agents', [])))
+        # Send ALL candidate questions to the frontend (for the per-agent
+        # question grid), but mark only the winner as "selected" so the
+        # Judge Activity feed shows a single voice per cycle.
+        for agent, question in candidates:
+            is_winner = (agent.id == winner_agent.id)
+            question_data = {
+                "agent_id":     agent.id,
+                "agent_name":   agent.name,
+                "color":        agent.color,
+                "question":     question,
+                "timestamp":    now_iso,
+                "selected":     is_winner,
+                "audio":        audio_b64 if is_winner else "",
+                "audio_format": audio_format if is_winner else "",
+            }
+            if is_winner:
+                session['questions_asked'].append(question_data)
+            await multi_agent_manager.send_json(session_id, {
+                "type": "agent_question",
+                "data": question_data,
+            })
 
-        agents        = session.get('agents', [])
-        brief_summary = session.get('brief_summary', '')
-        asked_texts   = [q.get('question', '') for q in session.get('questions_asked', [])]
+        # Record the winner's question into the opponent engine so it can
+        # exploit weaknesses that the panel has identified.
+        global_opponent_engine.record_judge_question(session_id, winner_question)
+        logger.info("[MultiAgent] %s selected (of %d candidates): %s…",
+                    winner_agent.name, len(candidates), winner_question[:60])
 
-        # Build initial trajectory context from the supplied tracker state
-        trajectory_context = (
-            _build_trajectory_context(tracker_state, predicted_next or [])
-            if tracker_state else None
-        )
-
-        # ── Agent evaluation — all agents concurrently, first yes wins ─────
-        # anyio task groups (trio-compatible structured concurrency).
-        # Each slot is pre-filled with a "no" sentinel so ordering is preserved
-        # even if tasks complete out of order.
-        results: list = [(a, False, None) for a in agents]
-
-        async def _eval_agent(idx: int, agent) -> None:
+        # Refresh the agenda panel after the agent interrupts.
+        # We do NOT feed the agent question to the tracker as a "judge" turn —
+        # agent questions are simulated advocate probes, not judicial direction,
+        # and skewing the confidence scores toward agent-favoured topics would
+        # corrupt the predicted trajectory.  Use the last known tracker state
+        # from the human's own speech instead.
+        tracker = session.get("tracker")
+        if tracker is not None:
             try:
-                logger.info("[MultiAgent] Evaluating agent '%s' (id=%s) for interrupt…", agent.name, agent.id)
-                should_ask, question = await multi_agent_service.analyze_agent_question(
-                    agent=agent,
-                    transcript=transcript,
-                    brief_summary=brief_summary,
-                    questions_already_asked=asked_texts,
-                    trajectory_context=trajectory_context,
-                )
-                logger.info("[MultiAgent] Agent '%s' → should_ask=%s, question=%s",
-                            agent.name, should_ask, (question[:60] + '…') if question else None)
-                results[idx] = (agent, should_ask, question)
-            except Exception as e:
-                logger.error("Error checking agent %s: %s", agent.name, e)
-                # results[idx] stays (agent, False, None)
-
-        async with anyio.create_task_group() as eval_tg:
-            for i, agent in enumerate(agents):
-                eval_tg.start_soon(_eval_agent, i, agent)
-
-        # Use TINY model to select the best question from candidates —
-        # adds intelligent selection so the court hears the most relevant
-        # question rather than a random pick.
-        candidates = [(agent, question) for agent, should_ask, question in results
-                      if should_ask and question]
-        winner_agent, winner_question = None, None
-        if candidates:
-            winner_agent, winner_question = await _select_best_question(
-                candidates, transcript, brief_summary,
-            )
-
-        if candidates:
-            # Mark interrupt time immediately to prevent overlapping calls
-            session['last_agent_interrupt_time'] = datetime.now()
-            now_iso = datetime.now().isoformat()
-
-            # Synthesize TTS audio only for the selected winner
-            audio_b64 = ""
-            audio_format = "opus"
-            try:
-                tts = get_tts_provider()
-                audio_b64 = await tts.synthesize(winner_question)
-                audio_format = tts.audio_format
-            except Exception as e:
-                logger.warning("[MultiAgent] TTS synthesis failed for %s: %s", winner_agent.name, e)
-
-            # Send ALL candidate questions to the frontend (for the per-agent
-            # question grid), but mark only the winner as "selected" so the
-            # Judge Activity feed shows a single voice per cycle.
-            for agent, question in candidates:
-                is_winner = (agent.id == winner_agent.id)
-                question_data = {
-                    "agent_id":     agent.id,
-                    "agent_name":   agent.name,
-                    "color":        agent.color,
-                    "question":     question,
-                    "timestamp":    now_iso,
-                    "selected":     is_winner,
-                    "audio":        audio_b64 if is_winner else "",
-                    "audio_format": audio_format if is_winner else "",
-                }
-                if is_winner:
-                    session['questions_asked'].append(question_data)
+                last_state = tracker.state()  # current state without advancing turn count
+                new_predicted = session.get("last_predicted_next", [])
                 await multi_agent_manager.send_json(session_id, {
-                    "type": "agent_question",
-                    "data": question_data,
+                    "type": "agenda_update",
+                    "data": {
+                        "best_prediction_id":       last_state.best_prediction_id,
+                        "agenda_confidences":       _format_agenda_confidences(last_state),
+                        "last_human_matched_topic": last_state.last_human_matched_topic,
+                        "predicted_next_topics":    new_predicted,
+                        "mcts_tree":                None,
+                        "triggered_by":             f"agent:{winner_agent.id}",
+                        "regeneration_needed":      last_state.regeneration_needed,
+                    },
                 })
-
-            # Record the winner's question into the opponent engine so it can
-            # exploit weaknesses that the panel has identified.
-            global_opponent_engine.record_judge_question(session_id, winner_question)
-            logger.info("[MultiAgent] %s selected (of %d candidates): %s…",
-                        winner_agent.name, len(candidates), winner_question[:60])
-
-            # Refresh the agenda panel after the agent interrupts.
-            # We do NOT feed the agent question to the tracker as a "judge" turn —
-            # agent questions are simulated advocate probes, not judicial direction,
-            # and skewing the confidence scores toward agent-favoured topics would
-            # corrupt the predicted trajectory.  Use the last known tracker state
-            # from the human's own speech instead.
-            tracker = session.get("tracker")
-            if tracker is not None:
-                try:
-                    last_state = tracker.state()  # current state without advancing turn count
-                    new_predicted = session.get("last_predicted_next", [])
-                    await multi_agent_manager.send_json(session_id, {
-                        "type": "agenda_update",
-                        "data": {
-                            "best_prediction_id":       last_state.best_prediction_id,
-                            "agenda_confidences":       _format_agenda_confidences(last_state),
-                            "last_human_matched_topic": last_state.last_human_matched_topic,
-                            "predicted_next_topics":    new_predicted,
-                            "mcts_tree":                None,
-                            "triggered_by":             f"agent:{winner_agent.id}",
-                            "regeneration_needed":      last_state.regeneration_needed,
-                        },
-                    })
-                except Exception as e:
-                    logger.warning("Agenda refresh after agent question failed: %s", e)
+            except Exception as e:
+                logger.warning("Agenda refresh after agent question failed: %s", e)
 
 
 if __name__ == "__main__":

@@ -403,6 +403,8 @@ def extract_content(response) -> str:
             text = _re.sub(r"<think>[\s\S]*", "", text).strip()
         return text
 
+    if not response.choices:
+        return ""
     msg = response.choices[0].message
     content = (msg.content or "").strip()
     if content:

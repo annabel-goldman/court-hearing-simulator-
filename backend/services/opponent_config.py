@@ -34,6 +34,7 @@ class OpponentConfig:
     enabled_types: List[str] = field(
         default_factory=lambda: ["rebuttal", "exploitation", "affirmative"]
     )
+    voice_id: str = ""  # TTS voice ID; "" = provider default
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +84,7 @@ def load_config() -> OpponentConfig:
                 system_prompt=raw.get("system_prompt", _DEFAULT_SYSTEM_PROMPT),
                 aggressiveness=float(raw.get("aggressiveness", 0.7)),
                 enabled_types=list(raw.get("enabled_types", ["rebuttal", "exploitation", "affirmative"])),
+                voice_id=raw.get("voice_id", ""),
             )
     except Exception as e:
         logger.warning("[OpponentConfig] load error, using defaults: %s", e)

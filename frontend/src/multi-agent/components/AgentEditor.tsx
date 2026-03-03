@@ -292,6 +292,7 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
     }
   }, [selectedAgentId, agents, onAgentsChange]);
 
+
   const selectedAgent = selectedAgentId ? getEffectiveAgent(selectedAgentId) : null;
   const canUndo = selectedAgentId && (versionHistory[selectedAgentId]?.length || 0) > 0;
   const hasLocalEdits = selectedAgentId && !!localEdits[selectedAgentId];
