@@ -1,0 +1,424 @@
+/* ============================================
+   COURTROOM OVERLAYS (active components only)
+   ============================================ */
+
+.status-dot {
+  font-size: 0.875rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.status-dot.active {
+  opacity: 1;
+}
+
+.status-dot.inactive {
+  opacity: 0.4;
+}
+
+/* Recording pulse animation for MIC indicator in compact status row */
+.media-status-row .status-dot:nth-child(2).active {
+  animation: recordPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes recordPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Courtroom timer */
+.courtroom-timer {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  border-radius: 50px;
+  border: 1px solid var(--border);
+  z-index: 60;
+}
+
+.timer-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.timer-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.timer-value.warning {
+  color: var(--warning);
+}
+
+.timer-value.danger {
+  color: var(--error);
+  animation: timerBlink 1s ease-in-out infinite;
+}
+
+@keyframes timerBlink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Judge question overlay */
+.judge-question-overlay {
+  position: absolute;
+  top: 4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  z-index: 45;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.judge-question-content {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  padding: 1rem 1.5rem;
+  box-shadow: 0 4px 30px rgba(59, 130, 246, 0.3);
+}
+
+.judge-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--primary);
+  margin-bottom: 0.5rem;
+}
+
+.judge-question-text {
+  color: var(--text);
+  font-size: 1.125rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Agent Sentiment Panel — bottom-right live eagerness display */
+.agent-sentiment-panel {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  width: 260px;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.agent-sentiment-header {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-sentiment-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.agent-sentiment-list {
+  padding: 0.25rem 0;
+}
+
+.agent-sentiment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  transition: background 0.2s;
+}
+
+.agent-sentiment-row.wants-to-ask {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-sentiment-row.on-cooldown {
+  opacity: 0.5;
+}
+
+.agent-sentiment-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.agent-sentiment-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-sentiment-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.agent-sentiment-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.agent-sentiment-badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.agent-sentiment-badge.cooling {
+  color: var(--text-subtle);
+  background: var(--bg-muted);
+}
+
+.agent-sentiment-badge.asking {
+  color: #fff;
+  background: var(--success);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.agent-sentiment-bar-track {
+  position: relative;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: visible;
+}
+
+.agent-sentiment-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.5s ease;
+}
+
+.agent-sentiment-bar-fill.hot {
+  box-shadow: 0 0 6px currentColor;
+}
+
+.agent-sentiment-score {
+  position: absolute;
+  right: -1.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-subtle);
+  line-height: 1;
+}
+
+/* Interrupt Log Panel — top-right live question feed */
+.interrupt-log-panel {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 272px;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.interrupt-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.interrupt-log-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.interrupt-log-counts {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.interrupt-log-count {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-subtle);
+  background: var(--bg-muted);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  line-height: 1.6;
+}
+
+.interrupt-log-count-missed {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  line-height: 1.6;
+}
+
+.interrupt-log-empty {
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-subtle);
+  font-style: italic;
+}
+
+.interrupt-log-list {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.interrupt-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.interrupt-log-entry:last-child {
+  border-bottom: none;
+}
+
+.interrupt-log-agent-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 0.35rem;
+}
+
+.interrupt-log-entry-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.interrupt-log-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.interrupt-log-agent-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.interrupt-log-strategy {
+  font-size: 0.65rem;
+  color: var(--text-subtle);
+  background: var(--bg-muted);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  line-height: 1.5;
+}
+
+.interrupt-log-question {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
+.interrupt-log-entry--missed {
+  opacity: 0.5;
+  border-left: 2px dashed rgba(255, 255, 255, 0.12);
+  padding-left: calc(0.75rem - 2px);
+}
+
+.interrupt-log-agent-dot--missed {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.interrupt-log-agent-name--missed {
+  color: var(--text-subtle) !important;
+}
+
+.interrupt-log-question--missed {
+  font-style: italic;
+  color: var(--text-subtle);
+}
+
+.interrupt-log-missed-badge {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  line-height: 1.5;
+}
+
+/* Shared audio level fill used by HUD */
+.audio-level-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--warning), var(--error));
+  border-radius: 3px;
+  transition: width 0.1s ease-out;
+}

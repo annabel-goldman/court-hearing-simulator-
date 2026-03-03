@@ -1,0 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Spectral:wght@400;500;600;700&display=swap');
+
+/* Court Simulator — single stylesheet. Sections: tokens & base, auth, layout & nav,
+   home & upload, buttons & forms, tabs & admin, avatar & courtroom, ritual overlay,
+   HUD & overlays, fullscreen layout, controls & transcript. */
+/* =============================================================================
+   DESIGN TOKENS & BASE
+   ============================================================================= */
+:root {
+  --bg: #09090b;
+  --bg-subtle: #18181b;
+  --bg-muted: #27272a;
+  --bg-elevated: #1f1f23;
+
+  --border: #27272a;
+  --border-subtle: #3f3f46;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-subtle: rgba(59, 130, 246, 0.1);
+
+  --success: #22c55e;
+  --success-subtle: rgba(34, 197, 94, 0.1);
+  --success-text: #86efac;
+
+  --warning: #f59e0b;
+  --warning-subtle: rgba(245, 158, 11, 0.1);
+  --warning-text: #fcd34d;
+
+  --error: #ef4444;
+  --error-hover: #dc2626;
+  --error-subtle: rgba(239, 68, 68, 0.1);
+  --error-text: #fca5a5;
+
+  --brief-a: #3b82f6;
+  --brief-a-bg: rgba(59, 130, 246, 0.08);
+  --brief-b: #a855f7;
+  --brief-b-bg: rgba(168, 85, 247, 0.08);
+
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+

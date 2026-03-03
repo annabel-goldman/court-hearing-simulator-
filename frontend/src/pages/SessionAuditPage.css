@@ -11,8 +11,8 @@
       rgba(84, 56, 29, 0.06) 16px
     ),
     linear-gradient(160deg, #4d331f 0%, #3a2518 30%, #2c1c12 100%);
-  color: #2f2318;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #27345a;
+  font-family: 'Spectral', Georgia, serif;
 }
 
 .session-audit-shell {
@@ -24,39 +24,48 @@
 
 .session-audit-header,
 .session-audit-section {
-  background: #f8f2e7;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(80, 110, 170, 0.1) 0px,
+      rgba(80, 110, 170, 0.1) 1px,
+      transparent 1px,
+      transparent 27px
+    ),
+    linear-gradient(180deg, #fffdf7 0%, #f6efe2 100%);
   border: 1px solid #d1c5b1;
-  border-radius: 6px;
-  padding: 1rem;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.24);
 }
 
 .session-audit-kicker {
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   color: #8b6236;
-  font-size: 0.77rem;
+  font-size: 0.74rem;
   font-weight: 700;
 }
 
 .session-audit-title {
   margin: 0.38rem 0 0;
   font-size: clamp(1.85rem, 3.1vw, 2.45rem);
-  color: #33251b;
+  color: #27345a;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .session-audit-section-title {
   margin: 0 0 0.75rem;
   font-size: 1.12rem;
-  color: #33251b;
+  color: #27345a;
   font-weight: 700;
 }
 
 .session-audit-empty {
   margin: 0;
-  color: #6b4f35;
+  color: #5f4630;
 }
 
 .session-audit-question-list {
@@ -65,9 +74,10 @@
 }
 
 .session-audit-question {
-  background: #fffaf1;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.48));
   border: 1px solid #d8d0c2;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0.75rem;
 }
 
@@ -80,7 +90,7 @@
 }
 
 .session-audit-question__index {
-  color: #5f4630;
+  color: #6b4f35;
   font-size: 0.82rem;
   font-weight: 600;
 }
@@ -90,7 +100,7 @@
   border-radius: 4px;
   padding: 0.1rem 0.5rem;
   font-size: 0.76rem;
-  font-weight: 600;
+  font-weight: 700;
   background: #fffdf8;
 }
 
@@ -98,10 +108,12 @@
   margin: 0;
   line-height: 1.45;
   color: #27345a;
+  font-size: 1rem;
 }
 
 .session-audit-performance {
   margin: 0;
   color: #27345a;
-  line-height: 1.5;
+  line-height: 1.55;
+  font-size: 1rem;
 }
