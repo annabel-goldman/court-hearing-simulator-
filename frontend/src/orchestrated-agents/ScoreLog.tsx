@@ -8,6 +8,7 @@
  * Styles: score-log.css
  */
 
+import { memo } from 'react';
 import type { ArgumentScore } from '../multi-agent/types';
 import './score-log.css';
 
@@ -28,7 +29,7 @@ function overallClass(v: number): string {
   return 'sl-overall--low';
 }
 
-export function ScoreLog({ scores }: ScoreLogProps) {
+export const ScoreLog = memo(function ScoreLog({ scores }: ScoreLogProps) {
   if (scores.length === 0) {
     return (
       <div className="sl-log">
@@ -84,4 +85,4 @@ export function ScoreLog({ scores }: ScoreLogProps) {
       })}
     </div>
   );
-}
+});

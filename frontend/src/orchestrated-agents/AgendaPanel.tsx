@@ -14,13 +14,11 @@
  *  - The MCTS-predicted next topics ("Coming next") at the top
  */
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { Agent, AgendaItem, AgendaUpdate, PredictedTopic } from '../multi-agent/types';
 import { Card, CardHeader, CardContent } from '../multi-agent/components/ui';
 import './agenda.css';
 
-// Re-export for backwards compatibility — consumers that import from here
-// will continue to work.
 export type { AgendaItem, PredictedTopic };
 
 interface AgendaPanelProps {
@@ -38,7 +36,7 @@ const TARGET_LABELS: Record<PredictedTopic['target'], string> = {
   both: 'Both',
 };
 
-export function AgendaPanel({
+export const AgendaPanel = memo(function AgendaPanel({
   agents,
   items,
   onItemsChange,
@@ -301,4 +299,4 @@ export function AgendaPanel({
       </CardContent>
     </Card>
   );
-}
+});

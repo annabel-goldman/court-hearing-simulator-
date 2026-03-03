@@ -16,10 +16,11 @@
  * the paths MCTS explored from it.
  *
  * Fallback (no agenda):
- *   depth-1   golden-angle spread around 360°    (ring r = 140 px)
- *   depth-2   symmetric fan from parent angle     (ring r = 250 px)
- *   depth-3   symmetric fan                       (ring r = 330 px)
- *   depth-4   symmetric fan                       (ring r = 375 px)
+ *   depth-1   golden-angle spread around 360°    (ring r = 130 px)
+ *   depth-2   symmetric fan from parent angle     (ring r = 220 px)
+ *   depth-3   symmetric fan                       (ring r = 295 px)
+ *   depth-4   symmetric fan                       (ring r = 350 px)
+ *   depth-5   symmetric fan                       (ring r = 390 px)
  *
  * Sibling order is derived from the tree edge list sorted by node ID,
  * not from arrival order, so positions are deterministic regardless of
@@ -46,7 +47,7 @@
  *   "Reset view"  – restore 1:1 view
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { MCTSTree, MCTSNode, AgendaItem } from '../multi-agent/types';
 
 interface Props {
@@ -70,20 +71,22 @@ const MAX_SLOT   = 12;         // max children rendered per node; excess are ski
 
 /** Distance from CENTER for each depth ring. */
 const RING_RADIUS: Record<number, number> = {
-  1: 140,
-  2: 250,
-  3: 330,
-  4: 375,
+  1: 130,
+  2: 220,
+  3: 295,
+  4: 350,
+  5: 390,
 };
-const DEFAULT_RING = 390; // depth ≥ 5
+const DEFAULT_RING = 410; // depth ≥ 6
 
 /** Angular step (rad) between siblings at each depth level. */
 const DEPTH_STEP: Record<number, number> = {
   2: 0.32,   // ≈ 18°
   3: 0.20,   // ≈ 11°
   4: 0.14,   // ≈  8°
+  5: 0.10,   // ≈  6°
 };
-const DEFAULT_STEP = 0.10; // ≈ 6° for depth ≥ 5
+const DEFAULT_STEP = 0.08; // ≈ 4.5° for depth ≥ 6
 
 /** Minimum distance (px) between any two node centres — prevents overlap.
  *  Max node radius is 11 px, so two nodes touching = 22 px; 42 px gives
@@ -115,7 +118,7 @@ function nodeColor(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function MCTSTreeViz({
+export const MCTSTreeViz = memo(function MCTSTreeViz({
   tree,
   addressedTopics = [],
   predictedNext   = [],
@@ -276,11 +279,11 @@ export function MCTSTreeViz({
    * Sibling order is derived from the tree's edge list (sorted by node ID)
    * so positions are deterministic regardless of streaming batch order.
    *
-   * Returns null for nodes at depth > 4 or beyond MAX_SLOT siblings.
+   * Returns null for nodes at depth > 5 or beyond MAX_SLOT siblings.
    */
   function assignPosition(node: MCTSNode): { x: number; y: number } | null {
     if (node.depth === 0) return { x: CENTER, y: CENTER };
-    if (node.depth > 4) return null;
+    if (node.depth > 5) return null;
 
     const parentId = parentIdRef.current.get(node.id);
     const radius   = RING_RADIUS[node.depth] ?? DEFAULT_RING;
@@ -511,7 +514,7 @@ export function MCTSTreeViz({
         {tree?.nodes && tree.nodes.length > 0 && (
           <g transform={`matrix(${scale},0,0,${scale},${tx},${ty})`}>
             {/* Depth-ring guides */}
-            {[1, 2, 3].map(d => (
+            {[1, 2, 3, 4, 5].map(d => (
               <circle key={d} cx={CENTER} cy={CENTER} r={RING_RADIUS[d]}
                 fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={1} />
             ))}
@@ -703,4 +706,4 @@ export function MCTSTreeViz({
       )}
     </div>
   );
-}
+});

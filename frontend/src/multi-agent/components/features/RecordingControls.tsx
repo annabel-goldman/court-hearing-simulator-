@@ -6,6 +6,7 @@
  * Styles: styles/recording.css
  */
 
+import { memo } from 'react';
 import { Button } from '../ui';
 import type { SimulationPhase } from '../../types';
 import '../../styles/recording.css';
@@ -18,7 +19,7 @@ interface RecordingControlsProps {
   onReset: () => void;
 }
 
-export function RecordingControls({
+export const RecordingControls = memo(function RecordingControls({
   phase,
   hasAgents,
   onStart,
@@ -70,4 +71,4 @@ export function RecordingControls({
       )}
     </div>
   );
-}
+});

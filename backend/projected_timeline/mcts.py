@@ -141,6 +141,7 @@ def _rollout(
     remaining: List[str],
     vec_map: Dict,
     quality_map: Optional[Dict[str, float]] = None,
+    max_steps: Optional[int] = None,
 ) -> float:
     """
     Simulate an epsilon-greedy completion of the path and return its score.
@@ -152,12 +153,16 @@ def _rollout(
 
     When quality_map is provided (live projection), weak/unaddressed topics
     get a selection bonus so the projector gravitates toward them.
+
+    max_steps limits how many topics to add during the rollout (used by sparse
+    MCTS to keep rollouts shallow during initial generation).
     """
     if not remaining:
         return _score_sequence(list(node_state), vec_map, quality_map)
     path = list(node_state)
     pool = list(remaining)
-    while pool:
+    steps = 0
+    while pool and (max_steps is None or steps < max_steps):
         if path and random.random() > _ROLLOUT_EPSILON:
             last_vec = vec_map.get(path[-1])
             if last_vec is not None:
@@ -177,6 +182,7 @@ def _rollout(
             next_title = random.choice(pool)
         path.append(next_title)
         pool.remove(next_title)
+        steps += 1
     return _score_sequence(path, vec_map, quality_map)
 
 
@@ -188,6 +194,7 @@ def _run_mcts(
     topic_pool: List[Dict],
     n_sims: int,
     quality_map: Optional[Dict[str, float]] = None,
+    max_depth: Optional[int] = None,
 ) -> _Node:
     """
     Run n_sims MCTS simulations starting from an empty root state.
@@ -200,6 +207,11 @@ def _run_mcts(
     quality_map — optional title→float (0–1) from the live tracker.
     When provided, the rollout and scoring functions bias toward weak /
     unaddressed topics so the projector recommends what needs attention.
+
+    max_depth — when set, limits the tree to this many topics per path.
+    Nodes at max_depth are treated as leaves (no further expansion).
+    Used by sparse MCTS: initial generation creates shallow trees, then
+    live projection expands deeper as the student progresses.
     """
     titles   = [t["title"] for t in topic_pool]
     vec_map  = {t["title"]: t["vector"] for t in topic_pool}
@@ -213,20 +225,27 @@ def _run_mcts(
         while node.is_fully_expanded() and node.children:
             node = node.best_child()
 
-        # ── 2. Expansion ──────────────────────────────────────────────
-        if node._untried:
+        # ── 2. Expansion (respect max_depth) ──────────────────────────
+        at_depth_limit = max_depth is not None and len(node.state) >= max_depth
+        if node._untried and not at_depth_limit:
             action = node._untried.pop(random.randrange(len(node._untried)))
             new_state     = node.state + (action,)
             new_state_set = frozenset(new_state)
-            new_untried   = [t for t in titles if t not in new_state_set]
+            if max_depth is not None and len(new_state) >= max_depth:
+                new_untried = []
+            else:
+                new_untried = [t for t in titles if t not in new_state_set]
             child = _Node(state=new_state, parent=node, untried=new_untried)
             node.children[action] = child
             node = child
 
-        # ── 3. Rollout ────────────────────────────────────────────────
+        # ── 3. Rollout (depth-limited when max_depth is set) ──────────
         node_state_set = frozenset(node.state)
         remaining = [t for t in titles if t not in node_state_set]
-        score = _rollout(node.state, remaining, vec_map, quality_map)
+        rollout_steps = None
+        if max_depth is not None:
+            rollout_steps = max_depth - len(node.state)
+        score = _rollout(node.state, remaining, vec_map, quality_map, max_steps=rollout_steps)
 
         # ── 4. Backpropagation ────────────────────────────────────────
         cur = node
@@ -331,12 +350,17 @@ def run_generation(
     n_sims: int = 800,
     top_k: int = 10,
     root_label: str = "",
+    max_depth: Optional[int] = None,
 ) -> tuple[List[List[Dict]], dict]:
     """
     Run MCTS over the topic pool and return top_k distinct ordered paths.
 
     Each returned path is a list of topic dicts (with 'title', 'description',
     'target' keys) in the MCTS-predicted hearing order.
+
+    max_depth — sparse MCTS: limit paths to this many topics.  When set,
+    the initial tree is shallow and fast; live projection expands deeper
+    as the student progresses through topics.
 
     If the pool is empty or too small, returns an empty list.
     """
@@ -345,8 +369,8 @@ def run_generation(
 
     prepared = _prepare_pool(topic_pool)
 
-    logger.info("MCTS generation: %d topics, %d sims, top_k=%d", len(prepared), n_sims, top_k)
-    root = _run_mcts(prepared, n_sims)
+    logger.info("MCTS generation: %d topics, %d sims, top_k=%d, max_depth=%s", len(prepared), n_sims, top_k, max_depth)
+    root = _run_mcts(prepared, n_sims, max_depth=max_depth)
 
     # Collect all leaf paths (nodes with no children) sorted by avg value
     paths: List[tuple[float, tuple[str, ...]]] = []
@@ -383,7 +407,8 @@ def run_generation(
         results = [[title_to_topic[t["title"]] for t in fallback if t["title"] in title_to_topic]]
 
     logger.info("MCTS generation: returning %d paths", len(results))
-    return results, serialise_tree(root, root_label=root_label)
+    tree_depth = max_depth if max_depth is not None else 3
+    return results, serialise_tree(root, max_depth=tree_depth, root_label=root_label)
 
 
 def _collect_leaves(node: _Node, out: List[tuple[float, tuple[str, ...]]]) -> None:
@@ -452,6 +477,7 @@ async def _run_mcts_streaming(
     n_sims: int,
     on_expand: ExpandCallback,
     yield_every: int = 10,
+    max_depth: Optional[int] = None,
 ) -> tuple[_Node, Dict[int, int]]:
     """
     Async version of _run_mcts that yields to the event loop every
@@ -461,6 +487,8 @@ async def _run_mcts_streaming(
     the loop each time a new node is created.  Because this function awaits
     `asyncio.sleep(0)` periodically, the caller's async generator can drain
     queued events between batches without needing threads.
+
+    max_depth — sparse MCTS depth limit (same semantics as _run_mcts).
     """
     titles  = [t["title"] for t in topic_pool]
     vec_map = {t["title"]: t["vector"] for t in topic_pool}
@@ -488,22 +516,29 @@ async def _run_mcts_streaming(
         while node.is_fully_expanded() and node.children:
             node = node.best_child()
 
-        # Expansion
-        if node._untried:
+        # Expansion (respect max_depth)
+        at_depth_limit = max_depth is not None and len(node.state) >= max_depth
+        if node._untried and not at_depth_limit:
             action        = node._untried.pop(random.randrange(len(node._untried)))
             new_state     = node.state + (action,)
             new_state_set = frozenset(new_state)
-            new_untried   = [t for t in titles if t not in new_state_set]
+            if max_depth is not None and len(new_state) >= max_depth:
+                new_untried = []
+            else:
+                new_untried = [t for t in titles if t not in new_state_set]
             child         = _Node(state=new_state, parent=node, untried=new_untried)
             node.children[action] = child
 
             on_expand(_sid(child), _sid(node), len(child.state))
             node = child
 
-        # Rollout
+        # Rollout (depth-limited)
         node_state_set = frozenset(node.state)
         remaining = [t for t in titles if t not in node_state_set]
-        score = _rollout(node.state, remaining, vec_map)
+        rollout_steps = None
+        if max_depth is not None:
+            rollout_steps = max_depth - len(node.state)
+        score = _rollout(node.state, remaining, vec_map, max_steps=rollout_steps)
 
         # Backpropagation
         cur = node
@@ -525,10 +560,13 @@ async def run_generation_streaming(
     n_sims: int = 800,
     top_k: int = 10,
     root_label: str = "",
+    max_depth: Optional[int] = None,
 ) -> tuple[list[list[dict]], dict]:
     """
     Async version of run_generation.  Calls `on_expand` for every new node
     so the SSE endpoint can stream them to the client in real time.
+
+    max_depth — sparse MCTS depth limit (same semantics as run_generation).
 
     Returns (paths, tree_snapshot) — same shape as run_generation.
     """
@@ -539,10 +577,10 @@ async def run_generation_streaming(
     title_to_topic = {t["title"]: t for t in topic_pool}
 
     logger.info(
-        "MCTS streaming generation: %d topics, %d sims, top_k=%d",
-        len(prepared), n_sims, top_k,
+        "MCTS streaming generation: %d topics, %d sims, top_k=%d, max_depth=%s",
+        len(prepared), n_sims, top_k, max_depth,
     )
-    root, seq_map = await _run_mcts_streaming(prepared, n_sims, on_expand)
+    root, seq_map = await _run_mcts_streaming(prepared, n_sims, on_expand, max_depth=max_depth)
 
     paths: List[tuple[float, tuple[str, ...]]] = []
     _collect_leaves(root, paths)
@@ -573,4 +611,5 @@ async def run_generation_streaming(
     logger.info("MCTS streaming generation: returning %d paths", len(results))
     # Pass seq_map so serialise_tree uses the same ids that were emitted via SSE,
     # allowing the frontend to reuse positions assigned during streaming.
-    return results, serialise_tree(root, id_map=seq_map, root_label=root_label)
+    tree_depth = max_depth if max_depth is not None else 3
+    return results, serialise_tree(root, max_depth=tree_depth, id_map=seq_map, root_label=root_label)

@@ -22,6 +22,12 @@
   border-radius: 0.75rem;
   padding: 1rem;
   margin-top: 1rem;
+  contain: layout style;
+  transition: border-color 0.2s ease;
+}
+
+.mcts-tree-viz:hover {
+  border-color: rgba(255,255,255,0.18);
 }
 
 .mcts-tree-viz--empty {
@@ -104,6 +110,7 @@
   touch-action: none;
   max-width: 680px;
   margin: 0 auto;
+  will-change: transform;
   /* SVG elements use transform-box so scale() originates from the element center */
   & g { transform-box: fill-box; transform-origin: center; }
 }
@@ -205,6 +212,7 @@
 .oa-timeline__item {
   display: flex;
   gap: 0.875rem;
+  transition: background 0.2s ease;
 }
 
 /* ── Left rail (dot + connector) ── */
@@ -435,6 +443,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  transition: background-color 0.25s ease,
+              border-color 0.25s ease,
+              opacity 0.25s ease,
+              box-shadow 0.25s ease;
 }
 
 .oa-topic__header {
@@ -499,11 +511,12 @@
 /* Confidence bar under lens title */
 .oa-confidence-bar {
   height: 3px;
-  background: var(--ma-info, #6366f1);
+  background: linear-gradient(90deg, var(--ma-info, #6366f1), #818cf8);
   border-radius: 2px;
   margin-top: 4px;
-  transition: width 0.4s ease;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   max-width: 100%;
+  will-change: width;
 }
 
 /* Active lens highlight */
@@ -563,6 +576,7 @@
 .oa-topic--active {
   background: rgba(99, 102, 241, 0.08);
   border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.12);
 }
 
 /* MCTS next-topic prediction strip */
@@ -586,6 +600,23 @@
   border-radius: 999px;
   padding: 0.15rem 0.6rem;
   font-size: 0.75rem;
+  animation: oa-tag-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: background 0.15s ease;
+}
+
+.oa-next-topics__tag:hover {
+  background: rgba(99, 102, 241, 0.22);
+}
+
+@keyframes oa-tag-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* ── Counter-argument feed ───────────────────────────────────────────────── */
@@ -613,12 +644,18 @@
   font-size: 0.8rem;
   cursor: pointer;
   text-align: center;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s ease,
+              border-color 0.15s ease,
+              transform 0.12s ease;
 }
 
 .oa-feed__show-more:hover {
   background: var(--ma-bg-secondary, rgba(255,255,255,0.04));
   border-color: var(--ma-accent, #60a5fa);
+}
+
+.oa-feed__show-more:active {
+  transform: scale(0.98);
 }
 
 .oa-feed__item {
@@ -628,6 +665,23 @@
   background: var(--ma-bg-secondary, var(--ma-surface));
   min-width: 0;
   overflow: hidden;
+  animation: oa-feed-slide-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: background 0.15s ease;
+}
+
+.oa-feed__item:hover {
+  background: var(--ma-bg-tertiary, rgba(255,255,255,0.06));
+}
+
+@keyframes oa-feed-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .oa-feed__header {
@@ -708,7 +762,8 @@
 .oa-opponent__strength-fill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s ease;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
 }
 
 .oa-feed__strategy {
@@ -757,11 +812,19 @@
   font-size: 0.78rem;
   font-weight: 500;
   padding: 0.25rem 0.6rem;
-  transition: background 0.15s, opacity 0.15s;
+  transition: background 0.15s ease,
+              opacity 0.2s ease,
+              transform 0.12s ease,
+              border-color 0.15s ease;
 }
 
 .oa-agent-toggle:hover {
   background: var(--ma-bg-tertiary);
+  transform: translateY(-1px);
+}
+
+.oa-agent-toggle:active {
+  transform: scale(0.96);
 }
 
 .oa-agent-toggle--off {
@@ -829,9 +892,12 @@
   gap: 2rem;
   margin-top: 1rem;
   overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.2s ease;
+  transition: max-height 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.25s ease,
+              margin-top 0.25s ease;
   max-height: 5000px;
   opacity: 1;
+  will-change: max-height, opacity;
 }
 
 .oa-setup-section--collapsed .oa-setup-section__body {
@@ -892,6 +958,12 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  contain: layout style;
+  transition: border-color 0.2s ease;
+}
+
+.oa-panel:hover {
+  border-color: var(--ma-border-muted);
 }
 
 .oa-panel__header {
@@ -918,6 +990,46 @@
   flex-shrink: 0;
 }
 
+.oa-panel__header--toggle {
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  text-align: left;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+.oa-panel__header--toggle:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.oa-panel__chevron {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  color: var(--ma-text-dim, rgba(255,255,255,0.3));
+  transition: transform 0.2s ease;
+}
+
+.oa-panel__count {
+  display: inline-block;
+  background: var(--ma-bg-primary, #111827);
+  border-radius: 9999px;
+  color: var(--ma-text-muted, rgba(255,255,255,0.5));
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 1.1rem;
+  padding: 0.05rem 0.35rem;
+  text-align: center;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.oa-panel--collapsed .oa-panel__header {
+  border-bottom: none;
+}
+
 .oa-panel__body {
   padding: var(--ma-space-md);
   color: var(--ma-text-secondary);
@@ -925,6 +1037,7 @@
   overflow-wrap: anywhere;
   word-break: break-word;
   flex: 1;
+  contain: layout style;
 }
 
 /* ── Nav links in header ───────────────────────────────────────────────────── */
@@ -959,6 +1072,18 @@
   gap: 1rem;
   padding: 1.5rem 1rem;
   text-align: center;
+  animation: oa-intro-appear 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes oa-intro-appear {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .oa-judge-intro__icon {
@@ -1002,4 +1127,111 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* ── Turn Indicator ─────────────────────────────────────────────────────────── */
+
+.oa-turn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  animation: oa-turn-appear 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes oa-turn-appear {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.oa-turn__pulse {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  animation: oa-turn-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes oa-turn-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.75); }
+}
+
+.oa-turn__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oa-turn__name {
+  font-weight: 700;
+}
+
+/* ── Advocate (your turn) ── */
+.oa-turn--advocate {
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  color: #34d399;
+}
+.oa-turn--advocate .oa-turn__pulse {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
+}
+
+/* ── Judge speaking ── */
+.oa-turn--judge {
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid var(--oa-turn-color, rgba(96, 165, 250, 0.3));
+  color: var(--oa-turn-color, #60a5fa);
+}
+.oa-turn--judge .oa-turn__pulse {
+  background: var(--oa-turn-color, #60a5fa);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--oa-turn-color, #60a5fa) 50%, transparent);
+}
+
+/* ── Opponent speaking ── */
+.oa-turn--opponent {
+  background: rgba(230, 126, 34, 0.08);
+  border: 1px solid rgba(230, 126, 34, 0.25);
+  color: #e67e22;
+}
+.oa-turn--opponent .oa-turn__pulse {
+  background: #e67e22;
+  box-shadow: 0 0 6px rgba(230, 126, 34, 0.5);
+}
+
+/* ── Silence detected — bench may interject ── */
+.oa-turn--silence {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  color: #fbbf24;
+  animation: oa-turn-appear 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.oa-turn--silence .oa-turn__pulse {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.5);
+  animation: oa-turn-pulse-slow 2.4s ease-in-out infinite;
+}
+
+@keyframes oa-turn-pulse-slow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.3; transform: scale(0.6); }
+}
+
+/* ── Hearing concluded ── */
+.oa-turn--finished {
+  background: rgba(156, 163, 175, 0.08);
+  border: 1px solid rgba(156, 163, 175, 0.2);
+  color: #9ca3af;
+}
+.oa-turn--finished .oa-turn__pulse {
+  background: #9ca3af;
+  animation: none;
+  opacity: 0.6;
 }

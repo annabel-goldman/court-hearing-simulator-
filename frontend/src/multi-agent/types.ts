@@ -23,9 +23,11 @@ export interface AgentQuestion {
   color: string;
   question: string;
   timestamp: string;
-  selected?: boolean;     // true = chosen to interrupt (shown in Judge Activity)
-  audio?: string;         // Base64-encoded TTS audio (opus)
-  audio_format?: string;  // e.g. 'opus'
+  selected?: boolean;        // true = chosen to interrupt (shown in Judge Activity)
+  question_type?: 'question' | 'counter';  // 'counter' = counter-argument to matched topic
+  topic?: string;            // topic title (set when question_type='counter')
+  audio?: string;            // Base64-encoded TTS audio (opus)
+  audio_format?: string;     // e.g. 'opus'
 }
 
 export interface BriefData {

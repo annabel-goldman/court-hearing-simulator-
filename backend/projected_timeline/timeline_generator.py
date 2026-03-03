@@ -305,6 +305,8 @@ async def _generate_agenda(
 # Public API
 # ---------------------------------------------------------------------------
 
+SPARSE_MCTS_INITIAL_DEPTH = 5
+
 async def generate_topic_sets(
     request: TopicPredictionRequest,
     use_mcts: bool = True,
@@ -406,10 +408,13 @@ async def generate_topic_sets(
             total_predictions=len(predictions),
         )
 
-    # ── MCTS Phase 2 ──────────────────────────────────────────────────────
+    # ── MCTS Phase 2 (Sparse) ─────────────────────────────────────────────
     # Flatten all lens topics into a single candidate pool, then let MCTS
-    # discover top-K coherent orderings.
-    _emit("status", {"phase": "mcts", "detail": "Running MCTS search on topic pool…"})
+    # discover top-K coherent orderings.  Uses sparse MCTS: the initial tree
+    # is depth-limited to SPARSE_MCTS_INITIAL_DEPTH topics per path.  The
+    # full pool is preserved in the response so the live projection can
+    # expand deeper as the student progresses.
+    _emit("status", {"phase": "mcts", "detail": "Running sparse MCTS search on topic pool…"})
     topic_pool: list[dict] = []
     for lens_def, agenda in per_lens:
         for topic in agenda.topics:
@@ -430,10 +435,14 @@ async def generate_topic_sets(
                 mcts_paths, mcts_tree = await run_generation_streaming(
                     topic_pool, on_expand=mcts_callback, top_k=num,
                     root_label=case_summary,
+                    max_depth=SPARSE_MCTS_INITIAL_DEPTH,
                 )
             else:
                 from .mcts import run_generation
-                mcts_paths, mcts_tree = run_generation(topic_pool, top_k=num, root_label=case_summary)
+                mcts_paths, mcts_tree = run_generation(
+                    topic_pool, top_k=num, root_label=case_summary,
+                    max_depth=SPARSE_MCTS_INITIAL_DEPTH,
+                )
             logger.info("MCTS returned %d paths, %d tree nodes", len(mcts_paths), len(mcts_tree.get("nodes", [])))
 
             for path_idx, path in enumerate(mcts_paths[:num], start=1):
@@ -472,12 +481,19 @@ async def generate_topic_sets(
     if not predictions:
         predictions = [ag for _, ag in per_lens]
 
+    # Strip internal keys from the pool before including in the response
+    serialisable_pool = [
+        {k: v for k, v in t.items() if not k.startswith("_")}
+        for t in topic_pool
+    ] if topic_pool else None
+
     return PredictedTopicSets(
         case_summary=case_summary,
         key_legal_issues=key_issues,
         predictions=predictions,
         total_predictions=len(predictions),
         mcts_tree=mcts_tree if mcts_tree else None,
+        full_topic_pool=serialisable_pool,
     )
 
 

@@ -9,7 +9,7 @@
  * Most-recent entries appear first.
  */
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { OpponentResponse } from '../multi-agent/types';
 import './agenda.css';
 
@@ -38,7 +38,7 @@ function strengthBar(strength: number) {
   );
 }
 
-export function OpponentFeed({ responses }: OpponentFeedProps) {
+export const OpponentFeed = memo(function OpponentFeed({ responses }: OpponentFeedProps) {
   const [showAll, setShowAll] = useState(false);
 
   if (responses.length === 0) {
@@ -94,4 +94,4 @@ export function OpponentFeed({ responses }: OpponentFeedProps) {
       )}
     </div>
   );
-}
+});

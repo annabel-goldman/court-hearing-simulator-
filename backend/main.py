@@ -100,6 +100,11 @@ MCTS_MIN_WORDS = 40
 # and — because MCTS is synchronous C-extension work — blocks the event loop.
 MCTS_DEBOUNCE_TURNS = 3
 
+# Sparse MCTS: once any topic in the best agenda reaches this quality,
+# expand all_topics to include the full candidate pool so future MCTS
+# projections operate over the deeper topic set.
+EXPANSION_QUALITY_THRESHOLD = 0.5
+
 # Evict WS sessions that have been idle for this long (network-drop guard).
 _SESSION_TTL = 3600.0  # 1 hour
 
@@ -1341,6 +1346,14 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                 }
                                 all_topics.append({"title": t["title"], "description": t.get("description", "")})
 
+                        # Sparse MCTS: preserve the full candidate pool for
+                        # lazy expansion once the student starts progressing.
+                        full_pool_raw = pts_raw.get("full_topic_pool", []) if pts_raw else []
+                        full_topic_pool = [
+                            {"title": t["title"], "description": t.get("description", "")}
+                            for t in full_pool_raw
+                        ] if full_pool_raw else list(all_topics)
+
                         tracker = None
                         if pts_raw:
                             try:
@@ -1354,10 +1367,12 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             "all_topics":       all_topics,
                             "addressed_titles": set(),
                             "case_summary":     pts_raw.get("case_summary", "") if pts_raw else "",
+                            "full_topic_pool":  full_topic_pool,
+                            "sparse_expanded":  False,
                         })
                         logger.info(
-                            "[MultiAgent] set_agenda: tracker_ready=%s, topics_indexed=%d",
-                            tracker is not None, len(topic_map),
+                            "[MultiAgent] set_agenda: tracker_ready=%s, topics_indexed=%d, full_pool=%d",
+                            tracker is not None, len(topic_map), len(full_topic_pool),
                         )
                         await multi_agent_manager.send_json(session_id, {
                             "type": "agenda_set_ack",
@@ -1530,11 +1545,46 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
                 session["addressed_titles"] = addressed
 
             all_topics = session.get("all_topics", [])
-            remaining  = [t for t in all_topics if t["title"] not in addressed]
             root_label = session.get("case_summary", "")
             quality_map = _build_quality_map(state)
 
+            # ── Sparse MCTS expansion ─────────────────────────────────────
+            # The initial tree only covers SPARSE_MCTS_INITIAL_DEPTH topics.
+            # Once any addressed topic reaches EXPANSION_QUALITY_THRESHOLD,
+            # swap all_topics to the full candidate pool so MCTS projection
+            # can explore the deeper topic space.
+            if not session.get("sparse_expanded", False) and quality_map:
+                max_quality = max(quality_map.values()) if quality_map else 0.0
+                if max_quality >= EXPANSION_QUALITY_THRESHOLD:
+                    full_pool = session.get("full_topic_pool", [])
+                    if full_pool and len(full_pool) > len(all_topics):
+                        existing_titles = {t["title"] for t in all_topics}
+                        new_topics = [t for t in full_pool if t["title"] not in existing_titles]
+                        all_topics = all_topics + new_topics
+                        session["all_topics"] = all_topics
+                        # Also update topic_map for new topics
+                        topic_map = session.get("topic_map", {})
+                        for t in new_topics:
+                            if t["title"] not in topic_map:
+                                topic_map[t["title"]] = {
+                                    "agenda_id": None,
+                                    "agent_id": None,
+                                    "description": t.get("description", ""),
+                                }
+                        session["topic_map"] = topic_map
+                        session["sparse_expanded"] = True
+                        session["_just_expanded"] = True
+                        logger.info(
+                            "[SparseMCTS] Expansion triggered (max_quality=%.2f ≥ %.2f): "
+                            "%d → %d topics",
+                            max_quality, EXPANSION_QUALITY_THRESHOLD,
+                            len(all_topics) - len(new_topics), len(all_topics),
+                        )
+
+            remaining  = [t for t in all_topics if t["title"] not in addressed]
+
             # ── MCTS gate ──────────────────────────────────────────────────
+            just_expanded       = session.pop("_just_expanded", False)
             word_count          = len(session.get("transcript", "").split())
             flush_count         = session.get("projection_flush_count", 0) + 1
             session["projection_flush_count"] = flush_count
@@ -1542,9 +1592,11 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
             since_last_mcts      = flush_count - last_mcts_flush_prev
 
             run_mcts = (
-                word_count >= MCTS_MIN_WORDS
-                and since_last_mcts >= MCTS_DEBOUNCE_TURNS
-                and len(remaining) >= 2
+                len(remaining) >= 2
+                and (
+                    just_expanded
+                    or (word_count >= MCTS_MIN_WORDS and since_last_mcts >= MCTS_DEBOUNCE_TURNS)
+                )
             )
             if run_mcts:
                 # Mark the flush optimistically inside the lock so a concurrent
@@ -1608,62 +1660,89 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
         },
     })
 
-    # ── Counter-argument: fire-and-forget ─────────────────────────────────
+    # ── Counter-argument: ALL agents concurrently, select a winner ──────
+    # Mirrors the agent-question pipeline: every agent generates a counter,
+    # all appear in the per-agent QuestionFeed grid (question_type="counter"),
+    # and a TINY-model selector picks the single best response to speak aloud.
     matched = state.last_human_matched_topic
     if matched:
-        async def _fire_counter(sid, matched_topic, topic_info, agent, utt, brief_summary):
+        async def _fire_all_counters(sid, matched_topic, topic_info, agents, utt, brief_summary):
             try:
-                counter = await generate_counter_argument(
-                    agent=agent,
-                    topic_title=matched_topic,
-                    topic_description=topic_info.get("description", "") if topic_info else "",
-                    recent_utterance=utt,
-                    brief_summary=brief_summary,
+                topic_desc = topic_info.get("description", "") if topic_info else ""
+                results: list = [None] * len(agents)
+
+                async def _gen(idx, agent):
+                    try:
+                        text = await generate_counter_argument(
+                            agent=agent,
+                            topic_title=matched_topic,
+                            topic_description=topic_desc,
+                            recent_utterance=utt,
+                            brief_summary=brief_summary,
+                        )
+                        if text:
+                            results[idx] = (agent, text)
+                    except Exception as e:
+                        logger.error("Counter-arg gen failed for %s: %s", agent.name, e)
+
+                async with anyio.create_task_group() as gen_tg:
+                    for i, agent in enumerate(agents):
+                        gen_tg.start_soon(_gen, i, agent)
+
+                candidates = [r for r in results if r is not None]
+                if not candidates:
+                    return
+
+                winner_agent, winner_text = await _select_best_question(
+                    candidates, utt, brief_summary,
                 )
-                if counter:
+
+                audio_b64 = ""
+                audio_format = "opus"
+                if winner_agent:
+                    try:
+                        tts = get_tts_provider()
+                        audio_b64 = await tts.synthesize(winner_text)
+                        audio_format = tts.audio_format
+                    except Exception as e:
+                        logger.warning("[Counter] TTS failed for %s: %s", winner_agent.name, e)
+
+                now_iso = datetime.now().isoformat()
+                for agent, text in candidates:
+                    is_winner = winner_agent and agent.id == winner_agent.id
+                    q_data = {
+                        "agent_id":      agent.id,
+                        "agent_name":    agent.name,
+                        "color":         agent.color,
+                        "question":      text,
+                        "timestamp":     now_iso,
+                        "selected":      bool(is_winner),
+                        "question_type": "counter",
+                        "topic":         matched_topic,
+                        "audio":         audio_b64 if is_winner else "",
+                        "audio_format":  audio_format if is_winner else "",
+                    }
+                    if is_winner:
+                        session.get("questions_asked", []).append(q_data)
                     await multi_agent_manager.send_json(sid, {
-                        "type": "agent_counter_argument",
-                        "data": {
-                            "agent_id":         agent.id,
-                            "agent_name":       agent.name,
-                            "color":            agent.color,
-                            "topic":            matched_topic,
-                            "counter_argument": counter,
-                            "timestamp":        datetime.now().isoformat(),
-                        },
+                        "type": "agent_question",
+                        "data": q_data,
                     })
+
+                if winner_agent:
+                    logger.info("[Counter] %s selected (of %d): %s…",
+                                winner_agent.name, len(candidates), winner_text[:60])
             except Exception as e:
-                logger.error("Counter-argument generation failed: %s", e)
+                logger.error("Counter-argument pipeline failed: %s", e)
 
+        agents_list = session.get("agents", [])
         topic_info = session.get("topic_map", {}).get(matched)
-        agent = None
-
-        if topic_info and topic_info.get("agent_id"):
-            agent = next(
-                (a for a in session.get("agents", []) if a.id == topic_info["agent_id"]),
-                None,
-            )
-
-        if not agent:
-            agents = session.get("agents", [])
-            topic_lower = matched.lower()
-            desc_lower  = (topic_info.get("description", "") if topic_info else "").lower()
-            best_score, best_agent = 0, None
-            for a in agents:
-                score = sum(
-                    1 for t in (a.triggers if hasattr(a, 'triggers') else [])
-                    if t.lower() in topic_lower or t.lower() in desc_lower
-                )
-                if score > best_score:
-                    best_score, best_agent = score, a
-            agent = best_agent or (random.choice(agents) if agents else None)
-
-        if agent:
+        if agents_list:
             session_tg = session.get('_tg')
             if session_tg:
                 session_tg.start_soon(
-                    _fire_counter,
-                    session_id, matched, topic_info, agent, utterance,
+                    _fire_all_counters,
+                    session_id, matched, topic_info, agents_list, utterance,
                     session.get("brief_summary", ""),
                 )
 
@@ -1711,15 +1790,32 @@ async def _select_best_question(
         "Respond with ONLY the number (e.g. '1' or '2'). Nothing else."
     )
 
+    SELECTION_TIMEOUT = 8  # seconds — fall back to random if TINY is slow
+
     try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=10,
-            extra_body=task_extra_body("question_selection"),
-        )
-        content = extract_content(response)
+        result = [None]
+
+        async def _call_llm():
+            result[0] = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=10,
+                extra_body=task_extra_body("question_selection"),
+            )
+
+        with anyio.CancelScope() as scope:
+            scope.deadline = anyio.current_time() + SELECTION_TIMEOUT
+            await _call_llm()
+
+        if scope.cancelled_caught:
+            logger.warning(
+                "[QuestionSelect] TINY selection timed out after %ds — falling back to random",
+                SELECTION_TIMEOUT,
+            )
+            return random.choice(candidates)
+
+        content = extract_content(result[0])
         match = re.search(r"(\d+)", content)
         if match:
             idx = int(match.group(1)) - 1

@@ -50,12 +50,18 @@ class PredictedTopicSets(BaseModel):
     mcts_tree — optional flat node/edge snapshot of the generation-phase MCTS
     tree, included in the /generate response so the frontend can animate the
     search tree as nodes pop in.  Absent on tracker-only responses.
+
+    full_topic_pool — the complete flattened candidate pool from all lenses,
+    preserved for sparse MCTS expansion.  The initial predictions may only
+    contain the first N topics (shallow tree); live projection expands deeper
+    by pulling from this pool as the student progresses.
     """
     case_summary:      str
     key_legal_issues:  List[str]         # Issues common to all predictions
     predictions:       List[TopicPrediction]
     total_predictions: int
     mcts_tree:         Optional[Dict] = None
+    full_topic_pool:   Optional[List[Dict]] = None
 
 
 # ---------------------------------------------------------------------------

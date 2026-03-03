@@ -9,7 +9,6 @@ import type {
   AgendaUpdate,
   AgentQuestion,
   ArgumentScore,
-  CounterArgument,
   OpponentResponse,
   SimulationPhase,
   MultiAgentSocketMessage,
@@ -24,7 +23,6 @@ interface UseMultiAgentSocketProps {
   onAgentQuestion?: (question: AgentQuestion) => void;
   onPhaseUpdate?: (phase: SimulationPhase) => void;
   onAgendaUpdate?: (update: AgendaUpdate) => void;
-  onCounterArgument?: (arg: CounterArgument) => void;
   onArgumentScore?: (score: ArgumentScore) => void;
   onOpponentResponse?: (response: OpponentResponse) => void;
 }
@@ -46,7 +44,6 @@ export function useMultiAgentSocket({
   onAgentQuestion,
   onPhaseUpdate,
   onAgendaUpdate,
-  onCounterArgument,
   onArgumentScore,
   onOpponentResponse,
 }: UseMultiAgentSocketProps): UseMultiAgentSocketReturn {
@@ -60,7 +57,6 @@ export function useMultiAgentSocket({
     onAgentQuestion,
     onPhaseUpdate,
     onAgendaUpdate,
-    onCounterArgument,
     onArgumentScore,
     onOpponentResponse,
   });
@@ -69,7 +65,6 @@ export function useMultiAgentSocket({
     onAgentQuestion,
     onPhaseUpdate,
     onAgendaUpdate,
-    onCounterArgument,
     onArgumentScore,
     onOpponentResponse,
   };
@@ -112,9 +107,6 @@ export function useMultiAgentSocket({
             break;
           case 'agenda_update':
             cb.onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
-            break;
-          case 'agent_counter_argument':
-            cb.onCounterArgument?.(message.data as unknown as CounterArgument);
             break;
           case 'argument_score':
             cb.onArgumentScore?.(message.data as unknown as ArgumentScore);

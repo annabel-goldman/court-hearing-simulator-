@@ -184,9 +184,10 @@ Extracts `{case_summary, key_legal_issues}` from both briefs.
 ### Phase 2 — Agenda Generation (TINY tier, parallelised)
 For each of 10 **JUDICIAL_LENSES** (statutory text, precedent, agency deference, etc.), generates a 5-7 topic ordered agenda. Each lens runs independently; results become `TopicPrediction` objects.
 
-### MCTS — Topic Sequencing
-- **Generation mode** (`run_generation`, n_sims=800): build agendas from scratch during setup
-- **Projection mode** (`run_projection`, n_sims=150): live prediction of next topics during hearing
+### MCTS — Sparse Topic Sequencing
+- **Generation mode** (`run_generation`, n_sims=800, **max_depth=5**): build shallow agendas from scratch during setup. Each path covers only the first 5 predicted topics; the full candidate pool (~50-70 topics) is preserved in `PredictedTopicSets.full_topic_pool`.
+- **Lazy expansion**: Once any addressed topic reaches `EXPANSION_QUALITY_THRESHOLD` (0.5) quality, the session's `all_topics` is expanded from the shallow initial set to the full candidate pool. This triggers an immediate MCTS projection over the deeper set, bypassing normal debounce.
+- **Projection mode** (`run_projection`, n_sims=150): live prediction of next topics during hearing, operating over whatever topics are currently in `all_topics` (shallow before expansion, full after).
 
 MCTS runs in a thread pool via `anyio.to_thread.run_sync()` — never blocks the event loop.
 
@@ -194,6 +195,12 @@ Gate constants (in `main.py`):
 ```python
 MCTS_MIN_WORDS = 40        # don't run until advocate has spoken 40+ words
 MCTS_DEBOUNCE_TURNS = 3    # only re-run every 3rd sentence flush
+```
+
+Sparse MCTS constants (in `timeline_generator.py` and `main.py`):
+```python
+SPARSE_MCTS_INITIAL_DEPTH = 5         # max topics per path in initial generation
+EXPANSION_QUALITY_THRESHOLD = 0.5     # quality score that triggers pool expansion
 ```
 
 ### Tracker (`tracker.py`)
@@ -343,6 +350,8 @@ Key fields in the per-session dict (stored in `_SESSIONS` in `main.py`):
   "projection_flush_count": int,
   "last_mcts_flush": int,
   "last_predicted_next": List[str],    # cached MCTS result
+  "full_topic_pool": List[dict],       # complete candidate pool from all lenses (sparse MCTS expansion)
+  "sparse_expanded": bool,             # True once all_topics has been expanded to full pool
 }
 ```
 
@@ -353,6 +362,7 @@ MIN_WORDS_BEFORE_INTERRUPT = 10
 SENTENCE_BUFFER_FLUSH_WORDS = 25
 SILENCE_FLUSH_TIMEOUT = 3.0
 _SESSION_TTL = 3600.0   # 1 hour; idle sessions are evicted every 5 min
+EXPANSION_QUALITY_THRESHOLD = 0.5  # sparse MCTS: expand topic pool when a topic hits this quality
 ```
 
 ---

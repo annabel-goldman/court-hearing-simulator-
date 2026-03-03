@@ -14,7 +14,7 @@
  *    `agent_counter_argument` messages for live feedback.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   Agent,
@@ -23,7 +23,6 @@ import type {
   ArgumentScore,
   BriefData,
   ChatMessage,
-  CounterArgument,
   MCTSNode,
   MCTSTree,
   OpponentResponse,
@@ -63,6 +62,7 @@ export default function OrchestratedAgents() {
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [phase, setPhase] = useState<SimulationPhase>('SETUP');
   const [setupCollapsed, setSetupCollapsed] = useState(false);
+  const [agentQuestionsCollapsed, setAgentQuestionsCollapsed] = useState(false);
 
   const [, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBriefText, setOpposingBriefText] = useState<string>('');
@@ -83,7 +83,6 @@ export default function OrchestratedAgents() {
   const currentSpeechRef = useRef('');
   const chatIdRef = useRef(0);
   const [questions, setQuestions] = useState<AgentQuestion[]>([]);
-  const [counterArguments, setCounterArguments] = useState<CounterArgument[]>([]);
   const [opponentResponses, setOpponentResponses] = useState<OpponentResponse[]>([]);
   const [scores, setScores] = useState<ArgumentScore[]>([]);
   const [inactiveAgentIds, setInactiveAgentIds] = useState<Set<string>>(new Set());
@@ -107,27 +106,75 @@ export default function OrchestratedAgents() {
   const [judgeIntroText, setJudgeIntroText] = useState<string | null>(null);
   const judgeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // ── Turn indicator — tracks who is currently speaking via audio ──────────
+  const [activeSpeaker, setActiveSpeaker] = useState<{
+    type: 'judge' | 'opponent';
+    name: string;
+    color: string;
+  } | null>(null);
+
+  // ── Silence detection — hands turn to the bench after ~4s of quiet ─────
+  const SILENCE_TURN_TIMEOUT = 4000;
+  const [silenceDetected, setSilenceDetected] = useState(false);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const resetSilenceTimer = useCallback(() => {
+    setSilenceDetected(false);
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => setSilenceDetected(true), SILENCE_TURN_TIMEOUT);
+  }, []);
+
+  const clearSilenceTimer = useCallback(() => {
+    setSilenceDetected(false);
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'RECORDING') {
+      resetSilenceTimer();
+    } else {
+      clearSilenceTimer();
+    }
+    return () => { if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current); };
+  }, [phase, resetSilenceTimer, clearSilenceTimer]);
+
+  useEffect(() => {
+    if (activeSpeaker) {
+      setSilenceDetected(false);
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    } else if (phase === 'RECORDING') {
+      resetSilenceTimer();
+    }
+  }, [activeSpeaker, phase, resetSilenceTimer]);
+
   // ── Shared audio queue — serializes agent questions + opponent responses ─
-  const audioQueueRef   = useRef<Array<() => Promise<void>>>([]);
+  interface AudioQueueItem {
+    play: () => Promise<void>;
+    speaker: { type: 'judge' | 'opponent'; name: string; color: string };
+  }
+  const audioQueueRef   = useRef<AudioQueueItem[]>([]);
   const audioPlayingRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // drainAudioQueueRef is reassigned each render so the recursive call always
-  // uses the latest closure (avoids stale-ref issues with useCallback + recursion).
   const drainAudioQueueRef = useRef<() => void>(() => {});
   drainAudioQueueRef.current = () => {
     if (audioPlayingRef.current || audioQueueRef.current.length === 0) return;
     audioPlayingRef.current = true;
     const next = audioQueueRef.current.shift()!;
-    next().finally(() => {
+    setActiveSpeaker(next.speaker);
+    next.play().finally(() => {
       currentAudioRef.current = null;
       audioPlayingRef.current = false;
+      setActiveSpeaker(null);
       drainAudioQueueRef.current();
     });
   };
 
-  const enqueueAudio = useCallback((playFn: () => Promise<void>) => {
-    audioQueueRef.current.push(playFn);
+  const enqueueAudio = useCallback((
+    playFn: () => Promise<void>,
+    speaker: { type: 'judge' | 'opponent'; name: string; color: string },
+  ) => {
+    audioQueueRef.current.push({ play: playFn, speaker });
     drainAudioQueueRef.current();
   }, []);
 
@@ -215,7 +262,8 @@ export default function OrchestratedAgents() {
   const handleTranscriptUpdate = useCallback((text: string) => {
     currentSpeechRef.current += ' ' + text;
     setTranscript(currentSpeechRef.current);
-  }, []);
+    resetSilenceTimer();
+  }, [resetSilenceTimer]);
 
   /** Freeze the current live speech into a chat message and reset for next segment. */
   const freezeCurrentSpeech = useCallback(() => {
@@ -239,21 +287,24 @@ export default function OrchestratedAgents() {
 
     // Enqueue TTS audio for serialized playback (won't overlap opponent audio)
     if (question.audio) {
-      enqueueAudio(() => new Promise<void>((resolve) => {
-        const format = question.audio_format || 'mp3';
-        const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-        const mime = mimeMap[format] || 'audio/mpeg';
-        const blob = new Blob(
-          [Uint8Array.from(atob(question.audio!), c => c.charCodeAt(0))],
-          { type: mime },
-        );
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudioRef.current = audio;
-        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.play().catch(() => resolve());
-      }));
+      enqueueAudio(
+        () => new Promise<void>((resolve) => {
+          const format = question.audio_format || 'mp3';
+          const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
+          const mime = mimeMap[format] || 'audio/mpeg';
+          const blob = new Blob(
+            [Uint8Array.from(atob(question.audio!), c => c.charCodeAt(0))],
+            { type: mime },
+          );
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          currentAudioRef.current = audio;
+          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.play().catch(() => resolve());
+        }),
+        { type: 'judge', name: question.agent_name, color: question.color },
+      );
     }
   }, [freezeCurrentSpeech, enqueueAudio]);
 
@@ -269,10 +320,6 @@ export default function OrchestratedAgents() {
     }
   }, []);
 
-  const handleCounterArgument = useCallback((arg: CounterArgument) => {
-    setCounterArguments((prev) => [...prev, arg]);
-  }, []);
-
   const handleArgumentScore = useCallback((score: ArgumentScore) => {
     setScores((prev) => [...prev, score]);
   }, []);
@@ -286,21 +333,24 @@ export default function OrchestratedAgents() {
 
     // Enqueue TTS audio if the backend included it
     if (response.audio) {
-      enqueueAudio(() => new Promise<void>((resolve) => {
-        const format = response.audio_format || 'mp3';
-        const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-        const mime = mimeMap[format] || 'audio/mpeg';
-        const blob = new Blob(
-          [Uint8Array.from(atob(response.audio!), c => c.charCodeAt(0))],
-          { type: mime },
-        );
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudioRef.current = audio;
-        audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-        audio.play().catch(() => resolve());
-      }));
+      enqueueAudio(
+        () => new Promise<void>((resolve) => {
+          const format = response.audio_format || 'mp3';
+          const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
+          const mime = mimeMap[format] || 'audio/mpeg';
+          const blob = new Blob(
+            [Uint8Array.from(atob(response.audio!), c => c.charCodeAt(0))],
+            { type: mime },
+          );
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          currentAudioRef.current = audio;
+          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.play().catch(() => resolve());
+        }),
+        { type: 'opponent', name: 'Opposing Counsel', color: '#e67e22' },
+      );
     }
   }, [freezeCurrentSpeech, enqueueAudio]);
 
@@ -312,7 +362,10 @@ export default function OrchestratedAgents() {
     });
   }, []);
 
-  const activeAgents = agents.filter(a => !inactiveAgentIds.has(a.id));
+  const activeAgents = useMemo(
+    () => agents.filter(a => !inactiveAgentIds.has(a.id)),
+    [agents, inactiveAgentIds],
+  );
 
   const { isConnected, connect, disconnect, sendConfig, sendAudio, setPhase: sendPhase, updateAgents, sendAgenda } =
     useMultiAgentSocket({
@@ -321,7 +374,6 @@ export default function OrchestratedAgents() {
       onAgentQuestion: handleAgentQuestion,
       onPhaseUpdate: handlePhaseUpdate,
       onAgendaUpdate: handleAgendaUpdate,
-      onCounterArgument: handleCounterArgument,
       onArgumentScore: handleArgumentScore,
       onOpponentResponse: handleOpponentResponse,
     });
@@ -647,7 +699,6 @@ export default function OrchestratedAgents() {
     currentSpeechRef.current = '';
     chatIdRef.current = 0;
     setQuestions([]);
-    setCounterArguments([]);
     setOpponentResponses([]);
     setScores([]);
     setAgendaUpdate(null);
@@ -670,6 +721,8 @@ export default function OrchestratedAgents() {
     // Stop any playing queued audio (agent question or opponent response)
     audioQueueRef.current = [];
     audioPlayingRef.current = false;
+    setActiveSpeaker(null);
+    clearSilenceTimer();
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
@@ -698,7 +751,6 @@ export default function OrchestratedAgents() {
     currentSpeechRef.current = '';
     chatIdRef.current = 0;
     setQuestions([]);
-    setCounterArguments([]);
     setOpponentResponses([]);
     setScores([]);
     setInactiveAgentIds(new Set());
@@ -722,6 +774,38 @@ export default function OrchestratedAgents() {
       updateAgents(agents.filter(a => !inactiveAgentIds.has(a.id)));
     }
   }, [inactiveAgentIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Stable derived values for MCTSTreeViz (avoids new refs every render) ──
+  const addressedTopics = useMemo(
+    () => agendaUpdate?.agenda_confidences
+      .flatMap(ac => ac.topics_coverage.filter(t => t.addressed).map(t => t.title))
+      ?? [],
+    [agendaUpdate],
+  );
+  const predictedNext = useMemo(
+    () => agendaUpdate?.predicted_next_topics ?? [],
+    [agendaUpdate],
+  );
+  const currentTopic = agendaUpdate?.last_human_matched_topic ?? null;
+  const mctsTitle = agendaUpdate ? 'Tree Projection (Dynamic Topics)' : 'Topic Tree';
+  const weakTopics = useMemo(
+    () => agendaUpdate?.agenda_confidences
+      .flatMap(ac => ac.weak_titles ?? [])
+      ?? [],
+    [agendaUpdate],
+  );
+  const topicQualities = useMemo(
+    () => agendaUpdate?.agenda_confidences
+      .flatMap(ac => ac.topics_coverage)
+      .reduce<Record<string, number>>((acc, tc) => {
+        if (tc.addressed && tc.quality > 0) {
+          acc[tc.title] = Math.max(acc[tc.title] ?? 0, tc.quality);
+        }
+        return acc;
+      }, {})
+      ?? {},
+    [agendaUpdate],
+  );
 
   return (
     <div className="ma-page ma-invisible-scroll">
@@ -816,35 +900,60 @@ export default function OrchestratedAgents() {
             <MCTSTreeViz
               tree={mctsTree}
               agendaItems={agendaItems}
-              addressedTopics={
-                agendaUpdate?.agenda_confidences
-                  .flatMap(ac => ac.topics_coverage.filter(t => t.addressed).map(t => t.title))
-                ?? []
-              }
-              predictedNext={agendaUpdate?.predicted_next_topics ?? []}
-              currentTopic={agendaUpdate?.last_human_matched_topic ?? null}
-              title={agendaUpdate ? 'Tree Projection (Dynamic Topics)' : 'Topic Tree'}
-              weakTopics={
-                agendaUpdate?.agenda_confidences
-                  .flatMap(ac => ac.weak_titles ?? [])
-                ?? []
-              }
-              topicQualities={
-                agendaUpdate?.agenda_confidences
-                  .flatMap(ac => ac.topics_coverage)
-                  .reduce<Record<string, number>>((acc, tc) => {
-                    if (tc.addressed && tc.quality > 0) {
-                      acc[tc.title] = Math.max(acc[tc.title] ?? 0, tc.quality);
-                    }
-                    return acc;
-                  }, {})
-                ?? {}
-              }
+              addressedTopics={addressedTopics}
+              predictedNext={predictedNext}
+              currentTopic={currentTopic}
+              title={mctsTitle}
+              weakTopics={weakTopics}
+              topicQualities={topicQualities}
             />
           </div>
 
           {/* Middle column — Your argument + parallel agent evaluations */}
           <div className="ma-main__column ma-main__column--mid">
+            {/* ── Turn Indicator ── */}
+            {(phase === 'INTRO' || phase === 'RECORDING' || phase === 'FINISHED') && (
+              <div
+                className={`oa-turn ${
+                  phase === 'INTRO'
+                    ? 'oa-turn--judge'
+                    : phase === 'FINISHED'
+                      ? 'oa-turn--finished'
+                      : activeSpeaker
+                        ? `oa-turn--${activeSpeaker.type}`
+                        : silenceDetected
+                          ? 'oa-turn--silence'
+                          : 'oa-turn--advocate'
+                }`}
+                style={
+                  activeSpeaker
+                    ? { '--oa-turn-color': activeSpeaker.color } as React.CSSProperties
+                    : undefined
+                }
+              >
+                <span className="oa-turn__pulse" />
+                <span className="oa-turn__label">
+                  {phase === 'INTRO' ? (
+                    'Chief Justice is speaking'
+                  ) : phase === 'FINISHED' ? (
+                    'Hearing concluded'
+                  ) : activeSpeaker?.type === 'judge' ? (
+                    <>
+                      <span className="oa-turn__name">{activeSpeaker.name}</span> is questioning you
+                    </>
+                  ) : activeSpeaker?.type === 'opponent' ? (
+                    <>
+                      <span className="oa-turn__name">Opposing Counsel</span> is responding
+                    </>
+                  ) : silenceDetected ? (
+                    'Silence — the bench may interject'
+                  ) : (
+                    'Your turn — present your argument'
+                  )}
+                </span>
+              </div>
+            )}
+
             {/* Judge Introduction Banner */}
             {phase === 'INTRO' && (
               <div className="oa-panel">
@@ -916,14 +1025,25 @@ export default function OrchestratedAgents() {
               </div>
             </div>
 
-            {/* ── Agent Questions (parallel evaluations) ── */}
-            <div className="oa-panel">
-              <div className="oa-panel__header">
-                <span className="oa-panel__title">Agent Questions</span>
-              </div>
-              <div className="oa-panel__body">
-                <QuestionFeed agents={agents} questions={questions} />
-              </div>
+            {/* ── Agent Questions (parallel evaluations, collapsible) ── */}
+            <div className={`oa-panel${agentQuestionsCollapsed ? ' oa-panel--collapsed' : ''}`}>
+              <button
+                className="oa-panel__header oa-panel__header--toggle"
+                onClick={() => setAgentQuestionsCollapsed(c => !c)}
+              >
+                <span className="oa-panel__title">
+                  Agent Questions
+                  {questions.length > 0 && (
+                    <span className="oa-panel__count">{questions.length}</span>
+                  )}
+                </span>
+                <span className="oa-panel__chevron">{agentQuestionsCollapsed ? '▶' : '▼'}</span>
+              </button>
+              {!agentQuestionsCollapsed && (
+                <div className="oa-panel__body">
+                  <QuestionFeed agents={agents} questions={questions} />
+                </div>
+              )}
             </div>
 
             {/* ── Argument Scores ── */}
@@ -957,7 +1077,7 @@ export default function OrchestratedAgents() {
                 )}
               </div>
               <div className="oa-panel__body">
-                <JudgeActivityFeed questions={questions} counterArguments={counterArguments} />
+                <JudgeActivityFeed questions={questions} />
               </div>
             </div>
 

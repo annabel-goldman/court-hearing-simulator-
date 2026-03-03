@@ -88,7 +88,14 @@
 /* Live indicator — subtle accent border */
 .ma-transcript__bubble--live {
   border: 1px solid var(--ma-info);
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15),
+              0 0 12px rgba(59, 130, 246, 0.06);
+  animation: ma-bubble-in 0.2s ease-out, ma-live-glow 2s ease-in-out infinite;
+}
+
+@keyframes ma-live-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15), 0 0 12px rgba(59, 130, 246, 0.06); }
+  50%      { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 0 16px rgba(59, 130, 246, 0.1); }
 }
 
 /* Judge speech — left-aligned with accent stripe */

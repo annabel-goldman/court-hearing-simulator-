@@ -6,6 +6,7 @@
  * Styles: styles/recording.css
  */
 
+import { memo } from 'react';
 import type { SimulationPhase } from '../../types';
 import '../../styles/recording.css';
 
@@ -13,7 +14,7 @@ interface RecordingStatusProps {
   phase: SimulationPhase;
 }
 
-export function RecordingStatus({ phase }: RecordingStatusProps) {
+export const RecordingStatus = memo(function RecordingStatus({ phase }: RecordingStatusProps) {
   if (phase !== 'RECORDING') return null;
   
   return (
@@ -22,4 +23,4 @@ export function RecordingStatus({ phase }: RecordingStatusProps) {
       <span className="ma-recording-status__text">Recording...</span>
     </div>
   );
-}
+});

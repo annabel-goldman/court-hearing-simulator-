@@ -28,12 +28,17 @@
   display: flex;
   flex-direction: column;
   gap: var(--ma-space-xs);
-  animation: sl-fade-in 0.2s ease;
+  animation: sl-fade-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: background 0.15s ease;
+}
+
+.sl-entry:hover {
+  background: var(--ma-bg-tertiary);
 }
 
 @keyframes sl-fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .sl-entry--appellant {
@@ -131,8 +136,9 @@
 .sl-dim__fill {
   height: 100%;
   border-radius: var(--ma-radius-full);
-  background: var(--ma-info);
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, var(--ma-info), #818cf8);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
 }
 
 .sl-dim__fill--respondent {

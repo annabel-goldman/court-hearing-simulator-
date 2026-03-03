@@ -7,7 +7,7 @@
  * Styles: styles/transcript.css
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../../types';
 import '../../styles/transcript.css';
 
@@ -17,7 +17,7 @@ interface TranscriptDisplayProps {
   placeholder?: string;
 }
 
-export function TranscriptDisplay({
+export const TranscriptDisplay = memo(function TranscriptDisplay({
   transcript,
   chatMessages = [],
   placeholder = "Start recording to see your transcript appear here in real-time..."
@@ -85,4 +85,4 @@ export function TranscriptDisplay({
       </div>
     </div>
   );
-}
+});
