@@ -23,7 +23,7 @@ export const RECORDING_SYNC_DELAY_MS = 500
 // =============================================================================
 
 /** Total time for demo mode session (in seconds) */
-export const DEMO_SESSION_DURATION_SECONDS = 60
+export const DEMO_SESSION_DURATION_SECONDS = 180
 
 /** How long to display the recent transcript before clearing (ms) */
 export const TRANSCRIPT_DISPLAY_DURATION_MS = 5000
@@ -78,7 +78,7 @@ export const TIMER_INTERVAL_MS = 1000
 export const SILENCE_AUDIO_LEVEL_THRESHOLD = 10
 
 /** Judge asks a question after this much uninterrupted user silence (ms) */
-export const SILENCE_TRIGGER_MS = 2000
+export const SILENCE_TRIGGER_MS = 8000
 
 /** Extra response window granted when timer expires mid-question (seconds) */
 export const TIMER_OVERTIME_SECONDS = 10

@@ -66,7 +66,7 @@ def build_agent_system_prompt(agent: Agent) -> str:
 
 PERSONALITY: {agent.description}
 
-YOUR TRIGGERS (topics that should prompt you to ask a question):
+YOUR TRIGGERS (topics that MUST appear explicitly in the transcript to prompt a question):
 {triggers_formatted}
 
 EXAMPLE QUESTIONS YOU MIGHT ASK:
@@ -75,12 +75,15 @@ EXAMPLE QUESTIONS YOU MIGHT ASK:
 ADDITIONAL INSTRUCTIONS:
 {agent.extra_prompt}
 
-You are listening to an advocate's oral argument. Based on what they are saying,
-decide if YOU specifically should interrupt with a question. Only ask if the
-content relates to YOUR triggers and expertise.
+You are listening to an advocate's oral argument. Your default is to stay silent.
+Only interrupt when the transcript DIRECTLY and EXPLICITLY addresses one of your trigger topics —
+not by inference, not tangentially, not because the general case might relate.
 
-If you decide to ask, make your question specific to what was just said.
-Do NOT repeat questions that have already been asked."""
+RULES:
+- If you are unsure whether to ask, do NOT ask. Silence is correct when in doubt.
+- Only set should_ask=true when the transcript contains specific content you cannot let pass.
+- Do NOT repeat questions that have already been asked.
+- If you decide to ask, make your question sharp, specific, and directly tied to what was said."""
 
 
 def build_agent_user_prompt(
@@ -127,13 +130,22 @@ RECENT TRANSCRIPT:
 Based on the recent transcript, should you ({agent.name}) ask a question now?
 
 Respond in JSON format:
-{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-3}}
+{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-10}}
 
-Where relevance is: 1=marginally relevant to your triggers, 2=relevant, 3=highly relevant."""
+Where relevance measures how directly this transcript touches your specific triggers:
+1-3 = barely mentioned or only general background
+4-5 = tangential or implicit connection
+6-7 = clearly relevant but not urgent
+8-9 = directly addresses one of your core triggers
+10 = this is the single most important issue in your domain and it demands an answer now
+
+IMPORTANT: Most transcript segments should score 1-5. A score of 7 or above means the
+advocate literally said something that falls squarely in your trigger area. Score honestly —
+do not inflate. Only set should_ask=true when relevance is 7 or higher."""
 
 
 # =============================================================================
 # RESPONSE FORMAT
 # =============================================================================
 
-AGENT_RESPONSE_FORMAT = """{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-3}}"""
+AGENT_RESPONSE_FORMAT = """{{"should_ask": true/false, "question": "Your question here or null", "relevance": 1-10}}"""

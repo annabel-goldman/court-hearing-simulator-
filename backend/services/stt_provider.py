@@ -22,7 +22,7 @@ class OpenAIWhisperProvider(STTProvider):
     
     def __init__(self):
         api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
+        self.model = os.getenv("OPENAI_STT_MODEL", "whisper-1")
         if not api_key:
             print("WARNING: OPENAI_API_KEY not set. STT will not work.")
             self.client = None

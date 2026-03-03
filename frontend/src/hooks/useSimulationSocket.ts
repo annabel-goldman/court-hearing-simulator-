@@ -25,6 +25,25 @@ export interface JudgeInterruptSource {
   agent_color?: string
 }
 
+export interface AgentScoreEntry {
+  agent_id: string
+  agent_name: string
+  agent_color: string
+  relevance: number | null
+  should_ask: boolean | null
+  on_cooldown: boolean
+}
+
+export interface MissedQuestionEntry {
+  agent_id: string
+  agent_name: string
+  agent_color: string
+  question: string
+  relevance: number
+  reason: 'not_selected' | 'duplicate'
+  timestamp: string
+}
+
 export interface MultiAgentSocketConfig {
   enabled: boolean
   strategy?: 'round_robin'
@@ -48,6 +67,8 @@ interface UseSimulationSocketOptions {
   onPhaseChange?: (phase: SimulationPhase) => void
   onJudgeInterrupt?: (interrupt: JudgeInterrupt) => void
   onTranscriptReceived?: (transcript: string) => void
+  onAgentScores?: (scores: AgentScoreEntry[]) => void
+  onMissedQuestion?: (entry: MissedQuestionEntry) => void
   onError?: (error: Error) => void
 }
 
@@ -65,12 +86,14 @@ interface UseSimulationSocketReturn {
 export function useSimulationSocket(
   options: UseSimulationSocketOptions
 ): UseSimulationSocketReturn {
-  const { 
-    sessionId, 
-    onPhaseChange, 
-    onJudgeInterrupt, 
+  const {
+    sessionId,
+    onPhaseChange,
+    onJudgeInterrupt,
     onTranscriptReceived,
-    onError 
+    onAgentScores,
+    onMissedQuestion,
+    onError
   } = options
 
   const [isConnected, setIsConnected] = useState(false)
@@ -157,6 +180,14 @@ export function useSimulationSocket(
         onTranscriptReceived?.(message.data.text || '')
         break
 
+      case 'agent_scores':
+        onAgentScores?.(message.data.scores || [])
+        break
+
+      case 'missed_question':
+        onMissedQuestion?.(message.data)
+        break
+
       case 'error':
         onError?.(new Error(message.data.message || 'Unknown error'))
         break
@@ -164,7 +195,7 @@ export function useSimulationSocket(
       default:
         console.log('Unknown message type:', message.type)
     }
-  }, [onPhaseChange, onJudgeInterrupt, onTranscriptReceived, onError])
+  }, [onPhaseChange, onJudgeInterrupt, onTranscriptReceived, onAgentScores, onMissedQuestion, onError])
 
   // Send message helper
   const sendMessage = useCallback((type: string, data: any) => {

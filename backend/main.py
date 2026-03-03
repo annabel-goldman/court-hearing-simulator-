@@ -36,13 +36,17 @@ logger = logging.getLogger('court-simulator')
 
 DEDUP_SIMILARITY_THRESHOLD = 0.85
 
+# Minimum relevance score (1-10) an agent must return to become a candidate.
+# This gates against "everything is relevant" LLM inflation.
+MIN_RELEVANCE_TO_ASK = 7
+
 # Judge speech pacing should align with frontend timing.
 JUDGE_MS_PER_WORD = 400
 JUDGE_MIN_SPEAKING_TIME_MS = 3000
 JUDGE_POST_SPEECH_COOLDOWN_SECONDS = 3
 
-# Minimum new words speaker must say after a question before another fires (~10s of speech).
-MIN_NEW_WORDS_AFTER_QUESTION = 20
+# Minimum new words speaker must say after a question before another fires (~5s of speech).
+MIN_NEW_WORDS_AFTER_QUESTION = 10
 
 # Per-agent cooldown: agent can't re-ask within this window or until enough new content.
 AGENT_MIN_COOLDOWN_SECONDS = 60
@@ -757,6 +761,8 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     total_agents = len(agents)
     # Fix 4: Collect all willing candidates in this pass; pick highest relevance at the end.
     candidates = []  # List of (agent, agent_index, question, relevance)
+    # Track per-agent evaluation results for the sentiment broadcast.
+    evaluated_in_pass: dict = {}  # agent_id -> {relevance, should_ask, on_cooldown}
 
     for checked_count in range(max_agents_per_pass):
         agent_index = (next_agent_index + checked_count) % total_agents
@@ -773,6 +779,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
                     f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
                     f"skipped (cooldown {elapsed:.0f}s / {AGENT_MIN_COOLDOWN_SECONDS}s)"
                 )
+                evaluated_in_pass[agent.id] = {"relevance": None, "should_ask": False, "on_cooldown": True}
                 continue
             new_words = transcript_word_count - words_when_asked
             if new_words < AGENT_MIN_NEW_WORDS:
@@ -780,6 +787,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
                     f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
                     f"skipped (only {new_words} new words since last ask, need {AGENT_MIN_NEW_WORDS})"
                 )
+                evaluated_in_pass[agent.id] = {"relevance": None, "should_ask": False, "on_cooldown": True}
                 continue
 
         logger.info(
@@ -801,9 +809,29 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
             f"should_ask={should_ask} question_present={bool(question and str(question).strip())} "
             f"relevance={relevance}"
         )
+        evaluated_in_pass[agent.id] = {"relevance": relevance, "should_ask": should_ask, "on_cooldown": False}
 
-        if should_ask and question:
+        if should_ask and question and relevance >= MIN_RELEVANCE_TO_ASK:
             candidates.append((agent, agent_index, question, relevance))
+        elif should_ask and question and relevance < MIN_RELEVANCE_TO_ASK:
+            logger.info(
+                f"[Orchestrator][DBG] Session {session_id}: agent id={agent.id} name={agent.name} "
+                f"below relevance threshold (relevance={relevance} < {MIN_RELEVANCE_TO_ASK}), skipping"
+            )
+
+    # Broadcast agent sentiment scores so the frontend can show live eagerness.
+    score_payload = [
+        {
+            "agent_id": ag.id,
+            "agent_name": ag.name,
+            "agent_color": ag.color,
+            "relevance": evaluated_in_pass[ag.id]["relevance"] if ag.id in evaluated_in_pass else None,
+            "should_ask": evaluated_in_pass[ag.id]["should_ask"] if ag.id in evaluated_in_pass else None,
+            "on_cooldown": evaluated_in_pass[ag.id]["on_cooldown"] if ag.id in evaluated_in_pass else False,
+        }
+        for ag in agents
+    ]
+    await manager.send_json(session_id, {"type": "agent_scores", "data": {"scores": score_payload}})
 
     if not candidates:
         multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
@@ -816,6 +844,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
     # Semantic dedup: filter candidates whose question is too similar to any previously asked question.
     stored_embeddings = session.get('question_embeddings', [])
     non_duplicate_candidates = []
+    duplicate_candidates = []  # track for missed_question events
     for agent, agent_index, question, relevance in candidates:
         embedding = await get_embedding(question)
         if embedding is None or not is_semantic_duplicate(embedding, stored_embeddings, DEDUP_SIMILARITY_THRESHOLD):
@@ -825,6 +854,24 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
                 f"[Orchestrator][DBG] Session {session_id}: candidate from {agent.name} "
                 f"is semantically duplicate, skipping"
             )
+            duplicate_candidates.append((agent, question, relevance))
+
+    now_iso = datetime.now().isoformat()
+
+    # Emit missed_question for semantic duplicates immediately.
+    for agent, question, relevance in duplicate_candidates:
+        await manager.send_json(session_id, {
+            "type": "missed_question",
+            "data": {
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "agent_color": agent.color,
+                "question": question,
+                "relevance": relevance,
+                "reason": "duplicate",
+                "timestamp": now_iso,
+            }
+        })
 
     if not non_duplicate_candidates:
         multi_agent_config["next_agent_index"] = (next_agent_index + max_agents_per_pass) % total_agents
@@ -834,7 +881,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         )
         return False
 
-    # Fix 4: Pick the highest-relevance candidate; ties broken by round-robin order (list position).
+    # Pick the highest-relevance candidate; ties broken by round-robin order (list position).
     selected_agent, selected_agent_index, selected_question, selected_relevance, selected_embedding = max(
         non_duplicate_candidates, key=lambda x: x[3]
     )
@@ -844,6 +891,22 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         f"name={selected_agent.name} relevance={selected_relevance} "
         f"from {len(non_duplicate_candidates)} non-duplicate candidate(s)"
     )
+
+    # Emit missed_question for valid candidates that lost the selection.
+    for agent, agent_index, question, relevance, _ in non_duplicate_candidates:
+        if agent.id != selected_agent.id:
+            await manager.send_json(session_id, {
+                "type": "missed_question",
+                "data": {
+                    "agent_id": agent.id,
+                    "agent_name": agent.name,
+                    "agent_color": agent.color,
+                    "question": question,
+                    "relevance": relevance,
+                    "reason": "not_selected",
+                    "timestamp": now_iso,
+                }
+            })
 
     source = {
         "type": "multi_agent",
@@ -861,7 +924,7 @@ async def check_and_trigger_multi_agent_interrupt(session_id: str, session: dict
         session['question_embeddings'].append(selected_embedding)
     _mark_question_scheduled(session, selected_question)
 
-    # Fix 3: Record when this agent last asked and how many words were in the transcript.
+    # Record when this agent last asked and how many words were in the transcript.
     agent_states[selected_agent.id] = {
         "last_asked_at": datetime.now(),
         "words_when_asked": transcript_word_count,

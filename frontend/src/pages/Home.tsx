@@ -70,6 +70,7 @@ export default function Home() {
   const [landingActivated, setLandingActivated] = useState(false)
   const [showLandingButton, setShowLandingButton] = useState(false)
   const [error, setError] = useState('')
+  const [sessionDuration, setSessionDuration] = useState(180)
 
   const inputRefA = useRef<HTMLInputElement>(null)
   const inputRefB = useRef<HTMLInputElement>(null)
@@ -433,11 +434,12 @@ export default function Home() {
       const fallbackConfig = {
         proceedingType: 'demo' as const,
         userRole: 'attorney' as const,
-      materials: [
-        { name: fileA.name, text: fileA.text, role: 'appellant' },
-        { name: fileB.name, text: fileB.text, role: 'appellee' },
-      ],
+        materials: [
+          { name: fileA.name, text: fileA.text, role: 'appellant' },
+          { name: fileB.name, text: fileB.text, role: 'appellee' },
+        ],
         useMultiAgentJudge: true,
+        sessionDurationSeconds: sessionDuration,
       }
 
     try {
@@ -676,6 +678,23 @@ export default function Home() {
                 </section>
               </>
             )}
+          </div>
+
+          <div className="session-duration-row">
+            <span className="session-duration-label">Session length</span>
+            <div className="session-duration-pills">
+              {[60, 120, 180, 300, 600].map((secs) => (
+                <button
+                  key={secs}
+                  type="button"
+                  className={`duration-pill${sessionDuration === secs ? ' active' : ''}`}
+                  onClick={() => setSessionDuration(secs)}
+                  disabled={intakeLocked}
+                >
+                  {secs < 60 ? `${secs}s` : `${secs / 60}m`}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="desk-controls">

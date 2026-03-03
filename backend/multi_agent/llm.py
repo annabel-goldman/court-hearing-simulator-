@@ -132,7 +132,7 @@ class MultiAgentLLM:
                 should_ask = result.get("should_ask", False)
                 question = result.get("question")
                 try:
-                    relevance = max(1, min(3, int(result.get("relevance", 1))))
+                    relevance = max(1, min(10, int(result.get("relevance", 1))))
                 except (TypeError, ValueError):
                     relevance = 1
                 return should_ask, (question if should_ask else None), relevance

@@ -21,12 +21,17 @@ import type { SpeakingRole, SimulationPhase, SessionConfig } from '../3d-renderi
 // UI Overlays
 import { JudgeSpeechOverlay } from '../ui-overlays/JudgeSpeechOverlay'
 import { StatusDashboardHUD } from '../ui-overlays/StatusDashboardHUD'
+import { InterruptLogPanel } from '../ui-overlays/InterruptLogPanel'
+import { AgentSentimentPanel } from '../ui-overlays/AgentSentimentPanel'
 
 // Hooks
 import {
   useSimulationSocket,
   useAudioPlayer,
   type JudgeInterrupt,
+  type JudgeInterruptSource,
+  type AgentScoreEntry,
+  type MissedQuestionEntry,
   type MultiAgentSocketConfig,
 } from '../hooks/useSimulationSocket'
 import { useMediaRecording } from '../hooks/useMediaRecording'
@@ -54,6 +59,7 @@ import {
 import type {
   SessionAuditPayload,
   SessionQuestionRecord,
+  MissedQuestionRecord,
   SessionTranscriptRecord,
 } from '../types/sessionAudit'
 
@@ -70,10 +76,13 @@ export default function CourtroomPage() {
   const [simulationPhase, setSimulationPhase] = useState<SimulationPhase>('OFF_RECORD')
   const [sessionConfig, setSessionConfig] = useState<SessionConfig | null>(null)
   const [currentJudgeQuestion, setCurrentJudgeQuestion] = useState<string | null>(null)
+  const [currentInterruptSource, setCurrentInterruptSource] = useState<JudgeInterruptSource | null>(null)
   const [recentTranscript, setRecentTranscript] = useState<string>('')
   const [timerSeconds, setTimerSeconds] = useState(DEMO_SESSION_DURATION_SECONDS)
   const [questionHistory, setQuestionHistory] = useState<SessionQuestionRecord[]>([])
+  const [missedQuestions, setMissedQuestions] = useState<MissedQuestionRecord[]>([])
   const [transcriptHistory, setTranscriptHistory] = useState<SessionTranscriptRecord[]>([])
+  const [agentScores, setAgentScores] = useState<Record<string, AgentScoreEntry>>({})
 
   // ========== REFS ==========
   const lipsyncRef = useRef<Lipsync | null>(null)
@@ -130,9 +139,39 @@ export default function CourtroomPage() {
   }, [sessionConfig?.useMultiAgentJudge])
 
   // ========== WEBSOCKET ==========
-  const { 
-    isConnected, 
-    sendConfig, 
+  const handleAgentScores = useCallback((scores: AgentScoreEntry[]) => {
+    setAgentScores(prev => {
+      const next = { ...prev }
+      for (const score of scores) {
+        if (score.relevance !== null || !next[score.agent_id]) {
+          // Agent was evaluated this pass — full update.
+          next[score.agent_id] = score
+        } else {
+          // Agent was not evaluated this pass — keep last relevance bar visible
+          // but clear should_ask so ASKING only reflects the current pass.
+          next[score.agent_id] = { ...next[score.agent_id], on_cooldown: score.on_cooldown, should_ask: false }
+        }
+      }
+      return next
+    })
+  }, [])
+
+  const handleMissedQuestion = useCallback((entry: MissedQuestionEntry) => {
+    setMissedQuestions(prev => [...prev, {
+      id: `missed_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      question: entry.question,
+      timestamp: entry.timestamp,
+      agentId: entry.agent_id,
+      agentName: entry.agent_name,
+      agentColor: entry.agent_color,
+      relevance: entry.relevance,
+      reason: entry.reason,
+    }])
+  }, [])
+
+  const {
+    isConnected,
+    sendConfig,
     sendAudio,
     sendSilenceTimeout,
     sendQuestionCutoff,
@@ -141,6 +180,8 @@ export default function CourtroomPage() {
   } = useSimulationSocket({
     sessionId,
     onJudgeInterrupt: handleJudgeInterrupt,
+    onAgentScores: handleAgentScores,
+    onMissedQuestion: handleMissedQuestion,
     onPhaseChange: (phase) => {
       console.log('[CourtroomPage] Backend phase update:', phase)
       // Only accept PROCEEDING/ADJOURNED from backend (ritual phases controlled by frontend)
@@ -197,6 +238,7 @@ export default function CourtroomPage() {
 
   const endJudgeSpeech = useCallback(() => {
     setCurrentJudgeQuestion(null)
+    setCurrentInterruptSource(null)
     setSpeakingRole(null)
     judgeQuestionActiveRef.current = false
 
@@ -258,6 +300,7 @@ export default function CourtroomPage() {
     judgeQuestionActiveRef.current = true
 
     setCurrentJudgeQuestion(interrupt.question)
+    setCurrentInterruptSource(interrupt.source ?? null)
     setSpeakingRole('judge')
     
     if (interrupt.audio && interrupt.audioFormat) {
@@ -290,9 +333,10 @@ export default function CourtroomPage() {
       userRole: 'attorney',
       useMultiAgentJudge: Boolean(sessionConfig?.useMultiAgentJudge),
       questions: questionHistory,
+      missedQuestions,
       transcriptSegments: transcriptHistory,
     }
-  }, [sessionId, sessionConfig?.useMultiAgentJudge, questionHistory, transcriptHistory])
+  }, [sessionId, sessionConfig?.useMultiAgentJudge, questionHistory, missedQuestions, transcriptHistory])
 
   const finalizeSession = useCallback(() => {
     if (hasFinalizedSessionRef.current) return
@@ -459,7 +503,7 @@ export default function CourtroomPage() {
       const config = JSON.parse(stored) as SessionConfig
       console.log('[CourtroomPage] Session loaded:', config.proceedingType)
       setSessionConfig(config)
-      setTimerSeconds(DEMO_SESSION_DURATION_SECONDS)
+      setTimerSeconds(config.sessionDurationSeconds ?? DEMO_SESSION_DURATION_SECONDS)
       questionCutoffReachedRef.current = false
       
       const timeoutId = window.setTimeout(() => {
@@ -610,7 +654,18 @@ export default function CourtroomPage() {
           onEndSession={endSession}
         />
 
-        <JudgeSpeechOverlay question={currentJudgeQuestion} />
+        <JudgeSpeechOverlay question={currentJudgeQuestion} source={currentInterruptSource} />
+
+        <InterruptLogPanel
+          questions={questionHistory}
+          missedQuestions={missedQuestions}
+          isVisible={simulationPhase === 'PROCEEDING'}
+        />
+
+        <AgentSentimentPanel
+          scores={agentScores}
+          isVisible={simulationPhase === 'PROCEEDING'}
+        />
       </div>
     </div>
   )
