@@ -88,7 +88,7 @@ export function AgendaPanel({
           </div>
         ) : items.length === 0 ? (
           <p className="oa-agenda__empty">
-            Upload both briefs and press Start to see the projected hearing agenda.
+            Upload both briefs and generate a summary to see the projected hearing agenda.
           </p>
         ) : (
           <div className="oa-agenda">
