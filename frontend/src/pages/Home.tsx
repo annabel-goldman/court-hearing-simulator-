@@ -16,7 +16,6 @@ type HomeStage = 'landing' | 'desk'
 type LandingPhase = 'intro' | 'welcome'
 type IntakePhase = 'idle' | 'launching' | 'analyzing'
 type UserPartyRole = 'appellant' | 'respondent'
-type JudgeInterruptionLevel = 'easy' | 'difficult' | 'hard'
 type JudgeQuestionTypeId =
   | 'clarification'
   | 'hypothetical'
@@ -28,22 +27,22 @@ const ANALYSIS_MESSAGE = 'The judge is analyzing your briefs.'
 const BENCH_LOGO_SRC = getAssetUrl('bench-logo.svg')
 const LANDING_INTRO_BACKGROUND_SRC = getAssetUrl('Background.jpg')
 const LANDING_SWOOSH_MS = 840
+const DESK_ENTRY_MS = 420
 const SETTINGS_PULSE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 const SETTINGS_PULSE_LAST_SEEN_KEY = 'homeSettingsPulseLastSeenAt'
 const SETTINGS_PULSE_SESSION_KEY = 'homeSettingsPulseShownThisSession'
 
 const SESSION_LENGTH_OPTIONS = [60, 120, 180, 300, 600, 900] as const
-const INTERRUPTION_LEVEL_OPTIONS: JudgeInterruptionLevel[] = ['easy', 'difficult', 'hard']
-const INTERRUPTION_LEVEL_LABELS: Record<JudgeInterruptionLevel, string> = {
-  easy: 'Low',
-  difficult: 'Medium',
-  hard: 'High',
-}
 const JUDGE_DIFFICULTY_OPTIONS: JudgeAvatarDifficulty[] = ['easy', 'medium', 'hard']
 const JUDGE_DIFFICULTY_LABELS: Record<JudgeAvatarDifficulty, string> = {
   easy: 'Easy',
   medium: 'Medium',
   hard: 'Hard',
+}
+const INTERRUPTION_LEVEL_BY_DIFFICULTY: Record<JudgeAvatarDifficulty, 'easy' | 'difficult' | 'hard'> = {
+  easy: 'easy',
+  medium: 'difficult',
+  hard: 'hard',
 }
 const JUDGE_QUESTION_OPTIONS: Array<{
   id: JudgeQuestionTypeId
@@ -101,6 +100,7 @@ export default function Home() {
   const [landingPhase, setLandingPhase] = useState<LandingPhase>('intro')
   const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle')
   const [landingExiting, setLandingExiting] = useState(false)
+  const [deskEntering, setDeskEntering] = useState(false)
   const [landingActivated, setLandingActivated] = useState(false)
   const [showLandingButton, setShowLandingButton] = useState(false)
 
@@ -116,7 +116,6 @@ export default function Home() {
   const [error, setError] = useState('')
   const [sessionDuration, setSessionDuration] = useState(180)
   const [userPartyRole, setUserPartyRole] = useState<UserPartyRole>('appellant')
-  const [judgeInterruptionLevel, setJudgeInterruptionLevel] = useState<JudgeInterruptionLevel>('difficult')
   const [judgeAvatarDifficulty, setJudgeAvatarDifficulty] = useState<JudgeAvatarDifficulty>('medium')
   const [enabledQuestionTypes, setEnabledQuestionTypes] = useState<JudgeQuestionTypeId[]>([
     'clarification',
@@ -131,6 +130,7 @@ export default function Home() {
   const inputRefA = useRef<HTMLInputElement>(null)
   const inputRefB = useRef<HTMLInputElement>(null)
   const landingExitTimerRef = useRef<number | null>(null)
+  const deskEntryTimerRef = useRef<number | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioUnlockedRef = useRef(false)
   const backgroundMusicRef = useRef<{
@@ -411,6 +411,10 @@ export default function Home() {
         window.clearTimeout(landingExitTimerRef.current)
         landingExitTimerRef.current = null
       }
+      if (deskEntryTimerRef.current !== null) {
+        window.clearTimeout(deskEntryTimerRef.current)
+        deskEntryTimerRef.current = null
+      }
       stopBackgroundMusic()
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         void audioContextRef.current.close()
@@ -539,7 +543,7 @@ export default function Home() {
         judgeAvatarDifficulty,
         userPartyRole,
         judgeDisposition: {
-          interruptionLevel: judgeInterruptionLevel,
+          interruptionLevel: INTERRUPTION_LEVEL_BY_DIFFICULTY[judgeAvatarDifficulty],
           questionTypes: enabledQuestionTypes,
         },
       }
@@ -739,8 +743,16 @@ export default function Home() {
     }
     landingExitTimerRef.current = window.setTimeout(() => {
       setStage('desk')
+      setDeskEntering(true)
       setLandingExiting(false)
       landingExitTimerRef.current = null
+      if (deskEntryTimerRef.current !== null) {
+        window.clearTimeout(deskEntryTimerRef.current)
+      }
+      deskEntryTimerRef.current = window.setTimeout(() => {
+        setDeskEntering(false)
+        deskEntryTimerRef.current = null
+      }, DESK_ENTRY_MS)
     }, LANDING_SWOOSH_MS)
   }
 
@@ -806,7 +818,7 @@ export default function Home() {
                   disabled={!showLandingButton || landingExiting}
                   aria-hidden={!showLandingButton}
                 >
-                  upload your breifs
+                  upload your briefs
                 </button>
               </div>
             </>
@@ -822,9 +834,9 @@ export default function Home() {
   const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
 
   return (
-    <div className="home home-professional desk-stage">
+    <div className={`home home-professional desk-stage ${deskEntering ? 'is-entering' : ''}`}>
       <main className="home-main desk-main">
-        <div className="desk-surface">
+        <div className={`desk-surface ${deskEntering ? 'is-entering' : ''}`}>
           <div className="top-left-action-stack">
             <button
               type="button"
@@ -953,25 +965,6 @@ export default function Home() {
                             You've selected no judges; this means no questions will be asked during your session.
                           </p>
                         )}
-                      </div>
-                    </div>
-
-                    <div className="settings-ledger-row">
-                      <p className="settings-ledger-copy">
-                        <span className="settings-ledger-label">Interruption pace</span>
-                        <span className="settings-ledger-note">How aggressively the judge cuts in</span>
-                      </p>
-                      <div className="settings-ledger-options">
-                        {INTERRUPTION_LEVEL_OPTIONS.map((level) => (
-                          <button
-                            key={level}
-                            type="button"
-                            className={`settings-ledger-option ${judgeInterruptionLevel === level ? 'is-selected' : ''}`}
-                            onClick={() => setJudgeInterruptionLevel(level)}
-                          >
-                            {INTERRUPTION_LEVEL_LABELS[level]}
-                          </button>
-                        ))}
                       </div>
                     </div>
 

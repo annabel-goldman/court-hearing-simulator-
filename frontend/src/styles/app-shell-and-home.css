@@ -793,6 +793,11 @@
   justify-content: center;
 }
 
+.desk-stage.is-entering .desk-surface,
+.desk-surface.is-entering {
+  animation: deskSurfaceEnter 0.42s cubic-bezier(0.2, 0.74, 0.2, 1) both;
+}
+
 .desk-header {
   text-align: center;
   margin-bottom: 1.2rem;
@@ -1118,6 +1123,19 @@
   }
   100% {
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes deskSurfaceEnter {
+  0% {
+    opacity: 0.28;
+    transform: translate3d(0, 26px, 0) scale(0.992);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
   }
 }
 
