@@ -20,43 +20,107 @@ else
   exit 1
 fi
 
-kill_port() {
+log() {
+  echo "[restart] $*"
+}
+
+list_port_pids() {
   local port="$1"
-  local pids
-  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
-  if [[ -z "$pids" ]]; then
-    return
+  lsof -ti tcp:"$port" 2>/dev/null | awk 'NF' | sort -u || true
+}
+
+kill_pid_gracefully() {
+  local pid="$1"
+  local grace_seconds="${2:-3}"
+  local i
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 0
   fi
 
-  echo "[restart] Stopping processes on port $port: $pids"
-  while IFS= read -r pid; do
-    [[ -z "$pid" ]] && continue
-    kill "$pid" 2>/dev/null || true
-  done <<< "$pids"
+  kill "$pid" 2>/dev/null || true
+  for ((i = 0; i < grace_seconds; i++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
 
-  sleep 1
-  local remaining
-  remaining="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
-  if [[ -n "$remaining" ]]; then
+  kill -9 "$pid" 2>/dev/null || true
+}
+
+kill_pidfile_if_present() {
+  local label="$1"
+  local pidfile="$2"
+  if [[ ! -f "$pidfile" ]]; then
+    return 0
+  fi
+
+  local pid
+  pid="$(tr -d '[:space:]' < "$pidfile" 2>/dev/null || true)"
+  if [[ -n "$pid" ]]; then
+    log "Stopping $label from pid file ($pid)."
+    kill_pid_gracefully "$pid" 3
+  fi
+  rm -f "$pidfile"
+}
+
+kill_port_listeners() {
+  local port="$1"
+  local pids
+  local attempts=0
+
+  while true; do
+    pids="$(list_port_pids "$port")"
+    if [[ -z "$pids" ]]; then
+      return 0
+    fi
+
+    log "Stopping processes on port $port: $(echo "$pids" | tr '\n' ' ')"
     while IFS= read -r pid; do
       [[ -z "$pid" ]] && continue
-      kill -9 "$pid" 2>/dev/null || true
-    done <<< "$remaining"
+      kill_pid_gracefully "$pid" 3
+    done <<< "$pids"
+
+    attempts=$((attempts + 1))
+    if (( attempts >= 3 )); then
+      break
+    fi
+  done
+
+  pids="$(list_port_pids "$port")"
+  if [[ -n "$pids" ]]; then
+    log "Warning: port $port still has listeners: $(echo "$pids" | tr '\n' ' ')"
   fi
 }
 
-echo "[restart] Killing existing backend/frontend listeners..."
-kill_port 8000
-kill_port 5173
-kill_port 3000
+wait_for_port() {
+  local port="$1"
+  local timeout_seconds="${2:-15}"
+  local i
+  for ((i = 0; i < timeout_seconds; i++)); do
+    if [[ -n "$(list_port_pids "$port")" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
 
-echo "[restart] Setting up backend..."
+log "Killing existing backend/frontend listeners..."
+kill_pidfile_if_present "backend" "$LOG_DIR/backend.pid"
+kill_pidfile_if_present "frontend" "$LOG_DIR/frontend.pid"
+kill_port_listeners 8000
+kill_port_listeners 5173
+kill_port_listeners 3000
+
+log "Setting up backend..."
 (
   cd "$ROOT_DIR/backend"
   bash setup.sh
 )
 
-echo "[restart] Preparing frontend dependencies with $FRONTEND_PM..."
+log "Preparing frontend dependencies with $FRONTEND_PM..."
 (
   cd "$ROOT_DIR/frontend"
   if [[ ! -d node_modules ]]; then
@@ -64,13 +128,13 @@ echo "[restart] Preparing frontend dependencies with $FRONTEND_PM..."
   fi
 )
 
-echo "[restart] Building frontend..."
+log "Building frontend..."
 (
   cd "$ROOT_DIR/frontend"
   "${FRONTEND_BUILD_CMD[@]}"
 )
 
-echo "[restart] Starting backend..."
+log "Starting backend..."
 (
   cd "$ROOT_DIR/backend"
   nohup bash run.sh > "$LOG_DIR/backend.log" 2>&1 &
@@ -78,17 +142,28 @@ echo "[restart] Starting backend..."
 )
 
 sleep 1
-echo "[restart] Starting frontend..."
+log "Starting frontend..."
 (
   cd "$ROOT_DIR/frontend"
   nohup "${FRONTEND_DEV_CMD[@]}" > "$LOG_DIR/frontend.log" 2>&1 &
   echo $! > "$LOG_DIR/frontend.pid"
 )
 
-sleep 1
-echo "[restart] Done."
-echo "[restart] Backend:  http://localhost:8000"
-echo "[restart] Frontend: http://localhost:5173"
-echo "[restart] Logs:"
+if wait_for_port 8000 15; then
+  log "Backend is listening on port 8000."
+else
+  log "Warning: backend did not bind port 8000 within timeout."
+fi
+
+if wait_for_port 5173 15; then
+  log "Frontend is listening on port 5173."
+else
+  log "Warning: frontend did not bind port 5173 within timeout."
+fi
+
+log "Done."
+log "Backend:  http://localhost:8000"
+log "Frontend: http://localhost:5173"
+log "Logs:"
 echo "  - $LOG_DIR/backend.log"
 echo "  - $LOG_DIR/frontend.log"

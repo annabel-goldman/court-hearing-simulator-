@@ -80,6 +80,39 @@
   color: #8f2d2d;
 }
 
+.courtroom-command-bar .timer-value.paused {
+  opacity: 0.5;
+}
+
+.btn-pause-timer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 1px solid rgba(53, 77, 115, 0.35);
+  background: rgba(255, 255, 255, 0.6);
+  color: #27345a;
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-pause-timer:hover {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(53, 77, 115, 0.6);
+}
+
+.btn-pause-timer.is-paused {
+  background: rgba(218, 239, 211, 0.8);
+  border-color: rgba(60, 120, 60, 0.5);
+  color: #2a5a2a;
+}
+
 .top-left-panel {
   max-width: 250px;
   font-family: 'Spectral', Georgia, serif;
@@ -192,27 +225,10 @@
   background: #8b6236;
 }
 
-.speaking-indicator-3d .wave:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.speaking-indicator-3d .wave:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
 .speaking-text {
   color: #27345a;
   font-family: 'Spectral', Georgia, serif;
   font-weight: 600;
-}
-
-@keyframes wave {
-  0%, 100% {
-    transform: scaleY(0.5);
-  }
-  50% {
-    transform: scaleY(1);
-  }
 }
 
 .interrupt-log-panel,
@@ -224,6 +240,12 @@
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
   color: #27345a;
   font-family: 'Spectral', Georgia, serif;
+}
+
+/* Keep Bench Sentiment above the bottom command bar. */
+.agent-sentiment-panel {
+  bottom: 7rem;
+  z-index: 56;
 }
 
 .interrupt-log-header,

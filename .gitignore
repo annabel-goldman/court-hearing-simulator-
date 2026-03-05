@@ -22,5 +22,15 @@ node_modules/
 dist/
 .DS_Store
 
+# Local runtime artifacts
+.run/*.log
+.run/*.pid
+
+# Accidental root lockfile (frontend uses package-lock.json/bun.lock)
+/yarn.lock
+
+# Local source archives not used by runtime app
+frontend/src/3d-rendering/Judge/*.zip
+
 # Multi-agent custom data (user-created, should not be deployed)
 backend/multi_agent/data/custom/

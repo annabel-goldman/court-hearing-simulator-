@@ -15,8 +15,12 @@ import { Lipsync } from 'wawa-lipsync'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 
 // 3D Rendering
-import { CourtroomScene } from '../3d-rendering/CourtroomScene'
-import type { SpeakingRole, SimulationPhase, SessionConfig } from '../3d-rendering/types'
+import {
+  COURTROOM_ANIMATION_STATE_OPTIONS,
+  CourtroomScene,
+  type AvatarAnimationStateKey,
+} from '../3d-rendering/CourtroomScene'
+import type { JudgeAvatarDifficulty, SpeakingRole, SimulationPhase, SessionConfig } from '../3d-rendering/types'
 
 // UI Overlays
 import { JudgeSpeechOverlay } from '../ui-overlays/JudgeSpeechOverlay'
@@ -67,6 +71,37 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const TTS_ENDPOINT = `${API_URL}/api/tts`
 const ALL_RISE_AUTO_ADVANCE_MS = 1600
 const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
+const JUDGE_DIFFICULTY_STORAGE_KEY = 'judgeAvatarDifficulty'
+const DEFAULT_ANIMATION_PULSE_MS = 2200
+const ONE_SHOT_ANIMATION_STATES = new Set<AvatarAnimationStateKey>(['clap', 'cheer', 'sitTransition', 'sitToStand'])
+
+function isJudgeAvatarDifficulty(value: unknown): value is JudgeAvatarDifficulty {
+  return value === 'easy' || value === 'medium' || value === 'hard'
+}
+
+function readStoredJudgeAvatarDifficulty(): JudgeAvatarDifficulty {
+  if (typeof window === 'undefined') return 'medium'
+  const stored = window.localStorage.getItem(JUDGE_DIFFICULTY_STORAGE_KEY)
+  return isJudgeAvatarDifficulty(stored) ? stored : 'medium'
+}
+
+type AnimationDebugRole = keyof typeof COURTROOM_ANIMATION_STATE_OPTIONS
+type AnimationStateOverrideMap = Partial<Record<AnimationDebugRole, AvatarAnimationStateKey | null>>
+type AnimationConsoleApi = {
+  states: typeof COURTROOM_ANIMATION_STATE_OPTIONS
+  get: () => AnimationStateOverrideMap
+  set: (role: AnimationDebugRole, state: AvatarAnimationStateKey | null) => boolean
+  clear: (role?: AnimationDebugRole) => void
+  pulse: (role: AnimationDebugRole, state: AvatarAnimationStateKey, durationMs?: number) => boolean
+  demo: (role?: AnimationDebugRole) => void
+  help: () => string
+}
+
+declare global {
+  interface Window {
+    courtAnim?: AnimationConsoleApi
+  }
+}
 
 export default function CourtroomPage() {
   const navigate = useNavigate()
@@ -83,6 +118,12 @@ export default function CourtroomPage() {
   const [missedQuestions, setMissedQuestions] = useState<MissedQuestionRecord[]>([])
   const [transcriptHistory, setTranscriptHistory] = useState<SessionTranscriptRecord[]>([])
   const [agentScores, setAgentScores] = useState<Record<string, AgentScoreEntry>>({})
+  const [showBenchPanels, setShowBenchPanels] = useState(false)
+  const [isPaused, setIsPaused] = useState(false)
+  const [animationStateOverrides, setAnimationStateOverrides] = useState<AnimationStateOverrideMap>({})
+  const [judgeAvatarDifficulty, setJudgeAvatarDifficulty] = useState<JudgeAvatarDifficulty>(() =>
+    readStoredJudgeAvatarDifficulty()
+  )
 
   // ========== REFS ==========
   const lipsyncRef = useRef<Lipsync | null>(null)
@@ -96,6 +137,8 @@ export default function CourtroomPage() {
   const sessionStartedAtRef = useRef<number | null>(null)
   const sessionEndedAtRef = useRef<number | null>(null)
   const hasFinalizedSessionRef = useRef(false)
+  const animationOverrideRef = useRef<AnimationStateOverrideMap>({})
+  const animationDebugTimersRef = useRef<number[]>([])
 
   // Session ID
   const sessionId = useMemo(() => `session_${Date.now()}`, [])
@@ -236,6 +279,40 @@ export default function CourtroomPage() {
     }
   })
 
+  useEffect(() => {
+    animationOverrideRef.current = animationStateOverrides
+  }, [animationStateOverrides])
+
+  const clearAnimationDebugTimers = useCallback(() => {
+    animationDebugTimersRef.current.forEach((timerId) => clearTimeout(timerId))
+    animationDebugTimersRef.current = []
+  }, [])
+
+  const setAnimationOverride = useCallback((role: AnimationDebugRole, state: AvatarAnimationStateKey | null) => {
+    setAnimationStateOverrides((prev) => ({ ...prev, [role]: state }))
+  }, [])
+
+  const clearAnimationOverride = useCallback((role?: AnimationDebugRole) => {
+    if (role) {
+      setAnimationStateOverrides((prev) => ({ ...prev, [role]: null }))
+      return
+    }
+    setAnimationStateOverrides({})
+  }, [])
+
+  const handleAnimationStateFinished = useCallback(
+    (role: AnimationDebugRole, state: AvatarAnimationStateKey) => {
+      if (!ONE_SHOT_ANIMATION_STATES.has(state)) return
+      setAnimationStateOverrides((prev) => {
+        if (prev[role] !== state) return prev
+        return { ...prev, [role]: null }
+      })
+    },
+    []
+  )
+
+  const animationSpeakingRole = useMemo<SpeakingRole>(() => speakingRole, [speakingRole])
+
   const endJudgeSpeech = useCallback(() => {
     setCurrentJudgeQuestion(null)
     setCurrentInterruptSource(null)
@@ -358,7 +435,7 @@ export default function CourtroomPage() {
 
   // ========== TIMER ==========
   useEffect(() => {
-    if (simulationPhase !== 'PROCEEDING') return
+    if (simulationPhase !== 'PROCEEDING' || isPaused) return
     
     const interval = setInterval(() => {
       setTimerSeconds(prev => {
@@ -382,7 +459,7 @@ export default function CourtroomPage() {
     }, TIMER_INTERVAL_MS)
     
     return () => clearInterval(interval)
-  }, [simulationPhase, sendQuestionCutoff])
+  }, [simulationPhase, isPaused, sendQuestionCutoff])
 
   useEffect(() => {
     if (simulationPhase === 'PROCEEDING' && !sessionStartedAtRef.current) {
@@ -503,6 +580,11 @@ export default function CourtroomPage() {
       const config = JSON.parse(stored) as SessionConfig
       console.log('[CourtroomPage] Session loaded:', config.proceedingType)
       setSessionConfig(config)
+      const configuredDifficulty = isJudgeAvatarDifficulty(config.judgeAvatarDifficulty)
+        ? config.judgeAvatarDifficulty
+        : readStoredJudgeAvatarDifficulty()
+      setJudgeAvatarDifficulty(configuredDifficulty)
+      localStorage.setItem(JUDGE_DIFFICULTY_STORAGE_KEY, configuredDifficulty)
       setTimerSeconds(config.sessionDurationSeconds ?? DEMO_SESSION_DURATION_SECONDS)
       questionCutoffReachedRef.current = false
       
@@ -630,14 +712,115 @@ export default function CourtroomPage() {
     }
   }, [])
 
+  // Toggle bench panels (Questions from Bench + Bench Sentiment) with Cmd/Ctrl + D
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isToggleShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd'
+      if (!isToggleShortcut) return
+      event.preventDefault()
+      setShowBenchPanels(prev => !prev)
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const isValidStateForRole = (role: AnimationDebugRole, state: AvatarAnimationStateKey | null) => {
+      if (state === null) return true
+      const allowedStates = COURTROOM_ANIMATION_STATE_OPTIONS[role] as readonly AvatarAnimationStateKey[]
+      return allowedStates.includes(state)
+    }
+
+    const setState = (role: AnimationDebugRole, state: AvatarAnimationStateKey | null): boolean => {
+      if (!isValidStateForRole(role, state)) {
+        console.warn(
+          `[courtAnim] "${state}" is not valid for ${role}. Allowed: ${
+            COURTROOM_ANIMATION_STATE_OPTIONS[role].join(', ')
+          }`
+        )
+        return false
+      }
+      setAnimationOverride(role, state)
+      return true
+    }
+
+    const pulseState = (
+      role: AnimationDebugRole,
+      state: AvatarAnimationStateKey,
+      durationMs: number = DEFAULT_ANIMATION_PULSE_MS
+    ): boolean => {
+      if (!setState(role, state)) return false
+      const timerId = window.setTimeout(() => {
+        setAnimationStateOverrides((prev) => (prev[role] === state ? { ...prev, [role]: null } : prev))
+      }, Math.max(100, durationMs))
+      animationDebugTimersRef.current.push(timerId)
+      return true
+    }
+
+    const playDemo = (role: AnimationDebugRole = 'judge') => {
+      clearAnimationDebugTimers()
+      const sequence: Array<{ state: AvatarAnimationStateKey; atMs: number }> = [
+        { state: 'seatedIdle', atMs: 0 },
+        { state: 'seatedTalk', atMs: 900 },
+        { state: 'clap', atMs: 2300 },
+        { state: 'seatedTalk', atMs: 4200 },
+        { state: 'seatedIdle', atMs: 5600 },
+      ]
+      sequence.forEach(({ state, atMs }) => {
+        const timerId = window.setTimeout(() => {
+          setState(role, state)
+        }, atMs)
+        animationDebugTimersRef.current.push(timerId)
+      })
+      const clearTimerId = window.setTimeout(() => {
+        clearAnimationOverride(role)
+      }, 7200)
+      animationDebugTimersRef.current.push(clearTimerId)
+    }
+
+    const helpText = [
+      'window.courtAnim API:',
+      "  courtAnim.set('judge'|'counsel', stateOrNull)",
+      "  courtAnim.pulse('judge'|'counsel', state, durationMs?)",
+      "  courtAnim.demo('judge'|'counsel')",
+      "  courtAnim.clear('judge'|'counsel'?)",
+      '  courtAnim.get()',
+      'Available states are in courtAnim.states',
+    ].join('\n')
+
+    const api: AnimationConsoleApi = {
+      states: COURTROOM_ANIMATION_STATE_OPTIONS,
+      get: () => ({ ...animationOverrideRef.current }),
+      set: setState,
+      clear: clearAnimationOverride,
+      pulse: pulseState,
+      demo: playDemo,
+      help: () => helpText,
+    }
+
+    window.courtAnim = api
+
+    return () => {
+      clearAnimationDebugTimers()
+      if (window.courtAnim === api) {
+        delete window.courtAnim
+      }
+    }
+  }, [clearAnimationDebugTimers, clearAnimationOverride, setAnimationOverride])
+
   // ========== RENDER ==========
   return (
     <div className="avatar-page courtroom-fullscreen">
-      <div className="courtroom-canvas-fullscreen">
+      <div className={`courtroom-canvas-fullscreen ${showBenchPanels ? 'bench-panels-visible' : ''}`}>
         <CourtroomScene 
           speakingRole={speakingRole}
+          animationSpeakingRole={animationSpeakingRole}
           lipsyncManager={lipsyncRef.current}
           orbitControlsRef={orbitControlsRef}
+          judgeDifficulty={judgeAvatarDifficulty}
+          animationStateOverrides={animationStateOverrides}
+          onAnimationStateFinished={handleAnimationStateFinished}
         />
         
         <StatusDashboardHUD
@@ -652,6 +835,8 @@ export default function CourtroomPage() {
           speakingRole={speakingRole}
           videoPreviewRef={videoPreviewRef}
           onEndSession={endSession}
+          isPaused={isPaused}
+          onTogglePause={() => setIsPaused(prev => !prev)}
         />
 
         <JudgeSpeechOverlay question={currentJudgeQuestion} source={currentInterruptSource} />
@@ -659,12 +844,12 @@ export default function CourtroomPage() {
         <InterruptLogPanel
           questions={questionHistory}
           missedQuestions={missedQuestions}
-          isVisible={simulationPhase === 'PROCEEDING'}
+          isVisible={simulationPhase === 'PROCEEDING' && showBenchPanels}
         />
 
         <AgentSentimentPanel
           scores={agentScores}
-          isVisible={simulationPhase === 'PROCEEDING'}
+          isVisible={simulationPhase === 'PROCEEDING' && showBenchPanels}
         />
       </div>
     </div>

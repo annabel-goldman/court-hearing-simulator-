@@ -3,6 +3,7 @@
  */
 
 export type SpeakingRole = 'judge' | 'counsel' | null
+export type JudgeAvatarDifficulty = 'easy' | 'medium' | 'hard'
 
 // Simulation State Machine
 export type SimulationPhase = 
@@ -20,6 +21,7 @@ export interface SessionConfig {
   judicialSummary?: string
   useMultiAgentJudge?: boolean
   sessionDurationSeconds?: number
+  judgeAvatarDifficulty?: JudgeAvatarDifficulty
 }
 
 // Viseme mapping for Ready Player Me avatars

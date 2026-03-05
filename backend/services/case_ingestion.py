@@ -39,7 +39,7 @@ class CaseIngestionService:
         
         Args:
             content: PDF file content as bytes
-            role: 'appellant', 'appellee', or 'evidence'
+            role: 'appellant', 'respondent', or 'evidence'
             
         Returns:
             {

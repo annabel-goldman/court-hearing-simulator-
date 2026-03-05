@@ -48,6 +48,10 @@ jobs:
           # Production backend (set in repo Secrets for deploy)
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          # Toggle + base URL for optional S3/CloudFront-hosted frontend assets
+          VITE_USE_S3_ASSETS: ${{ secrets.VITE_USE_S3_ASSETS }}
+          # S3/CloudFront base URL for heavy frontend assets (GLB/background/logo)
+          VITE_ASSET_BASE_URL: ${{ secrets.VITE_ASSET_BASE_URL }}
         run: bun run build
 
       - name: Write deploy info (verify which branch is live)

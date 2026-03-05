@@ -90,6 +90,22 @@
   animation: slideDown 0.3s ease-out;
 }
 
+/* When side bench panels are visible, keep judge question in center lane. */
+.courtroom-canvas-fullscreen.bench-panels-visible .judge-question-overlay {
+  left: 17.5rem;
+  right: 18.5rem;
+  transform: none;
+  max-width: none;
+}
+
+@media (max-width: 980px) {
+  .courtroom-canvas-fullscreen.bench-panels-visible .judge-question-overlay {
+    left: 1rem;
+    right: 1rem;
+    top: 5rem;
+  }
+}
+
 @keyframes slideDown {
   from {
     opacity: 0;

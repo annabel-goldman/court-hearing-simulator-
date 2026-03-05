@@ -1,0 +1,11 @@
+/* Global sharp-corner mode */
+:root {
+  --radius: 0px;
+  --radius-sm: 0px;
+}
+
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}

@@ -19,6 +19,8 @@ interface StatusDashboardHUDProps {
   speakingRole: SpeakingRole
   videoPreviewRef: RefObject<HTMLVideoElement>
   onEndSession: () => void
+  isPaused: boolean
+  onTogglePause: () => void
 }
 
 const PHASE_LABELS: Record<SimulationPhase, string> = {
@@ -48,6 +50,8 @@ export function StatusDashboardHUD({
   speakingRole,
   videoPreviewRef,
   onEndSession,
+  isPaused,
+  onTogglePause,
 }: StatusDashboardHUDProps) {
   const isProceeding = phase === 'PROCEEDING'
 
@@ -96,9 +100,17 @@ export function StatusDashboardHUD({
           {isProceeding && (
             <div className="courtroom-timer">
               <span className="timer-label">Time Remaining</span>
-              <span className={`timer-value ${timerSeconds < 60 ? 'danger' : timerSeconds < 180 ? 'warning' : ''}`}>
+              <span className={`timer-value ${timerSeconds < 60 ? 'danger' : timerSeconds < 180 ? 'warning' : ''} ${isPaused ? 'paused' : ''}`}>
                 {formatTime(timerSeconds)}
               </span>
+              <button
+                className={`btn-pause-timer ${isPaused ? 'is-paused' : ''}`}
+                onClick={onTogglePause}
+                title={isPaused ? 'Resume timer' : 'Pause timer'}
+                aria-label={isPaused ? 'Resume timer' : 'Pause timer'}
+              >
+                {isPaused ? '▶' : '⏸'}
+              </button>
             </div>
           )}
           <div className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`}>

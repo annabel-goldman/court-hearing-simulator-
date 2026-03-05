@@ -360,7 +360,7 @@ Respond in JSON format:
 Provide a concise summary (max 300 words) that captures:
 1. The core legal dispute.
 2. The appellant's primary argument.
-3. The appellee's primary response.
+3. The respondent's primary response.
 4. The key precedents involved.
 
 APPELLANT BRIEF TEXT:
@@ -404,7 +404,7 @@ Format as a professional judicial summary."""
 APPELLANT BRIEF:
 {appellant_brief[:3000]}
 
-APPELLEE BRIEF:
+RESPONDENT BRIEF:
 {appellee_brief[:3000]}
 
 Generate questions that:
@@ -415,7 +415,7 @@ Generate questions that:
 
 Return as JSON array:
 [
-    {{"question": "...", "target": "appellant/appellee/both", "topic": "...", "difficulty": "easy/medium/hard"}},
+    {{"question": "...", "target": "appellant/respondent/both", "topic": "...", "difficulty": "easy/medium/hard"}},
     ...
 ]"""
 

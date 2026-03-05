@@ -66,6 +66,12 @@ export default function SessionAuditPage() {
     }
   }, [auditData, navigate])
 
+  const handlePlayAgain = () => {
+    sessionStorage.removeItem('courtSessionAudit')
+    sessionStorage.removeItem('courtSession')
+    navigate('/', { replace: true })
+  }
+
   if (!auditData) {
     return null
   }
@@ -109,6 +115,12 @@ export default function SessionAuditPage() {
           <h2 className="session-audit-section-title">Your Performance</h2>
           <p className="session-audit-performance">{performanceSummary}</p>
         </section>
+
+        <div className="session-audit-actions">
+          <button type="button" className="session-audit-play-again-btn" onClick={handlePlayAgain}>
+            Play Again
+          </button>
+        </div>
       </div>
     </div>
   )

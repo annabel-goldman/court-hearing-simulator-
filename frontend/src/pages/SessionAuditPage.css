@@ -117,3 +117,27 @@
   line-height: 1.55;
   font-size: 1rem;
 }
+
+.session-audit-actions {
+  display: flex;
+  justify-content: center;
+  padding: 0.35rem 0 0.15rem;
+}
+
+.session-audit-play-again-btn {
+  border: 1px solid #d1c5b1;
+  border-radius: 999px;
+  padding: 0.62rem 1.35rem;
+  background: linear-gradient(180deg, #fff7e6 0%, #f0dcc0 100%);
+  color: #3d2a1a;
+  font-family: 'Spectral', Georgia, serif;
+  font-size: 0.96rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.session-audit-play-again-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 16px rgba(0, 0, 0, 0.22);
+}

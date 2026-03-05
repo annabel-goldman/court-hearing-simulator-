@@ -7,10 +7,11 @@ This folder contains the organized replacement for the old monolithic `frontend/
 - `core.css`: global fonts import, design tokens, reset, base `body` styles.
 - `auth.css`: authentication gate/loading UI.
 - `app-shell-and-home.css`: nav, shared app shell, Home/desk flow, and shared page-level primitives.
-- `judge-admin.css`: Judge Admin page layout/components.
+- `proceeding-setup.css`: proceeding setup wizard styles (legacy section preserved).
 - `ritual-overlay.css`: courtroom ritual overlay.
 - `courtroom-overlays.css`: active courtroom overlay components (judge bubble, timer, interrupt log, sentiment panel).
 - `courtroom-fullscreen.css`: active courtroom fullscreen HUD layout primitives.
+- `utility-legacy.css`: utility class block used by legacy multi-agent UI patterns.
 - `courtroom-theme-alignment.css`: home-theme visual alignment overrides for courtroom/final flow.
 
 ## Entry points
