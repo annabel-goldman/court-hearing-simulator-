@@ -1,70 +1,223 @@
 /**
- * Question Feed Styles
- * 
+ * Question Feed Styles — parallel per-agent column layout
  * Corresponds to: components/features/QuestionFeed.tsx
  */
 
-.ma-question-feed {
-  background-color: var(--ma-bg-primary);
-  border-radius: var(--ma-radius-lg);
-  padding: 0.75rem;
-  min-height: 16rem;
-  max-height: 24rem;
-  overflow-y: auto;
+/* ── Root ─────────────────────────────────────────────────────────────────── */
+
+.ma-qfeed {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--ma-space-md);
 }
 
-.ma-question-feed__placeholder {
+.ma-qfeed__placeholder {
   color: var(--ma-text-dim);
   font-style: italic;
   font-size: 0.875rem;
+  padding: var(--ma-space-sm) 0;
 }
 
-/* Question item */
-.ma-question-item {
-  border-radius: var(--ma-radius-lg);
-  padding: 0.75rem;
-  border-left: 4px solid;
-  animation: ma-fade-in 0.3s ease;
+/* ── Agent grid ───────────────────────────────────────────────────────────── */
+
+.ma-qfeed__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--ma-space-sm);
 }
 
-.ma-question-item__header {
+.ma-qfeed__card {
+  background: var(--ma-bg-secondary);
+  border-radius: var(--ma-radius-md);
+  border-top: 3px solid transparent;
+  padding: var(--ma-space-sm) var(--ma-space-sm) var(--ma-space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+  min-height: 7rem;
+  max-height: 14rem;
+  min-width: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ma-qfeed__card:hover {
+  background: rgba(31, 41, 55, 0.9);
+}
+.ma-qfeed__card::-webkit-scrollbar {
+  display: none;
+}
+
+.ma-qfeed__card--active {
+  background: var(--ma-bg-tertiary);
+  animation: ma-qfeed-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+@keyframes ma-qfeed-pop {
+  from { transform: scale(0.96); opacity: 0.6; }
+  50%  { transform: scale(1.01); }
+  to   { transform: scale(1);    opacity: 1;   }
+}
+
+/* ── Card header ──────────────────────────────────────────────────────────── */
+
+.ma-qfeed__card-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
+  gap: var(--ma-space-xs);
+  flex-wrap: wrap;
 }
 
-.ma-question-item__dot {
+.ma-qfeed__dot {
+  flex-shrink: 0;
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
 }
 
-.ma-question-item__agent-name {
-  font-size: 0.875rem;
-  font-weight: 500;
+.ma-qfeed__dot--sm {
+  width: 0.4rem;
+  height: 0.4rem;
 }
 
-.ma-question-item__timestamp {
+.ma-qfeed__agent-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ma-qfeed__badge {
+  flex-shrink: 0;
+  background: var(--ma-bg-primary);
+  border-radius: var(--ma-radius-full);
+  color: var(--ma-text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 1.1rem;
+  padding: 0.1rem 0.3rem;
+  text-align: center;
+}
+
+/* ── Latest question ──────────────────────────────────────────────────────── */
+
+.ma-qfeed__latest {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+  flex: 1;
+}
+
+.ma-qfeed__question-text {
+  color: var(--ma-text-primary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ma-qfeed__idle {
   color: var(--ma-text-dim);
   font-size: 0.75rem;
+  font-style: italic;
+  margin: 0;
+  padding-top: var(--ma-space-xs);
 }
 
-.ma-question-item__text {
-  color: var(--ma-text-primary);
-  font-size: 0.875rem;
+.ma-qfeed__time {
+  color: var(--ma-text-dim);
+  font-size: 0.68rem;
+  flex-shrink: 0;
 }
 
-@keyframes ma-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(-0.5rem);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.ma-qfeed__time--right {
+  margin-left: auto;
+}
+
+/* ── Chronological history ────────────────────────────────────────────────── */
+
+.ma-qfeed__history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-top: 1px solid var(--ma-border-default);
+  padding-top: var(--ma-space-sm);
+  max-height: 16rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.ma-qfeed__history::-webkit-scrollbar {
+  display: none;
+}
+
+.ma-qfeed__history-label {
+  color: var(--ma-text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 0 0 0.2rem;
+}
+
+.ma-qfeed__history-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ma-space-xs);
+  animation: ma-qfeed-pop 0.2s ease;
+  min-width: 0;
+}
+
+.ma-qfeed__history-name {
+  font-size: 0.72rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ma-qfeed__history-text {
+  color: var(--ma-text-secondary);
+  font-size: 0.75rem;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ── Counter-argument visual distinction ──────────────────────────────── */
+
+.ma-qfeed__card--counter {
+  border-top-style: dashed;
+}
+
+.ma-qfeed__type-tag {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--ma-radius-sm, 4px);
+  margin-bottom: 0.15rem;
+}
+
+.ma-qfeed__type-tag--counter {
+  background: var(--ma-opponent-bg, rgba(230, 126, 34, 0.15));
+  color: var(--ma-opponent, #e67e22);
+}
+
+.ma-qfeed__type-tag--sm {
+  padding: 0 0.25rem;
+  font-size: 0.55rem;
+  flex-shrink: 0;
+  line-height: 1.4;
 }

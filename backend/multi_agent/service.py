@@ -99,13 +99,15 @@ class MultiAgentService:
         transcript: str,
         brief_summary: str,
         questions_already_asked: List[str] = [],
-    ) -> Tuple[bool, Optional[str], int]:
+        trajectory_context: Optional[dict] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """Determine if an agent should ask a question based on the current transcript."""
         return await self.llm.analyze_agent_question(
             agent=agent,
             transcript=transcript,
             brief_summary=brief_summary,
             questions_already_asked=questions_already_asked,
+            trajectory_context=trajectory_context,
         )
 
 

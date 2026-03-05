@@ -1,26 +1,13 @@
-#!/usr/bin/env bash
-# Run the backend server in the virtual environment
+#!/bin/bash
+# Run the backend server with uv + hypercorn (trio backend)
 
-set -euo pipefail
+cd "$(dirname "$0")"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# Ensure deps are synced (fast no-op if already up to date)
+uv sync --quiet
 
-if [[ ! -d "venv" ]]; then
-  echo "[backend/run] Virtual environment not found. Running setup..."
-  bash setup.sh
-fi
-
-source venv/bin/activate
-
-BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
-BACKEND_PORT="${BACKEND_PORT:-8000}"
-BACKEND_RELOAD="${BACKEND_RELOAD:-0}"
-
-UVICORN_CMD=(uvicorn main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT")
-if [[ "$BACKEND_RELOAD" == "1" ]]; then
-  UVICORN_CMD+=(--reload)
-fi
-
-echo "[backend/run] Starting backend on http://localhost:${BACKEND_PORT} (reload=${BACKEND_RELOAD})"
-exec "${UVICORN_CMD[@]}"
+echo "Starting Court Simulator Backend on http://localhost:8000 (trio)"
+# hypercorn with --worker-class trio gives structured concurrency and allows
+# anyio.to_thread.run_sync to offload CPU-bound MCTS without blocking the loop.
+# Remove --reload in production.
+uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload

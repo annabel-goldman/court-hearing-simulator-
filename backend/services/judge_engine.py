@@ -6,6 +6,8 @@ Based on moot-court-practice JudgeAnalyzer - analyzes arguments and generates qu
 import os
 import json
 import re
+import time
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -14,11 +16,41 @@ from dotenv import load_dotenv
 # Load environment variables from the root .env file
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"))
 
+# ---------------------------------------------------------------------------
+# Config cache — avoids re-reading judge_config.json on every LLM call.
+# Config is re-read when the cached value is older than _JUDGE_CFG_TTL seconds,
+# which is short enough to pick up UI saves promptly without disk I/O per call.
+# ---------------------------------------------------------------------------
+_judge_cfg_cache: dict = {}
+_JUDGE_CFG_TTL = 30  # seconds
+
+def _get_cached_judge_config():
+    from services.judge_config import load_config
+    now = time.time()
+    if now - _judge_cfg_cache.get("ts", 0) > _JUDGE_CFG_TTL:
+        _judge_cfg_cache["cfg"] = load_config()
+        _judge_cfg_cache["ts"] = now
+    return _judge_cfg_cache["cfg"]
+
+
+@dataclass
+class ArgumentScore:
+    """Score for a single argument turn."""
+    speaker: str                 # "appellant" | "respondent"
+    utterance_preview: str       # first 120 chars of the utterance
+    clarity: float               # 0-10 — how clearly the point is stated
+    legal_reasoning: float       # 0-10 — use of precedent, statutes, logic
+    responsiveness: float        # 0-10 — directly addresses the judge's question / issue
+    persuasiveness: float        # 0-10 — overall convincing quality
+    overall: float               # 0-10 — weighted composite
+    feedback: str                # one-sentence coaching note
+    timestamp: float = field(default_factory=time.monotonic)
+
 # Lazy-load OpenAI client to avoid errors when API key is not set
 _openai_client = None
 
 def get_openai_client():
-    """Get or create the OpenAI client."""
+    """Get or create the OpenAI client (legacy helper, still used by old /ws endpoint)."""
     global _openai_client
     if _openai_client is None:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -31,6 +63,9 @@ def get_openai_client():
             base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         )
     return _openai_client
+
+# Model router integration — used for all judge LLM calls
+from model_router import get_task_client, extract_content, task_extra_body
 
 
 class MootCourtContext:
@@ -49,6 +84,11 @@ class MootCourtContext:
         self.last_interruption_time: Optional[datetime] = None
         self.session_start_time = datetime.now()
         self.topics_discussed: List[str] = []
+        # Per-speaker argument scores accumulated over the session
+        self.argument_scores: Dict[str, List[ArgumentScore]] = {
+            "appellant": [],
+            "respondent": [],
+        }
     
     def update_transcript(self, new_text: str) -> None:
         if new_text.strip():
@@ -119,7 +159,6 @@ class JudgeEngine:
     ):
         self.judge_personality = judge_personality
         self.interruption_frequency = interruption_frequency
-        self.model = os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o-mini")
         
         # Timing parameters based on frequency
         self.min_seconds_between = {
@@ -142,7 +181,12 @@ class JudgeEngine:
         return self.contexts[session_id]
     
     def _get_judge_system_prompt(self) -> str:
-        """Get the system prompt for the judge based on personality."""
+        """Get the system prompt for the judge, loaded from config with hardcoded fallback."""
+        cfg = _get_cached_judge_config()
+        if cfg.judge_prompt.strip():
+            return cfg.judge_prompt
+
+        # Hardcoded fallback (used only when config prompt is empty)
         base_prompt = """You are a federal appellate court judge presiding over a moot court argument.
 Your role is to:
 1. Listen carefully to the advocate's argument
@@ -158,13 +202,13 @@ Guidelines:
 - Don't interrupt too frequently (allow advocate to develop points)
 - Questions should be substantive and relevant to the case
 - Use natural judicial language and tone"""
-        
+
         personality_additions = {
             "strict": "\n\nYou are a strict, demanding judge who challenges arguments rigorously and expects precise legal reasoning.",
             "lenient": "\n\nYou are a more lenient judge who gives advocates room to explain but still asks clarifying questions when needed.",
             "socratic": "\n\nYou use the Socratic method, asking questions to guide the advocate to discover weaknesses in their own argument."
         }
-        
+
         return base_prompt + personality_additions.get(self.judge_personality, "")
 
     _OMIT_SECTION = "\n__OMIT_SECTION__"
@@ -275,7 +319,7 @@ Respond in JSON format:
 }}"""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("judge_interrupt")
             if not client:
                 print("WARNING: OpenAI client not available, returning mock response")
                 return False, None, "OpenAI API key not configured"
@@ -304,16 +348,17 @@ Respond in JSON format:
                 print(f"[Judge] Using DEFAULT backend prompt (no custom prompt set)")
 
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
-                max_tokens=300
+                max_tokens=1024,
+                extra_body=task_extra_body("judge_interrupt"),
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = extract_content(response)
             
             # Remove markdown code blocks if present
             if content.startswith("```"):
@@ -360,7 +405,7 @@ Respond in JSON format:
 Provide a concise summary (max 300 words) that captures:
 1. The core legal dispute.
 2. The appellant's primary argument.
-3. The respondent's primary response.
+3. The appellee's primary response.
 4. The key precedents involved.
 
 APPELLANT BRIEF TEXT:
@@ -372,21 +417,22 @@ APPELLEE BRIEF TEXT:
 Format as a professional judicial summary."""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("brief_summary")
             if not client:
                 return "Judicial summary unavailable (API key not set)."
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or default_system},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3, # Low temperature for factual summary
-                max_tokens=500
+                temperature=0.3,
+                max_tokens=500,
+                extra_body=task_extra_body("brief_summary"),
             )
-            
-            return response.choices[0].message.content.strip()
+
+            return extract_content(response) or "Judicial summary unavailable."
             
         except Exception as e:
             print(f"Error summarizing briefs: {e}")
@@ -404,7 +450,7 @@ Format as a professional judicial summary."""
 APPELLANT BRIEF:
 {appellant_brief[:3000]}
 
-RESPONDENT BRIEF:
+APPELLEE BRIEF:
 {appellee_brief[:3000]}
 
 Generate questions that:
@@ -415,27 +461,28 @@ Generate questions that:
 
 Return as JSON array:
 [
-    {{"question": "...", "target": "appellant/respondent/both", "topic": "...", "difficulty": "easy/medium/hard"}},
+    {{"question": "...", "target": "appellant/appellee/both", "topic": "...", "difficulty": "easy/medium/hard"}},
     ...
 ]"""
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("seed_questions")
             if not client:
                 print("WARNING: OpenAI client not available for seed questions")
                 return []
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or self._get_judge_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=1000,
+                extra_body=task_extra_body("seed_questions"),
             )
-            
-            content = response.choices[0].message.content.strip()
+
+            content = extract_content(response)
             print(f"[SeedQuestions] Raw OpenAI response:\n{content[:500]}...")
             
             # Extract JSON array from markdown code blocks if present
@@ -497,23 +544,24 @@ Return as JSON array:
         prompt = "".join(parts)
 
         try:
-            client = get_openai_client()
+            client, model = get_task_client("synthesize_question")
             if not client:
                 print("WARNING: OpenAI client not available for question synthesis")
                 return {"should_interrupt": False, "question": None, "reasoning": "OpenAI API key not configured"}
             
             response = await client.chat.completions.create(
-                model=self.model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt or self._get_judge_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=800,
+                extra_body=task_extra_body("synthesize_question"),
             )
-            
-            content = response.choices[0].message.content.strip()
-            
+
+            content = extract_content(response)
+
             # Extract JSON
             json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
             if json_match:
@@ -524,3 +572,161 @@ Return as JSON array:
         except Exception as e:
             print(f"Error synthesizing question: {e}")
             return {"should_interrupt": False, "question": None, "reasoning": str(e)}
+
+    async def score_argument(
+        self,
+        session_id: str,
+        speaker: str,
+        utterance: str,
+        brief_summary: Optional[str] = None,
+        topic: Optional[str] = None,
+        judge_question_answered: Optional[str] = None,
+    ) -> Optional[ArgumentScore]:
+        """
+        Score a single argument turn by the appellant or respondent.
+
+        Parameters
+        ----------
+        speaker : "appellant" or "respondent"
+        utterance : the spoken text to evaluate
+        brief_summary : optional judicial summary of both briefs (context)
+        topic : the legal topic being argued
+        judge_question_answered : the most recent judge question this turn is responding to
+
+        Returns an ArgumentScore, or None on LLM/parse failure.
+        """
+        if not utterance or len(utterance.split()) < 5:
+            return None
+
+        context = self.get_or_create_context(session_id)
+
+        cfg = _get_cached_judge_config()
+        dims = cfg.reward_dimensions
+
+        dim_lines = "\n".join(
+            f"  {d.name:<22} — {d.description}" for d in dims
+        )
+        formula = " + ".join(f"{d.name}×{d.weight}" for d in dims)
+        example_fields = ", ".join(f'"{d.name}": 7.0' for d in dims)
+        system_msg = cfg.scoring_prompt_template.strip() or "You are an expert moot court evaluator. Reply with JSON only."
+
+        parts: list[str] = []
+        if brief_summary:
+            parts.append(f"BRIEF SUMMARY (case context):\n{brief_summary[:400]}\n\n")
+        if topic:
+            parts.append(f"TOPIC BEING ARGUED: {topic}\n\n")
+        if judge_question_answered:
+            parts.append(f"JUDGE'S QUESTION THIS TURN IS RESPONDING TO:\n{judge_question_answered}\n\n")
+
+        parts.append(
+            f"SPEAKER: {speaker.upper()}\n"
+            f"ARGUMENT:\n{utterance[:1200]}\n\n"
+            f"Score each dimension 0-10 (decimals allowed):\n"
+            f"{dim_lines}\n\n"
+            f"overall = weighted average: {formula}\n\n"
+            "Also provide a one-sentence 'feedback' coaching note for the advocate.\n\n"
+            "Respond with valid JSON only — no markdown:\n"
+            f"{{{example_fields}, \"overall\": 7.0, \"feedback\": \"...\"}}"
+        )
+
+        prompt = "".join(parts)
+
+        try:
+            client, model = get_task_client("argument_scoring")
+            if not client:
+                return None
+
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=250,
+                extra_body=task_extra_body("argument_scoring"),
+            )
+
+            content = extract_content(response)
+
+            # Strip markdown code fences
+            if content.startswith("```"):
+                lines = content.split("\n")
+                content = "\n".join(lines[1:-1]) if len(lines) > 2 else content
+
+            json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(0)
+
+            raw = json.loads(content)
+
+            # Map configured dim names → the four fixed ArgumentScore fields.
+            # If user renamed dims, fall back to 5.0 for any unrecognised name.
+            score = ArgumentScore(
+                speaker=speaker,
+                utterance_preview=utterance[:120],
+                clarity=float(raw.get("clarity", 5.0)),
+                legal_reasoning=float(raw.get("legal_reasoning", 5.0)),
+                responsiveness=float(raw.get("responsiveness", 5.0)),
+                persuasiveness=float(raw.get("persuasiveness", 5.0)),
+                overall=float(raw.get("overall", 5.0)),
+                feedback=str(raw.get("feedback", "")),
+            )
+
+            key = "appellant" if speaker == "appellant" else "respondent"
+            context.argument_scores.setdefault(key, []).append(score)
+            return score
+
+        except Exception as e:
+            print(f"[JudgeEngine] score_argument error: {e}")
+            return None
+
+    def get_session_scores(self, session_id: str) -> Dict:
+        """
+        Return cumulative scores for both speakers in this session.
+
+        Returns a dict with:
+          per_turn  — list of individual turn scores (both speakers, chronological)
+          summary   — per-speaker averages across all scored turns
+        """
+        context = self.contexts.get(session_id)
+        if context is None:
+            return {"per_turn": [], "summary": {}}
+
+        # Collect all turns and sort chronologically by dataclass timestamp
+        all_scores_with_ts = [
+            s
+            for key in ("appellant", "respondent")
+            for s in context.argument_scores.get(key, [])
+        ]
+        all_scores_with_ts.sort(key=lambda s: s.timestamp)
+        per_turn_sorted = [
+            {
+                "speaker": s.speaker,
+                "utterance_preview": s.utterance_preview,
+                "clarity": round(s.clarity, 1),
+                "legal_reasoning": round(s.legal_reasoning, 1),
+                "responsiveness": round(s.responsiveness, 1),
+                "persuasiveness": round(s.persuasiveness, 1),
+                "overall": round(s.overall, 1),
+                "feedback": s.feedback,
+            }
+            for s in all_scores_with_ts
+        ]
+
+        summary: Dict[str, Dict] = {}
+        for key in ("appellant", "respondent"):
+            turns = context.argument_scores.get(key, [])
+            if not turns:
+                continue
+            n = len(turns)
+            summary[key] = {
+                "turns_scored": n,
+                "clarity": round(sum(s.clarity for s in turns) / n, 1),
+                "legal_reasoning": round(sum(s.legal_reasoning for s in turns) / n, 1),
+                "responsiveness": round(sum(s.responsiveness for s in turns) / n, 1),
+                "persuasiveness": round(sum(s.persuasiveness for s in turns) / n, 1),
+                "overall": round(sum(s.overall for s in turns) / n, 1),
+            }
+
+        return {"per_turn": per_turn_sorted, "summary": summary}

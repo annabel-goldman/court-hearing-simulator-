@@ -1,0 +1,282 @@
+/**
+ * Opponent Configuration Panel — ocp-* classes
+ * Uses --ma-* design tokens from multi-agent/styles/variables.css
+ */
+
+/* ── Panel wrapper ─────────────────────────────────────────────────────── */
+
+.ocp-panel {
+  margin-top: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Collapsible header button ─────────────────────────────────────────── */
+
+.ocp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid var(--ma-opponent, #e67e22);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.ocp-header:hover {
+  color: var(--ma-text-primary);
+  background: var(--ma-bg-tertiary);
+}
+
+.ocp-header--open {
+  color: var(--ma-text-primary);
+}
+
+.ocp-header__label {
+  flex: 1;
+}
+
+.ocp-header__chevron {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  color: var(--ma-text-dim);
+}
+
+.ocp-header--open .ocp-header__chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible body ──────────────────────────────────────────────────── */
+
+.ocp-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.2s ease;
+  max-height: 3000px;
+  opacity: 1;
+  margin-top: 0.5rem;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid var(--ma-opponent, #e67e22);
+  border-radius: var(--ma-radius-md);
+}
+
+.ocp-body--collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.ocp-body__inner {
+  padding: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Tab bar ───────────────────────────────────────────────────────────── */
+
+.ocp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--ma-border-default);
+  gap: 0;
+}
+
+.ocp-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.ocp-tab:hover {
+  color: var(--ma-text-primary);
+}
+
+.ocp-tab--active {
+  color: var(--ma-opponent, #e67e22);
+  border-bottom-color: var(--ma-opponent, #e67e22);
+  font-weight: 600;
+}
+
+/* ── Tab content ───────────────────────────────────────────────────────── */
+
+.ocp-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Labels & help ─────────────────────────────────────────────────────── */
+
+.ocp-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ma-text-secondary);
+  margin-bottom: var(--ma-space-xs);
+}
+
+.ocp-help {
+  font-size: 0.75rem;
+  color: var(--ma-text-muted);
+  line-height: 1.4;
+}
+
+.ocp-error-text {
+  font-size: 0.75rem;
+  color: var(--ma-error);
+  margin: 0 0 var(--ma-space-xs);
+}
+
+/* ── Textarea ──────────────────────────────────────────────────────────── */
+
+.ocp-textarea {
+  width: 100%;
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.ocp-textarea:focus {
+  border-color: var(--ma-opponent, #e67e22);
+  outline: none;
+}
+
+/* ── Fields ────────────────────────────────────────────────────────────── */
+
+.ocp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+}
+
+/* ── Slider ────────────────────────────────────────────────────────────── */
+
+.ocp-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ocp-slider-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ma-opponent, #e67e22);
+}
+
+.ocp-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--ma-bg-tertiary);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.ocp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--ma-opponent, #e67e22);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid var(--ma-bg-primary);
+  box-shadow: 0 0 4px rgba(230, 126, 34, 0.4);
+}
+
+.ocp-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--ma-opponent, #e67e22);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid var(--ma-bg-primary);
+  box-shadow: 0 0 4px rgba(230, 126, 34, 0.4);
+}
+
+/* ── Response type checkboxes ──────────────────────────────────────────── */
+
+.ocp-types-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-sm);
+}
+
+.ocp-type-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ma-space-sm);
+  cursor: pointer;
+  padding: var(--ma-space-sm);
+  border-radius: var(--ma-radius-md);
+  background: var(--ma-bg-primary);
+  border: 1px solid var(--ma-border-default);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ocp-type-row:hover {
+  border-color: var(--ma-border-muted);
+  background: var(--ma-bg-tertiary);
+}
+
+.ocp-checkbox {
+  margin-top: 2px;
+  accent-color: var(--ma-opponent, #e67e22);
+  flex-shrink: 0;
+}
+
+.ocp-type-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ocp-type-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ma-text-primary);
+}
+
+.ocp-type-desc {
+  font-size: 0.72rem;
+  color: var(--ma-text-muted);
+}
+
+/* ── Actions bar ───────────────────────────────────────────────────────── */
+
+.ocp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ma-space-sm);
+  padding-top: var(--ma-space-sm);
+  border-top: 1px solid var(--ma-border-default);
+}

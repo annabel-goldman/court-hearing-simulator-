@@ -1,0 +1,306 @@
+/**
+ * Judge Configuration Panel — jcp-* classes
+ * Uses --ma-* design tokens from multi-agent/styles/variables.css
+ */
+
+/* ── Panel wrapper ─────────────────────────────────────────────────────────── */
+
+.jcp-panel {
+  margin-top: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ── Collapsible header button ─────────────────────────────────────────────── */
+
+.jcp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid var(--ma-info);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.jcp-header:hover {
+  color: var(--ma-text-primary);
+  background: var(--ma-bg-tertiary);
+}
+
+.jcp-header--open {
+  color: var(--ma-text-primary);
+}
+
+.jcp-header__label {
+  flex: 1;
+}
+
+.jcp-header__chevron {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  color: var(--ma-text-dim);
+}
+
+.jcp-header--open .jcp-header__chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible body ──────────────────────────────────────────────────────── */
+
+.jcp-body {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin-top 0.2s ease;
+  max-height: 3000px;
+  opacity: 1;
+  margin-top: 0.5rem;
+  background: var(--ma-bg-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-left: 3px solid var(--ma-info);
+  border-radius: var(--ma-radius-md);
+}
+
+.jcp-body--collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.jcp-body__inner {
+  padding: var(--ma-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Tab bar ───────────────────────────────────────────────────────────────── */
+
+.jcp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--ma-border-default);
+  gap: 0;
+}
+
+.jcp-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ma-text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.jcp-tab:hover {
+  color: var(--ma-text-primary);
+}
+
+.jcp-tab--active {
+  color: var(--ma-info);
+  border-bottom-color: var(--ma-info);
+  font-weight: 600;
+}
+
+/* ── Tab content ───────────────────────────────────────────────────────────── */
+
+.jcp-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-md);
+}
+
+/* ── Labels & help ─────────────────────────────────────────────────────────── */
+
+.jcp-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ma-text-secondary);
+  margin-bottom: var(--ma-space-xs);
+}
+
+.jcp-textarea {
+  width: 100%;
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  padding: var(--ma-space-sm) var(--ma-space-md);
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.jcp-textarea:focus {
+  border-color: var(--ma-info);
+  outline: none;
+}
+
+/* ── Help text ─────────────────────────────────────────────────────────────── */
+
+.jcp-help {
+  font-size: 0.75rem;
+  color: var(--ma-text-muted);
+  line-height: 1.4;
+}
+
+.jcp-help code {
+  background: var(--ma-bg-tertiary);
+  border-radius: var(--ma-radius-sm);
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+
+/* ── Reward dimensions ─────────────────────────────────────────────────────── */
+
+.jcp-weight-total {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: var(--ma-space-xs) var(--ma-space-sm);
+  border-radius: var(--ma-radius-sm);
+}
+
+.jcp-weight-total--ok {
+  background: var(--ma-success-bg);
+  color: var(--ma-success);
+}
+
+.jcp-weight-total--error {
+  background: var(--ma-error-bg);
+  color: var(--ma-error);
+}
+
+.jcp-dims-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-sm);
+}
+
+.jcp-dimension-row {
+  display: grid;
+  grid-template-columns: 1fr 4.5rem 2fr auto;
+  gap: var(--ma-space-sm);
+  align-items: center;
+}
+
+.jcp-input {
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-size: 0.82rem;
+  padding: 0.3rem var(--ma-space-sm);
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.jcp-input:focus {
+  border-color: var(--ma-info);
+  outline: none;
+}
+
+.jcp-weight-input {
+  text-align: center;
+  width: 100%;
+}
+
+/* ── External LLM ──────────────────────────────────────────────────────────── */
+
+.jcp-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ma-space-sm);
+}
+
+.jcp-toggle {
+  position: relative;
+  width: 2.5rem;
+  height: 1.4rem;
+  background: var(--ma-bg-tertiary);
+  border-radius: var(--ma-radius-full);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.jcp-toggle--on {
+  background: var(--ma-info);
+}
+
+.jcp-toggle__thumb {
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1rem;
+  height: 1rem;
+  background: #fff;
+  border-radius: var(--ma-radius-full);
+  transition: transform 0.2s;
+}
+
+.jcp-toggle--on .jcp-toggle__thumb {
+  transform: translateX(1.1rem);
+}
+
+.jcp-toggle-label {
+  font-size: 0.85rem;
+  color: var(--ma-text-secondary);
+}
+
+.jcp-external-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-sm);
+}
+
+.jcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ma-space-xs);
+}
+
+.jcp-select {
+  background: var(--ma-bg-input);
+  border: 1px solid var(--ma-border-default);
+  border-radius: var(--ma-radius-md);
+  color: var(--ma-text-primary);
+  font-size: 0.82rem;
+  padding: 0.3rem var(--ma-space-sm);
+  transition: border-color 0.15s;
+  cursor: pointer;
+}
+
+.jcp-select:focus {
+  border-color: var(--ma-info);
+  outline: none;
+}
+
+/* ── Actions bar ───────────────────────────────────────────────────────────── */
+
+.jcp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ma-space-sm);
+  padding-top: var(--ma-space-sm);
+  border-top: 1px solid var(--ma-border-default);
+}

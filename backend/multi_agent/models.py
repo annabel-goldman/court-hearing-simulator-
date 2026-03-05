@@ -21,6 +21,7 @@ class Agent:
     version: int = 1
     created_at: Optional[str] = None
     is_custom: bool = False  # True if this is a user-created agent (can be deleted)
+    voice_id: str = ""       # TTS voice ID (e.g. Cartesia UUID); "" = provider default
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -38,4 +39,5 @@ class Agent:
             version=data.get("version", 1),
             created_at=data.get("created_at"),
             is_custom=data.get("is_custom", False),
+            voice_id=data.get("voice_id", ""),
         )

@@ -1,20 +1,18 @@
-#!/usr/bin/env bash
-# Backend setup script - creates venv and installs dependencies
+#!/bin/bash
+# Backend setup script - installs dependencies with uv
 
-set -euo pipefail
+set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$(dirname "$0")"
 
-echo "[backend/setup] Preparing backend environment..."
+echo "Setting up Court Simulator Backend..."
 
-if [[ ! -d "venv" ]]; then
-  echo "[backend/setup] Creating virtual environment..."
-  python3 -m venv venv
-fi
+# Sync dependencies from pyproject.toml via uv
+echo "Installing dependencies with uv..."
+uv sync
 
-source venv/bin/activate
-echo "[backend/setup] Installing Python dependencies..."
-pip install -r requirements.txt
-
-echo "[backend/setup] Done."
+echo ""
+echo "Setup complete! To run the server:"
+echo "  ./run.sh"
+echo "or:"
+echo "  uv run uvicorn main:app --reload --port 8000"
