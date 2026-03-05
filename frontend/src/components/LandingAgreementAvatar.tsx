@@ -1,13 +1,7 @@
 import { Suspense, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { AvatarModel } from '../3d-rendering/AvatarModel'
-import mediumJudgeSeatedAnsweringLocalUrl from '../3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import mediumJudgeAgreeGestureLocalUrl from '../3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Agree_Gesture_withSkin.glb?url'
-import mediumJudgeTalkWithHandsOpenLocalUrl from '../3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Talk_with_Hands_Open_withSkin.glb?url'
-import counselSeatedAnsweringLocalUrl from '../3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import counselAgreeGestureLocalUrl from '../3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Agree_Gesture_withSkin.glb?url'
-import counselStandAndChatLocalUrl from '../3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Stand_and_Chat_withSkin.glb?url'
-import { resolveAssetUrl } from '../config/assetUrls'
+import { getAssetUrl } from '../config/assetUrls'
 import type { LandingIntroAnimationAssetId } from '../config/homeLandingConfig'
 
 type FacingDirection = 'left' | 'right'
@@ -26,32 +20,14 @@ export interface LandingAgreementAvatarProps {
 
 const LANDING_AVATAR_ASSET_LIBRARY = {
   judge: {
-    seatedAnswering: resolveAssetUrl(
-      mediumJudgeSeatedAnsweringLocalUrl,
-      '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-    ),
-    agreeGesture: resolveAssetUrl(
-      mediumJudgeAgreeGestureLocalUrl,
-      '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Agree_Gesture_withSkin.glb'
-    ),
-    standAndChat: resolveAssetUrl(
-      mediumJudgeTalkWithHandsOpenLocalUrl,
-      '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Talk_with_Hands_Open_withSkin.glb'
-    ),
+    seatedAnswering: getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'),
+    agreeGesture: getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Agree_Gesture_withSkin.glb'),
+    standAndChat: getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Talk_with_Hands_Open_withSkin.glb'),
   },
   counsel: {
-    seatedAnswering: resolveAssetUrl(
-      counselSeatedAnsweringLocalUrl,
-      '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-    ),
-    agreeGesture: resolveAssetUrl(
-      counselAgreeGestureLocalUrl,
-      '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Agree_Gesture_withSkin.glb'
-    ),
-    standAndChat: resolveAssetUrl(
-      counselStandAndChatLocalUrl,
-      '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Stand_and_Chat_withSkin.glb'
-    ),
+    seatedAnswering: getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'),
+    agreeGesture: getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Agree_Gesture_withSkin.glb'),
+    standAndChat: getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Stand_and_Chat_withSkin.glb'),
   },
 } as const
 

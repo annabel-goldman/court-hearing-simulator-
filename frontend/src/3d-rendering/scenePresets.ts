@@ -1,121 +1,38 @@
-import chairLocalUrl from './glb/Chair.glb?url'
-import flagLocalUrl from './glb/Flag.glb?url'
-import lawyerDeskLocalUrl from './glb/Lawyer Desk.glb?url'
-import pewLocalUrl from './glb/Pew.glb?url'
-import emblemLocalUrl from './glb/emblem.glb?url'
-import windowLocalUrl from './glb/Window.glb?url'
-import beamLocalUrl from './beam.glb?url'
-import easyJudgeClapLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb?url'
-import easyJudgeRunLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Running_withSkin.glb?url'
-import easyJudgeSeatedAnsweringLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import easyJudgeSitCheerLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb?url'
-import easyJudgeFingerWagLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb?url'
-import easyJudgeWalkLocalUrl from './glb/Easy Judge/Meshy_AI_Animation_Walking_withSkin.glb?url'
-import mediumJudgeClapLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb?url'
-import mediumJudgeRunLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Running_withSkin.glb?url'
-import mediumJudgeSeatedAnsweringLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import mediumJudgeSeatedFistPumpLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Seated_Fist_Pump_withSkin.glb?url'
-import mediumJudgeFingerWagLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb?url'
-import mediumJudgeWalkLocalUrl from './glb/Medium Judge/Meshy_AI_Animation_Walking_withSkin.glb?url'
-import hardJudgeClapLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb?url'
-import hardJudgeRunLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Running_withSkin.glb?url'
-import hardJudgeSeatedAnsweringLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import hardJudgeSitCheerLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb?url'
-import hardJudgeSitTransitionLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Step_to_Sit_Transition_withSkin.glb?url'
-import hardJudgeWalkLocalUrl from './glb/Hard Judge/Meshy_AI_Animation_Walking_withSkin.glb?url'
-import counselClapLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Sitting_Clap_withSkin.glb?url'
-import counselRunLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Running_withSkin.glb?url'
-import counselSeatedAnsweringLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb?url'
-import counselSitCheerLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb?url'
-import counselSitDozeLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Sit_and_Doze_Off_withSkin.glb?url'
-import counselSitToStandLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Sit_to_Stand_Transition_M_withSkin.glb?url'
-import counselWalkLocalUrl from './glb/Opposing Council/Meshy_AI_Animation_Walking_withSkin.glb?url'
-import { resolveAssetUrl } from '../config/assetUrls'
+import { getAssetUrl } from '../config/assetUrls'
 import type { JudgeAvatarDifficulty } from './types'
 
-const chairUrl = resolveAssetUrl(chairLocalUrl, '3d-rendering/glb/Chair.glb')
-const flagUrl = resolveAssetUrl(flagLocalUrl, '3d-rendering/glb/Flag.glb')
-const lawyerDeskUrl = resolveAssetUrl(lawyerDeskLocalUrl, '3d-rendering/glb/Lawyer Desk.glb')
-const pewUrl = resolveAssetUrl(pewLocalUrl, '3d-rendering/glb/Pew.glb')
-const emblemUrl = resolveAssetUrl(emblemLocalUrl, '3d-rendering/glb/emblem.glb')
-const windowUrl = resolveAssetUrl(windowLocalUrl, '3d-rendering/glb/Window.glb')
-const beamUrl = resolveAssetUrl(beamLocalUrl, '3d-rendering/glb/beam.glb')
-const easyJudgeClapUrl = resolveAssetUrl(
-  easyJudgeClapLocalUrl,
-  '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb'
-)
-const easyJudgeRunUrl = resolveAssetUrl(easyJudgeRunLocalUrl, '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Running_withSkin.glb')
-const easyJudgeSeatedAnsweringUrl = resolveAssetUrl(
-  easyJudgeSeatedAnsweringLocalUrl,
-  '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-)
-const easyJudgeSitCheerUrl = resolveAssetUrl(
-  easyJudgeSitCheerLocalUrl,
-  '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb'
-)
-const easyJudgeFingerWagUrl = resolveAssetUrl(
-  easyJudgeFingerWagLocalUrl,
-  '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb'
-)
-const easyJudgeWalkUrl = resolveAssetUrl(easyJudgeWalkLocalUrl, '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Walking_withSkin.glb')
-const mediumJudgeClapUrl = resolveAssetUrl(
-  mediumJudgeClapLocalUrl,
-  '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb'
-)
-const mediumJudgeRunUrl = resolveAssetUrl(mediumJudgeRunLocalUrl, '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Running_withSkin.glb')
-const mediumJudgeSeatedAnsweringUrl = resolveAssetUrl(
-  mediumJudgeSeatedAnsweringLocalUrl,
-  '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-)
-const mediumJudgeSeatedFistPumpUrl = resolveAssetUrl(
-  mediumJudgeSeatedFistPumpLocalUrl,
-  '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Seated_Fist_Pump_withSkin.glb'
-)
-const mediumJudgeFingerWagUrl = resolveAssetUrl(
-  mediumJudgeFingerWagLocalUrl,
-  '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb'
-)
-const mediumJudgeWalkUrl = resolveAssetUrl(
-  mediumJudgeWalkLocalUrl,
-  '3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Walking_withSkin.glb'
-)
-const hardJudgeClapUrl = resolveAssetUrl(hardJudgeClapLocalUrl, '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb')
-const hardJudgeRunUrl = resolveAssetUrl(hardJudgeRunLocalUrl, '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Running_withSkin.glb')
-const hardJudgeSeatedAnsweringUrl = resolveAssetUrl(
-  hardJudgeSeatedAnsweringLocalUrl,
-  '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-)
-const hardJudgeSitCheerUrl = resolveAssetUrl(
-  hardJudgeSitCheerLocalUrl,
-  '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb'
-)
-const hardJudgeSitTransitionUrl = resolveAssetUrl(
-  hardJudgeSitTransitionLocalUrl,
-  '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Step_to_Sit_Transition_withSkin.glb'
-)
-const hardJudgeWalkUrl = resolveAssetUrl(hardJudgeWalkLocalUrl, '3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Walking_withSkin.glb')
-const counselClapUrl = resolveAssetUrl(
-  counselClapLocalUrl,
-  '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Clap_withSkin.glb'
-)
-const counselRunUrl = resolveAssetUrl(counselRunLocalUrl, '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Running_withSkin.glb')
-const counselSeatedAnsweringUrl = resolveAssetUrl(
-  counselSeatedAnsweringLocalUrl,
-  '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb'
-)
-const counselSitCheerUrl = resolveAssetUrl(
-  counselSitCheerLocalUrl,
-  '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb'
-)
-const counselSitDozeUrl = resolveAssetUrl(
-  counselSitDozeLocalUrl,
-  '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_and_Doze_Off_withSkin.glb'
-)
-const counselSitToStandUrl = resolveAssetUrl(
-  counselSitToStandLocalUrl,
-  '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_to_Stand_Transition_M_withSkin.glb'
-)
-const counselWalkUrl = resolveAssetUrl(counselWalkLocalUrl, '3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Walking_withSkin.glb')
+const chairUrl = getAssetUrl('3d-rendering/glb/Chair.glb')
+const flagUrl = getAssetUrl('3d-rendering/glb/Flag.glb')
+const lawyerDeskUrl = getAssetUrl('3d-rendering/glb/Lawyer Desk.glb')
+const pewUrl = getAssetUrl('3d-rendering/glb/Pew.glb')
+const emblemUrl = getAssetUrl('3d-rendering/glb/emblem.glb')
+const windowUrl = getAssetUrl('3d-rendering/glb/Window.glb')
+const beamUrl = getAssetUrl('3d-rendering/glb/beam.glb')
+const easyJudgeClapUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb')
+const easyJudgeRunUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Running_withSkin.glb')
+const easyJudgeSeatedAnsweringUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb')
+const easyJudgeSitCheerUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb')
+const easyJudgeFingerWagUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb')
+const easyJudgeWalkUrl = getAssetUrl('3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Walking_withSkin.glb')
+const mediumJudgeClapUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb')
+const mediumJudgeRunUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Running_withSkin.glb')
+const mediumJudgeSeatedAnsweringUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb')
+const mediumJudgeSeatedFistPumpUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Seated_Fist_Pump_withSkin.glb')
+const mediumJudgeFingerWagUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Sit_Finger_Wag_No_withSkin.glb')
+const mediumJudgeWalkUrl = getAssetUrl('3d-rendering/glb/Medium Judge/Meshy_AI_Animation_Walking_withSkin.glb')
+const hardJudgeClapUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb')
+const hardJudgeRunUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Running_withSkin.glb')
+const hardJudgeSeatedAnsweringUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb')
+const hardJudgeSitCheerUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb')
+const hardJudgeSitTransitionUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Step_to_Sit_Transition_withSkin.glb')
+const hardJudgeWalkUrl = getAssetUrl('3d-rendering/glb/Hard Judge/Meshy_AI_Animation_Walking_withSkin.glb')
+const counselClapUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Clap_withSkin.glb')
+const counselRunUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Running_withSkin.glb')
+const counselSeatedAnsweringUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sitting_Answering_Questions_withSkin.glb')
+const counselSitCheerUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_Cheer_with_Left_Hand_withSkin.glb')
+const counselSitDozeUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_and_Doze_Off_withSkin.glb')
+const counselSitToStandUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Sit_to_Stand_Transition_M_withSkin.glb')
+const counselWalkUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_Animation_Walking_withSkin.glb')
 
 // ============================================================================
 // EDITABLE NUMERIC CONTROLS (PRIMARY EDIT ZONE)
