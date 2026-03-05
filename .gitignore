@@ -32,5 +32,10 @@ dist/
 # Local source archives not used by runtime app
 frontend/src/3d-rendering/Judge/*.zip
 
+# 3D assets served from S3/CloudFront (do not commit binaries)
+frontend/src/3d-rendering/beam.glb
+frontend/src/3d-rendering/glb/*.glb
+frontend/src/3d-rendering/glb/**/*.glb
+
 # Multi-agent custom data (user-created, should not be deployed)
 backend/multi_agent/data/custom/

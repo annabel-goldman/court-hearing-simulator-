@@ -39,7 +39,7 @@ const lawyerDeskUrl = resolveAssetUrl(lawyerDeskLocalUrl, '3d-rendering/glb/Lawy
 const pewUrl = resolveAssetUrl(pewLocalUrl, '3d-rendering/glb/Pew.glb')
 const emblemUrl = resolveAssetUrl(emblemLocalUrl, '3d-rendering/glb/emblem.glb')
 const windowUrl = resolveAssetUrl(windowLocalUrl, '3d-rendering/glb/Window.glb')
-const beamUrl = resolveAssetUrl(beamLocalUrl, '3d-rendering/beam.glb')
+const beamUrl = resolveAssetUrl(beamLocalUrl, '3d-rendering/glb/beam.glb')
 const easyJudgeClapUrl = resolveAssetUrl(
   easyJudgeClapLocalUrl,
   '3d-rendering/glb/Easy Judge/Meshy_AI_Animation_Sitting_Clap_withSkin.glb'
