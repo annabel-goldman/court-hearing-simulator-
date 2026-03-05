@@ -33,7 +33,6 @@ dist/
 frontend/src/3d-rendering/Judge/*.zip
 
 # 3D assets served from S3/CloudFront (do not commit binaries)
-frontend/src/3d-rendering/beam.glb
 frontend/src/3d-rendering/glb/*.glb
 frontend/src/3d-rendering/glb/**/*.glb
 
