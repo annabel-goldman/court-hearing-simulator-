@@ -30,6 +30,25 @@
   margin: 0;
 }
 
+.ma-transcript__segment {
+  color: var(--ma-text-secondary);
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  margin: 0 0 0.75rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--ma-border-default, rgba(255, 255, 255, 0.08));
+}
+
+.ma-transcript__segment:last-of-type {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.ma-transcript__current {
+  margin-top: 0.5rem;
+}
+
 .ma-transcript__placeholder {
   color: var(--ma-text-dim);
   font-style: italic;

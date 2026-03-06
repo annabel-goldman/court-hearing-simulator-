@@ -19,6 +19,8 @@ interface BriefUploadProps {
   onSummaryGenerated?: (summary: string) => void;
   /** When true, Start skips the summarize API and calls onBriefsReady directly (e.g. OrchestratedAgents uses projected-timeline which generates agenda + summary) */
   skipSummary?: boolean;
+  /** Increment to reset the Start button (e.g. when Clear Session is clicked) */
+  clearTrigger?: number;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -44,7 +46,7 @@ function countWords(text: string): number {
   return text.split(/\s+/).length;
 }
 
-export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = false }: BriefUploadProps) {
+export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = false, clearTrigger }: BriefUploadProps) {
   const [userBrief, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBrief, setOpposingBrief] = useState<BriefData | null>(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
@@ -55,6 +57,10 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = f
   useEffect(() => {
     if (!userBrief || !opposingBrief) setStarted(false);
   }, [userBrief, opposingBrief]);
+
+  useEffect(() => {
+    if (clearTrigger != null && clearTrigger > 0) setStarted(false);
+  }, [clearTrigger]);
 
   const handleFileUpload = useCallback(async (file: File, type: 'user' | 'opposing') => {
     try {

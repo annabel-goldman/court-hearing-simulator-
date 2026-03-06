@@ -1,5 +1,5 @@
 """
-Monte Carlo Tree Search over predicted hearing topic sequences.
+Weighted Sparse Monte Carlo Tree Search over predicted hearing topic sequences.
 
 Two modes
 ---------
@@ -16,8 +16,12 @@ Rollouts are embedding-based (no LLM), using the same _embed / _cosine helpers
 that the trajectory tracker already loads.  This makes simulations very fast —
 thousands per second even on CPU.
 
-  score = mean_consecutive_cosine + 0.1 * coverage_fraction
-          ↑ topic-to-topic thematic flow    ↑ bonus for covering more ground
+  score = mean_consecutive_cosine + coverage_bonus
+          + exploitability_bonus  (static, from brief analysis)
+          + opponent_bonus        (dynamic, from opponent argument scores)
+          + initial_buff          (one-shot random buff for first topic)
+          + lens_continuity       (bonus for staying within a judicial lens)
+          + quality adjustments   (dynamic, from live tracker)
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from __future__ import annotations
 import logging
 import math
 import random
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 import anyio
@@ -34,6 +39,28 @@ logger = logging.getLogger("court-simulator.projected_timeline.mcts")
 # Re-use the embedding helpers already loaded by the tracker.
 # They're module-level callables with lazy model initialisation.
 from .tracker import _embed, _cosine  # noqa: PLC2701
+
+
+# ---------------------------------------------------------------------------
+# Consolidated weight configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MCTSWeights:
+    """All weight maps fed into the MCTS value function.
+
+    Keeps the function signatures clean — callers build one MCTSWeights
+    and pass it through instead of threading many optional kwargs.
+    """
+    exploitability: Dict[str, float] = field(default_factory=dict)
+    quality: Optional[Dict[str, float]] = None
+    opponent_bonus: Dict[str, float] = field(default_factory=dict)
+    initial_buff: Dict[str, float] = field(default_factory=dict)
+    lens_map: Dict[str, str] = field(default_factory=dict)
+    last_path_lens: Optional[str] = None
+    # Number of topics already covered in the hearing — used to increase the
+    # uncovered-topic bonus so we prioritize remaining topics more as coverage grows.
+    covered_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -89,23 +116,23 @@ class _Node:
 def _score_sequence(
     titles: List[str],
     vec_map: Dict[str, List],
-    quality_map: Optional[Dict[str, float]] = None,
+    weights: Optional[MCTSWeights] = None,
 ) -> float:
-    """
-    Score an ordered sequence of topic titles.
+    """Score an ordered sequence of topic titles.
 
-    Score = mean cosine similarity between consecutive pairs
-            + 0.1 * (len(sequence) / total_topics) as a coverage bonus
-            - quality penalties for weak topics (if quality_map provided).
-
-    When quality_map is present (live projection mode), topics the advocate
-    argued weakly are penalised and unaddressed topics (missing from the map
-    entirely) get an urgency bonus — the projector steers toward gaps and
-    weaknesses the bench should probe.
+    Components:
+      - mean cosine similarity between consecutive pairs (thematic flow)
+      - coverage bonus
+      - exploitability bonus (static, brief-based)
+      - opponent bonus (dynamic, from opponent argument scores)
+      - initial buff (one-shot for first topic)
+      - lens continuity (bonus for same-lens consecutive topics)
+      - quality adjustments (dynamic, live tracker)
     """
     if len(titles) < 2:
         return 0.0
 
+    w = weights or MCTSWeights()
     total = len(vec_map)
     pairs = [(titles[i], titles[i + 1]) for i in range(len(titles) - 1)]
     sim_sum = sum(
@@ -116,21 +143,43 @@ def _score_sequence(
     mean_sim = sim_sum / len(pairs)
     coverage_bonus = 0.1 * (len(titles) / max(total, 1))
 
-    quality_adjustment = 0.0
-    if quality_map:
-        for t in titles:
-            q = quality_map.get(t)
-            if q is None:
-                # Unaddressed — urgency bonus to steer toward it
-                quality_adjustment += 0.08
-            elif q < 0.4:
-                # Weak argument — bonus to re-probe
-                quality_adjustment += 0.05
-            elif q > 0.7:
-                # Strong — mild penalty (no need to revisit)
-                quality_adjustment -= 0.03
+    extra = 0.0
 
-    return mean_sim + coverage_bonus + quality_adjustment
+    # Exploitability: high-exploitability topics boost the path score
+    if w.exploitability:
+        extra += sum(0.08 * w.exploitability.get(t, 0.5) for t in titles)
+
+    # Opponent bonus: topics the opponent pressed (scaled by strength)
+    if w.opponent_bonus:
+        extra += sum(w.opponent_bonus.get(t, 0.0) for t in titles)
+
+    # Initial buff: one-shot bonus for the first topic at hearing start
+    if w.initial_buff:
+        extra += sum(w.initial_buff.get(t, 0.0) for t in titles)
+
+    # Lens continuity: bonus for consecutive topics sharing a lens
+    if w.lens_map:
+        for i in range(len(titles) - 1):
+            lens_a = w.lens_map.get(titles[i])
+            lens_b = w.lens_map.get(titles[i + 1])
+            if lens_a and lens_b and lens_a == lens_b:
+                extra += 0.06
+
+    # Quality adjustments (live projection)
+    # Uncovered topics (q is None) get a bonus; scale up as more topics are covered
+    # so we increasingly prioritize remaining gaps.
+    uncovered_bonus = 0.08 + 0.04 * min(w.covered_count, 10)
+    if w.quality:
+        for t in titles:
+            q = w.quality.get(t)
+            if q is None:
+                extra += uncovered_bonus
+            elif q < 0.4:
+                extra += 0.05
+            elif q > 0.7:
+                extra -= 0.03
+
+    return mean_sim + coverage_bonus + extra
 
 
 _ROLLOUT_EPSILON = 0.25   # probability of random pick vs. greedy nearest-neighbour
@@ -140,41 +189,47 @@ def _rollout(
     node_state: tuple[str, ...],
     remaining: List[str],
     vec_map: Dict,
-    quality_map: Optional[Dict[str, float]] = None,
+    weights: Optional[MCTSWeights] = None,
     max_steps: Optional[int] = None,
 ) -> float:
+    """Simulate an epsilon-greedy completion of the path and return its score.
+
+    At each step, with probability (1 - _ROLLOUT_EPSILON) pick the topic
+    that scores highest on a composite of cosine similarity, exploitability,
+    opponent bonus, lens continuity, and quality signals.
     """
-    Simulate an epsilon-greedy completion of the path and return its score.
-
-    At each step, with probability (1 - _ROLLOUT_EPSILON) pick the topic whose
-    embedding is most similar to the last-placed topic (greedy thematic flow).
-    With probability _ROLLOUT_EPSILON pick uniformly at random to maintain
-    diversity and avoid premature convergence.
-
-    When quality_map is provided (live projection), weak/unaddressed topics
-    get a selection bonus so the projector gravitates toward them.
-
-    max_steps limits how many topics to add during the rollout (used by sparse
-    MCTS to keep rollouts shallow during initial generation).
-    """
+    w = weights or MCTSWeights()
     if not remaining:
-        return _score_sequence(list(node_state), vec_map, quality_map)
+        return _score_sequence(list(node_state), vec_map, w)
     path = list(node_state)
     pool = list(remaining)
     steps = 0
     while pool and (max_steps is None or steps < max_steps):
         if path and random.random() > _ROLLOUT_EPSILON:
             last_vec = vec_map.get(path[-1])
+            last_lens = w.lens_map.get(path[-1]) if w.lens_map else None
             if last_vec is not None:
-                def _pick_score(t):
-                    cos = _cosine(vec_map[t], last_vec) if t in vec_map else 0.0
-                    if quality_map:
-                        q = quality_map.get(t)
+                def _pick_score(t, _lv=last_vec, _ll=last_lens, _w=w):
+                    s = _cosine(vec_map[t], _lv) if t in vec_map else 0.0
+                    # Exploitability pull
+                    s += 0.12 * _w.exploitability.get(t, 0.5)
+                    # Opponent bonus
+                    s += _w.opponent_bonus.get(t, 0.0)
+                    # Initial buff
+                    s += _w.initial_buff.get(t, 0.0)
+                    # Lens continuity
+                    if _ll and _w.lens_map.get(t) == _ll:
+                        s += 0.06
+                    # Quality / coverage signals — uncovered topics get a bonus that
+                    # scales with how many topics are already covered
+                    if _w.quality:
+                        q = _w.quality.get(t)
                         if q is None:
-                            cos += 0.15   # strong pull toward unaddressed
+                            uncovered = 0.15 + 0.06 * min(_w.covered_count, 10)
+                            s += uncovered
                         elif q < 0.4:
-                            cos += 0.08   # pull toward weak
-                    return cos
+                            s += 0.08
+                    return s
                 next_title = max(pool, key=_pick_score)
             else:
                 next_title = random.choice(pool)
@@ -183,7 +238,7 @@ def _rollout(
         path.append(next_title)
         pool.remove(next_title)
         steps += 1
-    return _score_sequence(path, vec_map, quality_map)
+    return _score_sequence(path, vec_map, w)
 
 
 # ---------------------------------------------------------------------------
@@ -193,30 +248,33 @@ def _rollout(
 def _run_mcts(
     topic_pool: List[Dict],
     n_sims: int,
-    quality_map: Optional[Dict[str, float]] = None,
+    weights: Optional[MCTSWeights] = None,
     max_depth: Optional[int] = None,
+    path_so_far: tuple[str, ...] = (),
 ) -> _Node:
-    """
-    Run n_sims MCTS simulations starting from an empty root state.
-
-    Returns the root node; callers extract best paths from the tree.
+    """Run n_sims MCTS simulations.
 
     topic_pool entries must have keys: "title", "vector"
     (call _prepare_pool first to add vector keys).
 
-    quality_map — optional title→float (0–1) from the live tracker.
-    When provided, the rollout and scoring functions bias toward weak /
-    unaddressed topics so the projector recommends what needs attention.
-
-    max_depth — when set, limits the tree to this many topics per path.
-    Nodes at max_depth are treated as leaves (no further expansion).
-    Used by sparse MCTS: initial generation creates shallow trees, then
-    live projection expands deeper as the student progresses.
+    weights — consolidated MCTSWeights (exploitability, quality, opponent, etc.).
+    max_depth — limit paths to this many topics (sparse MCTS).
+    path_so_far — seed the root with an existing traversal path (live projection).
+        Only topics in topic_pool are candidates for expansion; path topics
+        provide thematic context (cosine flow from last path topic).
     """
     titles   = [t["title"] for t in topic_pool]
     vec_map  = {t["title"]: t["vector"] for t in topic_pool}
 
-    root = _Node(state=(), parent=None, untried=list(titles))
+    # For path-seeded projection, include path topic vectors in vec_map
+    # so _score_sequence can compute cosine between last path topic and candidates.
+    # path_so_far titles won't appear in `titles` (they're already addressed).
+    root_state = path_so_far
+    root = _Node(
+        state=root_state,
+        parent=None,
+        untried=[t for t in titles if t not in frozenset(root_state)],
+    )
 
     for _ in range(n_sims):
         node = root
@@ -226,12 +284,13 @@ def _run_mcts(
             node = node.best_child()
 
         # ── 2. Expansion (respect max_depth) ──────────────────────────
-        at_depth_limit = max_depth is not None and len(node.state) >= max_depth
+        effective_depth = len(node.state) - len(path_so_far)
+        at_depth_limit = max_depth is not None and effective_depth >= max_depth
         if node._untried and not at_depth_limit:
             action = node._untried.pop(random.randrange(len(node._untried)))
             new_state     = node.state + (action,)
             new_state_set = frozenset(new_state)
-            if max_depth is not None and len(new_state) >= max_depth:
+            if max_depth is not None and (len(new_state) - len(path_so_far)) >= max_depth:
                 new_untried = []
             else:
                 new_untried = [t for t in titles if t not in new_state_set]
@@ -244,8 +303,8 @@ def _run_mcts(
         remaining = [t for t in titles if t not in node_state_set]
         rollout_steps = None
         if max_depth is not None:
-            rollout_steps = max_depth - len(node.state)
-        score = _rollout(node.state, remaining, vec_map, quality_map, max_steps=rollout_steps)
+            rollout_steps = max_depth - (len(node.state) - len(path_so_far))
+        score = _rollout(node.state, remaining, vec_map, weights, max_steps=rollout_steps)
 
         # ── 4. Backpropagation ────────────────────────────────────────
         cur = node
@@ -351,26 +410,24 @@ def run_generation(
     top_k: int = 10,
     root_label: str = "",
     max_depth: Optional[int] = None,
+    exploitability_map: Optional[Dict[str, float]] = None,
 ) -> tuple[List[List[Dict]], dict]:
-    """
-    Run MCTS over the topic pool and return top_k distinct ordered paths.
+    """Run MCTS over the topic pool and return top_k distinct ordered paths.
 
-    Each returned path is a list of topic dicts (with 'title', 'description',
-    'target' keys) in the MCTS-predicted hearing order.
-
-    max_depth — sparse MCTS: limit paths to this many topics.  When set,
-    the initial tree is shallow and fast; live projection expands deeper
-    as the student progresses through topics.
-
-    If the pool is empty or too small, returns an empty list.
+    exploitability_map — title→float (0–1) from Phase 1 brief analysis.
     """
     if not topic_pool:
         return [], {}
 
     prepared = _prepare_pool(topic_pool)
+    lens_map = {t["title"]: t.get("lens", "") for t in topic_pool}
+    weights = MCTSWeights(
+        exploitability=exploitability_map or {},
+        lens_map=lens_map,
+    )
 
     logger.info("MCTS generation: %d topics, %d sims, top_k=%d, max_depth=%s", len(prepared), n_sims, top_k, max_depth)
-    root = _run_mcts(prepared, n_sims, max_depth=max_depth)
+    root = _run_mcts(prepared, n_sims, weights=weights, max_depth=max_depth)
 
     # Collect all leaf paths (nodes with no children) sorted by avg value
     paths: List[tuple[float, tuple[str, ...]]] = []
@@ -434,17 +491,18 @@ def run_projection(
     remaining: List[Dict],
     n_sims: int = 150,
     root_label: str = "",
-    quality_map: Optional[Dict[str, float]] = None,
+    weights: Optional[MCTSWeights] = None,
+    path_so_far: tuple[str, ...] = (),
+    path_vecs: Optional[Dict[str, List]] = None,
 ) -> tuple[List[str], dict]:
-    """
-    Given the unaddressed topics at the current hearing state, run MCTS
-    and return an ordered list of topic titles (most-likely-next first).
+    """Project the next topics given the current hearing state.
 
-    `remaining` entries need at least 'title' and optionally 'description'.
-    `quality_map` — optional title→float (0–1) from the live tracker;
-    passed through to the value function so weak/unaddressed topics score
-    higher in the projection.
-    Returns an empty list if there is nothing left to project.
+    remaining — frontier topics available for MCTS expansion.
+    weights — consolidated MCTSWeights with all bias maps.
+    path_so_far — ordered tuple of topics already traversed (seeds the root).
+    path_vecs — pre-computed embeddings for path topics so cosine flow
+        from the last path topic works even though path topics aren't in
+        the remaining pool.
     """
     if not remaining:
         return [], {}
@@ -453,9 +511,60 @@ def run_projection(
         return [remaining[0]["title"]], {}
 
     prepared = _prepare_pool(remaining)
-    root     = _run_mcts(prepared, n_sims, quality_map=quality_map)
 
-    # Rank child actions of the root by visit count (most-explored = most likely next)
+    # Inject path topic vectors so _score_sequence / _rollout can compute
+    # cosine between the last path topic and candidates.
+    if path_vecs:
+        for p in prepared:
+            pass  # already in list
+        # We don't add path topics to `prepared` (they're addressed), but
+        # _run_mcts's vec_map needs the last path topic for cosine flow.
+        # Patch vec_map after _prepare_pool by adding path_vecs entries.
+        _extra_vecs = path_vecs
+    else:
+        _extra_vecs = {}
+
+    # Build vec_map manually to include path vectors
+    vec_map = {t["title"]: t["vector"] for t in prepared}
+    vec_map.update(_extra_vecs)
+
+    titles = [t["title"] for t in prepared]
+
+    root_state = path_so_far
+    root = _Node(
+        state=root_state,
+        parent=None,
+        untried=[t for t in titles if t not in frozenset(root_state)],
+    )
+
+    w = weights or MCTSWeights()
+
+    for _ in range(n_sims):
+        node = root
+
+        while node.is_fully_expanded() and node.children:
+            node = node.best_child()
+
+        effective_depth = len(node.state) - len(path_so_far)
+        if node._untried:
+            action = node._untried.pop(random.randrange(len(node._untried)))
+            new_state     = node.state + (action,)
+            new_state_set = frozenset(new_state)
+            new_untried   = [t for t in titles if t not in new_state_set]
+            child = _Node(state=new_state, parent=node, untried=new_untried)
+            node.children[action] = child
+            node = child
+
+        node_state_set = frozenset(node.state)
+        rem = [t for t in titles if t not in node_state_set]
+        score = _rollout(node.state, rem, vec_map, w)
+
+        cur = node
+        while cur is not None:
+            cur.visits += 1
+            cur.value  += score
+            cur = cur.parent
+
     ranked = sorted(
         root.children.items(),
         key=lambda kv: kv[1].visits,
@@ -478,24 +587,16 @@ async def _run_mcts_streaming(
     on_expand: ExpandCallback,
     yield_every: int = 10,
     max_depth: Optional[int] = None,
+    weights: Optional[MCTSWeights] = None,
 ) -> tuple[_Node, Dict[int, int]]:
-    """
-    Async version of _run_mcts that yields to the event loop every
+    """Async version of _run_mcts that yields to the event loop every
     `yield_every` simulations so SSE events can be flushed to the client.
-
-    `on_expand(node_id, parent_id, depth)` is called synchronously inside
-    the loop each time a new node is created.  Because this function awaits
-    `asyncio.sleep(0)` periodically, the caller's async generator can drain
-    queued events between batches without needing threads.
-
-    max_depth — sparse MCTS depth limit (same semantics as _run_mcts).
     """
     titles  = [t["title"] for t in topic_pool]
     vec_map = {t["title"]: t["vector"] for t in topic_pool}
 
     root = _Node(state=(), parent=None, untried=list(titles))
 
-    # Stable sequential IDs (Python object ids can be reused after GC)
     _seq: Dict[int, int] = {id(root): 0}
     _ctr = [1]
 
@@ -506,17 +607,14 @@ async def _run_mcts_streaming(
             _ctr[0] += 1
         return _seq[oid]
 
-    # Emit the root so the frontend can place it immediately
     on_expand(0, -1, 0)
 
     for i in range(n_sims):
         node = root
 
-        # Selection
         while node.is_fully_expanded() and node.children:
             node = node.best_child()
 
-        # Expansion (respect max_depth)
         at_depth_limit = max_depth is not None and len(node.state) >= max_depth
         if node._untried and not at_depth_limit:
             action        = node._untried.pop(random.randrange(len(node._untried)))
@@ -532,22 +630,19 @@ async def _run_mcts_streaming(
             on_expand(_sid(child), _sid(node), len(child.state))
             node = child
 
-        # Rollout (depth-limited)
         node_state_set = frozenset(node.state)
         remaining = [t for t in titles if t not in node_state_set]
         rollout_steps = None
         if max_depth is not None:
             rollout_steps = max_depth - len(node.state)
-        score = _rollout(node.state, remaining, vec_map, max_steps=rollout_steps)
+        score = _rollout(node.state, remaining, vec_map, weights, max_steps=rollout_steps)
 
-        # Backpropagation
         cur = node
         while cur is not None:
             cur.visits += 1
             cur.value  += score
             cur = cur.parent
 
-        # Yield to event loop periodically so SSE can flush
         if i % yield_every == 0:
             await anyio.sleep(0)
 
@@ -561,26 +656,27 @@ async def run_generation_streaming(
     top_k: int = 10,
     root_label: str = "",
     max_depth: Optional[int] = None,
+    exploitability_map: Optional[Dict[str, float]] = None,
 ) -> tuple[list[list[dict]], dict]:
-    """
-    Async version of run_generation.  Calls `on_expand` for every new node
-    so the SSE endpoint can stream them to the client in real time.
-
-    max_depth — sparse MCTS depth limit (same semantics as run_generation).
-
-    Returns (paths, tree_snapshot) — same shape as run_generation.
-    """
+    """Async version of run_generation with exploitability weights."""
     if not topic_pool:
         return [], {}
 
     prepared       = _prepare_pool(topic_pool)
     title_to_topic = {t["title"]: t for t in topic_pool}
+    lens_map = {t["title"]: t.get("lens", "") for t in topic_pool}
+    weights = MCTSWeights(
+        exploitability=exploitability_map or {},
+        lens_map=lens_map,
+    )
 
     logger.info(
         "MCTS streaming generation: %d topics, %d sims, top_k=%d, max_depth=%s",
         len(prepared), n_sims, top_k, max_depth,
     )
-    root, seq_map = await _run_mcts_streaming(prepared, n_sims, on_expand, max_depth=max_depth)
+    root, seq_map = await _run_mcts_streaming(
+        prepared, n_sims, on_expand, max_depth=max_depth, weights=weights,
+    )
 
     paths: List[tuple[float, tuple[str, ...]]] = []
     _collect_leaves(root, paths)

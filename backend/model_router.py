@@ -324,8 +324,10 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     "argument_scoring":     ModelTier.SMALL,
     "opponent_response":    ModelTier.SMALL,
 
+    # LARGE — deep brief analysis (exploitability scoring, one-time setup)
+    "issue_extraction":     ModelTier.LARGE,
+
     # TINY — structured extraction / timeline / selection
-    "issue_extraction":     ModelTier.TINY,
     "agenda_generation":    ModelTier.TINY,
     "question_selection":   ModelTier.TINY,
 }

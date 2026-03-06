@@ -654,39 +654,70 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
               if (!pos) return null;
               const label = hoveredNode.label || 'Root';
               const hovQuality = topicQualities[hoveredNode.label];
-              const rows: [string, string][] = [
-                ['topic',  label.length > 26 ? label.slice(0, 24) + '…' : label],
-                ['status', hoveredNode.depth === 0 ? 'root' : (currentTopic && hoveredNode.label === currentTopic) ? '▶ current' : weakSet.has(hoveredNode.label) ? '⚠ weak' : addressedSet.has(hoveredNode.label) ? 'covered' : predictedSet.has(hoveredNode.label) ? 'predicted' : 'not covered'],
-                ...(hovQuality !== undefined ? [['quality', `${(hovQuality * 100).toFixed(0)}%`] as [string, string]] : []),
-                ['visits', String(hoveredNode.visits)],
-                ['value',  hoveredNode.avg_value.toFixed(3)],
-                ['depth',  String(hoveredNode.depth)],
-              ];
-              const W = 162, H = 96 + (hovQuality !== undefined ? 16 : 0), PAD = 8;
-              let bx = pos.x + 14, by = pos.y - H / 2;
-              if (bx + W > SVG_SIZE - 4) bx = pos.x - W - 14;
+              // Wrap topic at ~32 chars per line
+              const wrapTopic = (s: string, maxLen: number): string[] => {
+                if (s.length <= maxLen) return [s];
+                const out: string[] = [];
+                let rest = s;
+                while (rest.length > maxLen) {
+                  const chunk = rest.slice(0, maxLen);
+                  const space = chunk.lastIndexOf(' ');
+                  const cut = space > maxLen * 0.5 ? space + 1 : maxLen;
+                  out.push(rest.slice(0, cut));
+                  rest = rest.slice(cut).trimStart();
+                }
+                if (rest) out.push(rest);
+                return out;
+              };
+              const topicLines = wrapTopic(label, 32);
+              const statusText = hoveredNode.depth === 0 ? 'root' : (currentTopic && hoveredNode.label === currentTopic) ? '▶ current' : weakSet.has(hoveredNode.label) ? '⚠ weak' : addressedSet.has(hoveredNode.label) ? 'covered' : predictedSet.has(hoveredNode.label) ? 'predicted' : 'not covered';
+              const W = 240;
+              const TOPIC_LINE_HEIGHT = 14;
+              const ROW_HEIGHT = 16;
+              const topicBlockH = topicLines.length * TOPIC_LINE_HEIGHT;
+              const metaRows = 3 + (hovQuality !== undefined ? 1 : 0);
+              const H = 24 + topicBlockH + metaRows * ROW_HEIGHT;
+              const PAD = 10;
+              let bx = pos.x + 18, by = pos.y - H / 2;
+              if (bx + W > SVG_SIZE - 4) bx = pos.x - W - 18;
               if (by < 4)               by = 4;
               if (by + H > SVG_SIZE - 4) by = SVG_SIZE - H - 4;
               return (
                 <g key="tooltip" style={{ pointerEvents: 'none' }}>
-                  <rect x={bx} y={by} width={W} height={H} rx={7}
-                    fill="rgba(10,16,30,0.97)" stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
-                  {rows.map(([key, val], i) => (
-                    <g key={i}>
-                      <text x={bx + PAD} y={by + PAD + 14 + i * 16}
-                        fill="rgba(130,155,200,0.75)" fontSize={8} fontFamily="system-ui,sans-serif">
-                        {key}
-                      </text>
-                      <text x={bx + 48} y={by + PAD + 14 + i * 16}
-                        fill={i === 0 ? 'rgba(255,255,255,0.95)' : 'rgba(215,228,248,0.9)'}
-                        fontSize={i === 0 ? 8.5 : 8}
-                        fontFamily="system-ui,sans-serif"
-                        fontWeight={i === 0 ? 'bold' : 'normal'}
-                      >
-                        {val}
-                      </text>
-                    </g>
+                  <rect x={bx} y={by} width={W} height={H} rx={8}
+                    fill="rgba(10,16,30,0.97)" stroke="rgba(255,255,255,0.18)" strokeWidth={1} />
+                  {/* Topic block — wrapped */}
+                  <text x={bx + PAD} y={by + PAD + 10} fill="rgba(130,155,200,0.75)"
+                    fontSize={8} fontFamily="system-ui,sans-serif">topic</text>
+                  {topicLines.map((line, i) => (
+                    <text key={i} x={bx + PAD} y={by + PAD + 14 + 10 + i * TOPIC_LINE_HEIGHT}
+                      fill="rgba(255,255,255,0.95)" fontSize={9} fontFamily="system-ui,sans-serif"
+                      fontWeight="bold">
+                      {line}
+                    </text>
                   ))}
+                  {(() => {
+                    const startY = by + PAD + 14 + topicBlockH + 6;
+                    const meta: [string, string][] = [
+                      ['status', statusText],
+                      ...(hovQuality !== undefined ? [['quality', `${(hovQuality * 100).toFixed(0)}%`] as [string, string]] : []),
+                      ['visits', String(hoveredNode.visits)],
+                      ['value', hoveredNode.avg_value.toFixed(3)],
+                      ['depth', String(hoveredNode.depth)],
+                    ];
+                    return meta.map(([key, val], i) => (
+                      <g key={i}>
+                        <text x={bx + PAD} y={startY + i * ROW_HEIGHT}
+                          fill="rgba(130,155,200,0.75)" fontSize={8} fontFamily="system-ui,sans-serif">
+                          {key}
+                        </text>
+                        <text x={bx + 52} y={startY + i * ROW_HEIGHT}
+                          fill="rgba(215,228,248,0.9)" fontSize={8} fontFamily="system-ui,sans-serif">
+                          {val}
+                        </text>
+                      </g>
+                    ));
+                  })()}
                 </g>
               );
             })()}

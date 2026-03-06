@@ -33,23 +33,26 @@ from .models import (
 logger = logging.getLogger("court-simulator.projected_timeline")
 
 # ---------------------------------------------------------------------------
-# Model routing — uses TINY tier for lightweight structured extraction
+# Model routing
 # ---------------------------------------------------------------------------
 
-from model_router import get_task_client, task_extra_body, extract_content
+from model_router import get_task_client, task_extra_body, extract_content, ModelTier
 
 
-def _get_model() -> str:
-    """Return the model name for timeline tasks (TINY tier)."""
-    _, model = get_task_client("issue_extraction")
-    return model
-
-
-def _get_client():
-    client, _ = get_task_client("issue_extraction")
+def _get_issue_client():
+    """Client + model for issue extraction (LARGE tier — deep brief analysis)."""
+    client, model = get_task_client("issue_extraction")
     if client is None:
-        raise RuntimeError("Model router returned no client — check OPENAI_API_KEY.")
-    return client
+        raise RuntimeError("Model router returned no client for issue_extraction — check OPENAI_API_KEY.")
+    return client, model
+
+
+def _get_agenda_client():
+    """Client + model for per-lens agenda generation (TINY tier)."""
+    client, model = get_task_client("agenda_generation")
+    if client is None:
+        raise RuntimeError("Model router returned no client for agenda_generation — check OPENAI_API_KEY.")
+    return client, model
 
 
 # ---------------------------------------------------------------------------
@@ -146,17 +149,37 @@ JUDICIAL_LENSES = [
 # ---------------------------------------------------------------------------
 
 _EXTRACT_SYSTEM = (
-    "You are a senior federal appellate court analyst. "
-    "Respond ONLY with valid JSON — no prose, no markdown fences."
+    "You are a senior federal appellate judge and experienced moot-court coach. "
+    "Your task is to analyse both briefs and identify the topics that are most "
+    "important for oral argument preparation — focusing on areas where the "
+    "petitioner's brief is weakest or most exploitable by the bench and opposing "
+    "counsel. Respond ONLY with valid JSON — no prose, no markdown fences."
 )
 
 _EXTRACT_USER = """\
-Read these two legal briefs and return a single JSON object:
+Read both briefs carefully.  Return a single JSON object with three keys:
 
 {{
   "case_summary": "<two neutral sentences describing the core dispute>",
-  "key_legal_issues": ["<issue 1>", "<issue 2>", "<issue 3>", "<issue 4>", "<issue 5>"]
+  "key_legal_issues": ["<issue 1>", "<issue 2>", "<issue 3>", "<issue 4>", "<issue 5>"],
+  "priority_topics": [
+    {{
+      "topic": "<short phrase, 3-8 words>",
+      "importance": <float 0.0-1.0>,
+      "reason": "<one sentence: why this is exploitable>"
+    }},
+    ...
+  ]
 }}
+
+For priority_topics:
+- List 8-15 topics a judge or opposing counsel would most want to probe.
+- Score importance 0.0-1.0 where 1.0 = most exploitable / weakest in petitioner's argument.
+- Focus on: gaps in reasoning, vulnerable precedent citations, unsupported factual claims, \
+concessions that can be pressed, tensions between petitioner's positions, areas where \
+respondent's brief is strongest.
+- Order from highest to lowest importance.
+- Each topic must be grounded in the actual arguments from the briefs.
 
 === PETITIONER BRIEF ===
 {appellant}
@@ -165,9 +188,10 @@ Read these two legal briefs and return a single JSON object:
 {appellee}"""
 
 
-async def _extract_issues(client, appellant: str, appellee: str) -> dict:
+async def _extract_issues(appellant: str, appellee: str) -> dict:
+    client, model = _get_issue_client()
     response = await client.chat.completions.create(
-        model=_get_model(),
+        model=model,
         messages=[
             {"role": "system", "content": _EXTRACT_SYSTEM},
             {
@@ -178,14 +202,15 @@ async def _extract_issues(client, appellant: str, appellee: str) -> dict:
                 ),
             },
         ],
-        temperature=0.2,
-        max_tokens=2048,
+        temperature=0.3,
+        max_tokens=3000,
         extra_body=task_extra_body("issue_extraction"),
     )
     raw = extract_content(response)
     return _parse_json(raw, fallback={
         "case_summary": "Case summary unavailable.",
         "key_legal_issues": [],
+        "priority_topics": [],
     })
 
 
@@ -249,6 +274,7 @@ def _normalise_target(raw: str) -> str:
 
 async def _generate_agenda(
     client,
+    model: str,
     prediction_id: int,
     lens_def: dict,
     case_summary: str,
@@ -258,7 +284,7 @@ async def _generate_agenda(
     proceeding_type: str,
 ) -> TopicPrediction:
     response = await client.chat.completions.create(
-        model=_get_model(),
+        model=model,
         messages=[
             {"role": "system", "content": _AGENDA_SYSTEM},
             {
@@ -308,10 +334,71 @@ async def _generate_agenda(
 
 
 # ---------------------------------------------------------------------------
+# Exploitability refinement (embedding-based score transfer)
+# ---------------------------------------------------------------------------
+
+def _refine_exploitability(
+    topic_pool: list[dict],
+    priority_topics: list[dict],
+) -> list[dict]:
+    """Map Phase 1 priority scores onto Phase 2 topics via embedding similarity.
+
+    For each topic in the pool, find the nearest Phase 1 priority_topic by
+    cosine similarity and inherit its importance as ``exploitability``.
+    Unmatched topics (max similarity < 0.3) get 0.5.
+    """
+    from .tracker import _embed, _cosine
+
+    if not priority_topics:
+        for t in topic_pool:
+            t["exploitability"] = 0.5
+        return topic_pool
+
+    priority_texts = [
+        p.get("topic", "") for p in priority_topics
+    ]
+    pool_texts = [
+        f"{t['title']}. {t.get('description', '')}" for t in topic_pool
+    ]
+
+    priority_vecs = _embed(priority_texts)
+    pool_vecs = _embed(pool_texts)
+
+    priority_scores = [
+        float(p.get("importance", 0.5)) for p in priority_topics
+    ]
+
+    for i, t in enumerate(topic_pool):
+        pool_vec = pool_vecs[i] if i < len(pool_vecs) else None
+        if pool_vec is None:
+            t["exploitability"] = 0.5
+            continue
+
+        best_sim = -1.0
+        best_score = 0.5
+        for j, pvec in enumerate(priority_vecs):
+            if pvec is None:
+                continue
+            sim = _cosine(pool_vec, pvec)
+            if sim > best_sim:
+                best_sim = sim
+                best_score = priority_scores[j] if j < len(priority_scores) else 0.5
+
+        t["exploitability"] = best_score if best_sim >= 0.3 else 0.5
+
+    logger.info(
+        "Exploitability refinement: %d pool topics scored (avg=%.2f)",
+        len(topic_pool),
+        sum(t.get("exploitability", 0.5) for t in topic_pool) / max(len(topic_pool), 1),
+    )
+    return topic_pool
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-SPARSE_MCTS_INITIAL_DEPTH = 5
+SPARSE_MCTS_INITIAL_DEPTH = 2
 
 async def generate_topic_sets(
     request: TopicPredictionRequest,
@@ -339,26 +426,33 @@ async def generate_topic_sets(
         if progress_callback is not None:
             progress_callback(event_type, data)
 
-    client = _get_client()
     num = max(1, min(request.num_predictions, len(JUDICIAL_LENSES)))
 
-    _emit("status", {"phase": "extracting", "detail": "Extracting issues from briefs…"})
-    logger.info("Extracting issues from briefs …")
-    meta = await _extract_issues(client, request.appellant_brief, request.appellee_brief)
-    case_summary = meta.get("case_summary", "")
-    key_issues   = meta.get("key_legal_issues", [])
+    # ── Phase 1: Issue extraction + priority scoring (LARGE tier) ─────────
+    _emit("status", {"phase": "extracting", "detail": "Analysing briefs for exploitability…"})
+    logger.info("Phase 1: extracting issues + priority topics (LARGE tier) …")
+    meta = await _extract_issues(request.appellant_brief, request.appellee_brief)
+    case_summary     = meta.get("case_summary", "")
+    key_issues       = meta.get("key_legal_issues", [])
+    priority_topics  = meta.get("priority_topics", [])
+    logger.info(
+        "Phase 1 done: %d key issues, %d priority topics",
+        len(key_issues), len(priority_topics),
+    )
 
+    # ── Phase 2: Per-lens agenda generation (TINY tier) ───────────────────
     _emit("status", {"phase": "agendas", "detail": f"Generating {num} topic agendas…"})
-    logger.info("Generating %d per-lens candidate pools in parallel …", num)
+    logger.info("Phase 2: generating %d per-lens candidate pools in parallel …", num)
     selected_lenses = JUDICIAL_LENSES[:num]
 
-    # Use as_completed so we can stream each agenda to the UI as it finishes
-    # rather than waiting for all to complete.
+    agenda_client, agenda_model = _get_agenda_client()
+
     tasks: dict[asyncio.Task, tuple[int, dict]] = {}
     for i, lens_def in enumerate(selected_lenses, start=1):
         task = asyncio.create_task(
             _generate_agenda(
-                client=client,
+                client=agenda_client,
+                model=agenda_model,
                 prediction_id=i,
                 lens_def=lens_def,
                 case_summary=case_summary,
@@ -437,9 +531,18 @@ async def generate_topic_sets(
 
     logger.info("Topic pool: %d topics from %d lenses", len(topic_pool), len(per_lens))
 
+    # ── Refinement: map Phase 1 priority scores → Phase 2 topics ──────────
+    if priority_topics and topic_pool:
+        _emit("status", {"phase": "refinement", "detail": "Mapping exploitability scores…"})
+        topic_pool = _refine_exploitability(topic_pool, priority_topics)
+    else:
+        for t in topic_pool:
+            t["exploitability"] = 0.5
+
     predictions: list[TopicPrediction] = []
     mcts_tree: dict = {}
     if topic_pool:
+        exploitability_map = {t["title"]: t.get("exploitability", 0.5) for t in topic_pool}
         try:
             if mcts_callback is not None:
                 from .mcts import run_generation_streaming
@@ -447,12 +550,14 @@ async def generate_topic_sets(
                     topic_pool, on_expand=mcts_callback, top_k=num,
                     root_label=case_summary,
                     max_depth=SPARSE_MCTS_INITIAL_DEPTH,
+                    exploitability_map=exploitability_map,
                 )
             else:
                 from .mcts import run_generation
                 mcts_paths, mcts_tree = run_generation(
                     topic_pool, top_k=num, root_label=case_summary,
                     max_depth=SPARSE_MCTS_INITIAL_DEPTH,
+                    exploitability_map=exploitability_map,
                 )
             logger.info("MCTS returned %d paths, %d tree nodes", len(mcts_paths), len(mcts_tree.get("nodes", [])))
 

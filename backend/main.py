@@ -34,7 +34,7 @@ from services.case_ingestion import CaseIngestionService
 from multi_agent import multi_agent_service, Agent
 from projected_timeline import router as projected_timeline_router
 from projected_timeline.tracker import create_session
-from projected_timeline.mcts import run_projection
+from projected_timeline.mcts import run_projection, MCTSWeights
 from projected_timeline.models import PredictedTopicSets as TrackerTopicSets, HearingTurn as TrackerTurn
 from model_router import (
     get_task_client,
@@ -104,6 +104,14 @@ MCTS_DEBOUNCE_TURNS = 3
 # expand all_topics to include the full candidate pool so future MCTS
 # projections operate over the deeper topic set.
 EXPANSION_QUALITY_THRESHOLD = 0.5
+
+# Gated frontier: how many new topics to release into the MCTS frontier
+# each time the progression threshold is crossed.
+FRONTIER_BATCH_SIZE = 3
+# Minimum quality on the current topic before the frontier can expand.
+FRONTIER_QUALITY_GATE = 0.3
+# Minimum flushes on the current topic before frontier expansion.
+FRONTIER_MIN_FLUSHES = 2
 
 # Evict WS sessions that have been idle for this long (network-drop guard).
 _SESSION_TTL = 3600.0  # 1 hour
@@ -1349,15 +1357,37 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                     "agent_id":    item.get("agentId"),
                                     "description": t.get("description", ""),
                                 }
-                                all_topics.append({"title": t["title"], "description": t.get("description", "")})
+                                all_topics.append({
+                                    "title": t["title"],
+                                    "description": t.get("description", ""),
+                                })
 
-                        # Sparse MCTS: preserve the full candidate pool for
-                        # lazy expansion once the student starts progressing.
+                        # Sparse MCTS: preserve the full candidate pool (with
+                        # exploitability + lens) for lazy expansion.
                         full_pool_raw = pts_raw.get("full_topic_pool", []) if pts_raw else []
                         full_topic_pool = [
-                            {"title": t["title"], "description": t.get("description", "")}
+                            {
+                                "title": t["title"],
+                                "description": t.get("description", ""),
+                                "exploitability": t.get("exploitability", 0.5),
+                                "lens": t.get("lens", ""),
+                            }
                             for t in full_pool_raw
-                        ] if full_pool_raw else list(all_topics)
+                        ] if full_pool_raw else [{**t, "exploitability": 0.5, "lens": ""} for t in all_topics]
+
+                        # Enrich all_topics with exploitability + lens from pool
+                        pool_lookup = {t["title"]: t for t in full_topic_pool}
+                        for t in all_topics:
+                            pool_entry = pool_lookup.get(t["title"], {})
+                            t["exploitability"] = pool_entry.get("exploitability", 0.5)
+                            t["lens"] = pool_entry.get("lens", "")
+
+                        # Pick the initial random buff topic (one of top 5 by exploitability)
+                        sorted_by_exploit = sorted(
+                            all_topics, key=lambda x: x.get("exploitability", 0.5), reverse=True,
+                        )
+                        top5 = sorted_by_exploit[:min(5, len(sorted_by_exploit))]
+                        initial_buff_topic = random.choice(top5)["title"] if top5 else None
 
                         tracker = None
                         if pts_raw:
@@ -1366,18 +1396,31 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             except Exception as e:
                                 logger.warning("Tracker init failed: %s", e)
 
+                        # Initial frontier: start with the top FRONTIER_BATCH_SIZE * 2
+                        # topics by exploitability (gated expansion adds more later).
+                        initial_frontier_size = FRONTIER_BATCH_SIZE * 2
+                        frontier_titles = {
+                            t["title"] for t in sorted_by_exploit[:initial_frontier_size]
+                        }
+
                         multi_agent_manager.session_data[session_id].update({
-                            "tracker":          tracker,
-                            "topic_map":        topic_map,
-                            "all_topics":       all_topics,
-                            "addressed_titles": set(),
-                            "case_summary":     pts_raw.get("case_summary", "") if pts_raw else "",
-                            "full_topic_pool":  full_topic_pool,
-                            "sparse_expanded":  False,
+                            "tracker":              tracker,
+                            "topic_map":            topic_map,
+                            "all_topics":           all_topics,
+                            "addressed_titles":     set(),
+                            "path_so_far":          [],
+                            "frontier_titles":      frontier_titles,
+                            "initial_buff_topic":   initial_buff_topic,
+                            "frontier_flush_count": 0,
+                            "case_summary":         pts_raw.get("case_summary", "") if pts_raw else "",
+                            "full_topic_pool":      full_topic_pool,
+                            "sparse_expanded":      False,
                         })
                         logger.info(
-                            "[MultiAgent] set_agenda: tracker_ready=%s, topics_indexed=%d, full_pool=%d",
+                            "[MultiAgent] set_agenda: tracker_ready=%s, topics_indexed=%d, "
+                            "full_pool=%d, frontier=%d, initial_buff=%s",
                             tracker is not None, len(topic_map), len(full_topic_pool),
+                            len(frontier_titles), initial_buff_topic,
                         )
                         await multi_agent_manager.send_json(session_id, {
                             "type": "agenda_set_ack",
@@ -1499,6 +1542,158 @@ def _build_trajectory_context(state, predicted_next: list) -> dict | None:
     }
 
 
+def _build_exploitability_map(session: dict) -> dict[str, float]:
+    """Build title→exploitability from session's all_topics / full_topic_pool."""
+    all_topics = session.get("all_topics", [])
+    return {t["title"]: t.get("exploitability", 0.5) for t in all_topics}
+
+
+def _build_opponent_bonus_map(session_id: str, all_topics: list) -> dict[str, float]:
+    """Build title→bonus from opponent engine's recent arguments.
+
+    The opponent only has their own brief so topic strings may differ.
+    Uses embedding similarity to match opponent topics to our pool titles.
+    """
+    from projected_timeline.tracker import _embed, _cosine
+
+    if not global_opponent_engine.has_session(session_id):
+        return {}
+
+    summary = global_opponent_engine.get_session_summary(session_id)
+    responses = summary.get("arguments", [])
+    if not responses:
+        return {}
+
+    # Collect opponent topic→max_strength
+    opp_topics: dict[str, float] = {}
+    for r in responses:
+        topic = r.get("topic", "")
+        strength = r.get("strength", 0.0)
+        if topic:
+            opp_topics[topic] = max(opp_topics.get(topic, 0.0), strength)
+
+    if not opp_topics:
+        return {}
+
+    opp_texts = list(opp_topics.keys())
+    opp_strengths = [opp_topics[t] for t in opp_texts]
+    pool_titles = [t["title"] for t in all_topics]
+
+    if not pool_titles:
+        return {}
+
+    opp_vecs = _embed(opp_texts)
+    pool_vecs = _embed([f"{t['title']}. {t.get('description', '')}" for t in all_topics])
+
+    bonus_map: dict[str, float] = {}
+    for i, title in enumerate(pool_titles):
+        pvec = pool_vecs[i] if i < len(pool_vecs) else None
+        if pvec is None:
+            continue
+        best_bonus = 0.0
+        for j, ovec in enumerate(opp_vecs):
+            if ovec is None:
+                continue
+            sim = _cosine(pvec, ovec)
+            if sim >= 0.4:
+                strength_norm = opp_strengths[j] / 10.0
+                best_bonus = max(best_bonus, 0.15 * strength_norm)
+        if best_bonus > 0:
+            bonus_map[title] = best_bonus
+
+    return bonus_map
+
+
+def _build_mcts_weights(session: dict, session_id: str, state, quality_map: dict) -> MCTSWeights:
+    """Assemble the full MCTSWeights for a live MCTS projection."""
+    all_topics = session.get("all_topics", [])
+    addressed = session.get("addressed_titles", set())
+    path_so_far = session.get("path_so_far", [])
+
+    exploitability_map = _build_exploitability_map(session)
+    opponent_bonus = _build_opponent_bonus_map(session_id, all_topics)
+
+    # Initial buff: only when no topics have been addressed yet
+    initial_buff: dict[str, float] = {}
+    buff_topic = session.get("initial_buff_topic")
+    if buff_topic and not addressed:
+        initial_buff[buff_topic] = 0.25
+
+    # Lens map from all_topics
+    lens_map = {t["title"]: t.get("lens", "") for t in all_topics}
+
+    # Last path lens for lens-continuity
+    last_lens = None
+    if path_so_far:
+        last_lens = lens_map.get(path_so_far[-1])
+
+    return MCTSWeights(
+        exploitability=exploitability_map,
+        quality=quality_map if quality_map else None,
+        opponent_bonus=opponent_bonus,
+        initial_buff=initial_buff,
+        lens_map=lens_map,
+        last_path_lens=last_lens,
+        covered_count=len(addressed),
+    )
+
+
+def _expand_frontier_if_ready(session: dict, quality_map: dict) -> bool:
+    """Check progression signals and expand the frontier if appropriate.
+
+    Returns True if the frontier was expanded.
+    """
+    frontier = session.get("frontier_titles", set())
+    all_topics = session.get("all_topics", [])
+    path_so_far = session.get("path_so_far", [])
+    frontier_flush = session.get("frontier_flush_count", 0)
+
+    if not path_so_far:
+        return False
+    if session.get("_last_frontier_expand_flush") == frontier_flush:
+        return False  # already expanded this flush
+
+    current_topic = path_so_far[-1]
+    current_quality = quality_map.get(current_topic, 0.0)
+
+    # Check if the current topic meets the progression threshold
+    last_path_flush = session.get("_last_path_update_flush", 0)
+    flushes_on_topic = frontier_flush - last_path_flush
+    if current_quality < FRONTIER_QUALITY_GATE and flushes_on_topic < FRONTIER_MIN_FLUSHES:
+        return False
+
+    # Expand: add next batch of topics sorted by exploitability + lens continuity
+    current_lens = None
+    for t in all_topics:
+        if t["title"] == current_topic:
+            current_lens = t.get("lens", "")
+            break
+
+    candidates = [
+        t for t in all_topics
+        if t["title"] not in frontier and t["title"] not in session.get("addressed_titles", set())
+    ]
+    if not candidates:
+        return False
+
+    def _expansion_score(t):
+        exploit = t.get("exploitability", 0.5)
+        lens_bonus = 0.1 if t.get("lens") == current_lens else 0.0
+        return exploit + lens_bonus
+
+    candidates.sort(key=_expansion_score, reverse=True)
+    new_titles = [t["title"] for t in candidates[:FRONTIER_BATCH_SIZE]]
+    frontier.update(new_titles)
+    session["frontier_titles"] = frontier
+    session["_last_frontier_expand_flush"] = frontier_flush  # cooldown: don't re-expand same flush
+
+    logger.info(
+        "[Frontier] Expanded by %d topics (current=%s, quality=%.2f): %s",
+        len(new_titles), current_topic, current_quality, new_titles,
+    )
+    return True
+
+
 async def check_tracker_and_counter(session_id: str, utterance: str):
     """Update the trajectory tracker, conditionally run MCTS re-projection, and fire counter-arguments.
 
@@ -1535,6 +1730,8 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
     last_mcts_flush_prev = 0
     run_mcts = False
     predicted_next = session.get("last_predicted_next", [])
+    path_so_far_list: list = session.get("path_so_far", [])
+    all_topics: list = session.get("all_topics", [])
 
     with anyio.move_on_after(5) as lock_scope:
         async with tracker_lock:
@@ -1543,9 +1740,14 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
                 TrackerTurn(speaker="petitioner", utterance=utterance)
             )
 
-            # ── Update addressed-topic set ─────────────────────────────────
+            # ── Update addressed-topic set + path_so_far ─────────────────
             addressed = session.get("addressed_titles", set())
+            path_so_far_list = list(session.get("path_so_far", []))
             if state.last_human_matched_topic:
+                if state.last_human_matched_topic not in addressed:
+                    path_so_far_list.append(state.last_human_matched_topic)
+                    session["path_so_far"] = path_so_far_list
+                    session["_last_path_update_flush"] = session.get("projection_flush_count", 0) + 1
                 addressed.add(state.last_human_matched_topic)
                 session["addressed_titles"] = addressed
 
@@ -1554,10 +1756,6 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
             quality_map = _build_quality_map(state)
 
             # ── Sparse MCTS expansion ─────────────────────────────────────
-            # The initial tree only covers SPARSE_MCTS_INITIAL_DEPTH topics.
-            # Once any addressed topic reaches EXPANSION_QUALITY_THRESHOLD,
-            # swap all_topics to the full candidate pool so MCTS projection
-            # can explore the deeper topic space.
             if not session.get("sparse_expanded", False) and quality_map:
                 max_quality = max(quality_map.values()) if quality_map else 0.0
                 if max_quality >= EXPANSION_QUALITY_THRESHOLD:
@@ -1567,7 +1765,6 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
                         new_topics = [t for t in full_pool if t["title"] not in existing_titles]
                         all_topics = all_topics + new_topics
                         session["all_topics"] = all_topics
-                        # Also update topic_map for new topics
                         topic_map = session.get("topic_map", {})
                         for t in new_topics:
                             if t["title"] not in topic_map:
@@ -1586,7 +1783,16 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
                             len(all_topics) - len(new_topics), len(all_topics),
                         )
 
-            remaining  = [t for t in all_topics if t["title"] not in addressed]
+            # ── Gated frontier expansion ──────────────────────────────────
+            session["frontier_flush_count"] = session.get("frontier_flush_count", 0) + 1
+            _expand_frontier_if_ready(session, quality_map)
+
+            # ── Build remaining from frontier (gated) ─────────────────────
+            frontier = session.get("frontier_titles", set())
+            remaining = [
+                t for t in all_topics
+                if t["title"] not in addressed and t["title"] in frontier
+            ]
 
             # ── MCTS gate ──────────────────────────────────────────────────
             just_expanded       = session.pop("_just_expanded", False)
@@ -1627,12 +1833,33 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
 
     if run_mcts:
         try:
-            # Run CPU-bound MCTS in a thread so the event loop stays free.
+            # Build consolidated weights for the MCTS projection.
+            mcts_weights = _build_mcts_weights(session, session_id, state, quality_map)
+
+            # Embed path topics so cosine flow works from the last path topic.
+            path_vecs: dict[str, list] = {}
+            if path_so_far_list:
+                from projected_timeline.tracker import _embed
+                last_title = path_so_far_list[-1]
+                # Find description for the last path topic
+                last_desc = ""
+                for t in all_topics:
+                    if t["title"] == last_title:
+                        last_desc = t.get("description", "")
+                        break
+                vecs = _embed([f"{last_title}. {last_desc}"])
+                if vecs and vecs[0] is not None:
+                    path_vecs[last_title] = vecs[0]
+
+            path_tuple = tuple(path_so_far_list)
+
             proj_fn = functools.partial(
                 run_projection,
                 remaining,
                 root_label=root_label,
-                quality_map=quality_map,
+                weights=mcts_weights,
+                path_so_far=path_tuple,
+                path_vecs=path_vecs,
             )
             predicted_next, mcts_tree = await anyio.to_thread.run_sync(proj_fn)
             session["last_predicted_next"] = predicted_next

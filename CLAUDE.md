@@ -185,7 +185,7 @@ Extracts `{case_summary, key_legal_issues}` from both briefs.
 For each of 10 **JUDICIAL_LENSES** (statutory text, precedent, agency deference, etc.), generates a 5-7 topic ordered agenda. Each lens runs independently; results become `TopicPrediction` objects.
 
 ### MCTS — Sparse Topic Sequencing
-- **Generation mode** (`run_generation`, n_sims=800, **max_depth=5**): build shallow agendas from scratch during setup. Each path covers only the first 5 predicted topics; the full candidate pool (~50-70 topics) is preserved in `PredictedTopicSets.full_topic_pool`.
+- **Generation mode** (`run_generation`, n_sims=800, **max_depth=2**): build shallow agendas from scratch during setup. Each path covers only the first 2 predicted topics; the full candidate pool (~50-70 topics) is preserved in `PredictedTopicSets.full_topic_pool`.
 - **Lazy expansion**: Once any addressed topic reaches `EXPANSION_QUALITY_THRESHOLD` (0.5) quality, the session's `all_topics` is expanded from the shallow initial set to the full candidate pool. This triggers an immediate MCTS projection over the deeper set, bypassing normal debounce.
 - **Projection mode** (`run_projection`, n_sims=150): live prediction of next topics during hearing, operating over whatever topics are currently in `all_topics` (shallow before expansion, full after).
 
@@ -199,7 +199,7 @@ MCTS_DEBOUNCE_TURNS = 3    # only re-run every 3rd sentence flush
 
 Sparse MCTS constants (in `timeline_generator.py` and `main.py`):
 ```python
-SPARSE_MCTS_INITIAL_DEPTH = 5         # max topics per path in initial generation
+SPARSE_MCTS_INITIAL_DEPTH = 2         # max topics per path in initial generation
 EXPANSION_QUALITY_THRESHOLD = 0.5     # quality score that triggers pool expansion
 ```
 

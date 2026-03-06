@@ -64,6 +64,7 @@ export default function OrchestratedAgents() {
   const [phase, setPhase] = useState<SimulationPhase>('SETUP');
   const [setupCollapsed, setSetupCollapsed] = useState(false);
   const [agentQuestionsCollapsed, setAgentQuestionsCollapsed] = useState(false);
+  const [mctsHidden, setMctsHidden] = useState(false);
 
   const [, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBriefText, setOpposingBriefText] = useState<string>('');
@@ -89,6 +90,7 @@ export default function OrchestratedAgents() {
   const [inactiveAgentIds, setInactiveAgentIds] = useState<Set<string>>(new Set());
   const [agendaUpdate, setAgendaUpdate] = useState<AgendaUpdate | null>(null);
   const [mctsTree, setMctsTree] = useState<MCTSTree | null>(null);
+  const [clearTrigger, setClearTrigger] = useState(0);
 
   // Queue of node events waiting to be flushed into mctsTree state at a
   // controlled rate so the tree visibly grows rather than snapping in at once.
@@ -699,10 +701,11 @@ export default function OrchestratedAgents() {
   ]);
 
   const handleStopSimulation = useCallback(() => {
+    freezeCurrentSpeech();
     stopRecording();
     sendPhase('FINISHED');
     setPhase('FINISHED');
-  }, [stopRecording, sendPhase]);
+  }, [freezeCurrentSpeech, stopRecording, sendPhase]);
 
   const handleResetSession = useCallback(() => {
     setPhase('READY');
@@ -717,8 +720,8 @@ export default function OrchestratedAgents() {
     setMctsTree(null);
   }, []);
 
-  /** Full session clear — resets the hearing but preserves briefs/agenda
-   *  so you can immediately start a new hearing without re-uploading. */
+  /** Full session clear — wipes agenda and hearing state, preserves briefs.
+   *  User returns to SETUP and can click Start to generate a new agenda. */
   const handleClearSession = useCallback(() => {
     // Stop any in-flight recording / connection
     stopRecording();
@@ -748,8 +751,7 @@ export default function OrchestratedAgents() {
     // Fresh session ID so the backend doesn't confuse old and new session data.
     setSessionId(generateSessionId());
 
-    // Clear hearing state but keep briefs, agenda, and topic sets so the
-    // user can start a new hearing immediately.
+    // Clear hearing state and agenda; preserve briefs so user can regenerate.
     setTranscript('');
     setChatMessages([]);
     currentSpeechRef.current = '';
@@ -758,12 +760,16 @@ export default function OrchestratedAgents() {
     setOpponentResponses([]);
     setScores([]);
     setAgendaUpdate(null);
+    setMctsTree(null);
+    setAgendaItems([]);
+    setPredictedTopicSets(null);
     setElapsedSeconds(0);
     setJudgeIntroText(null);
+    setClearTrigger((c) => c + 1);
 
-    // Go to READY if we already have an agenda, otherwise SETUP
-    setPhase(agendaItems.length > 0 ? 'READY' : 'SETUP');
-  }, [stopRecording, disconnect, clearSilenceTimer, agendaItems.length]);
+    // Return to SETUP so user sees Start button to generate a new agenda
+    setPhase('SETUP');
+  }, [stopRecording, disconnect, clearSilenceTimer]);
 
   const handleAgentsChange = useCallback(
     (newAgents: Agent[]) => {
@@ -883,6 +889,7 @@ export default function OrchestratedAgents() {
           <BriefUpload
             onBriefsReady={handleBriefsReady}
             skipSummary
+            clearTrigger={clearTrigger}
           />
 
           {!isLoadingAgents && (
@@ -898,7 +905,7 @@ export default function OrchestratedAgents() {
       {/* ── Main grid ── */}
       <main className="ma-main">
         <div className="ma-main__grid">
-          {/* Left column */}
+          {/* Left column — Agenda + MCTS viz */}
           <div className="ma-main__column">
             {/* ── Live Tracking (always visible) ── */}
             <AgendaPanel
@@ -910,16 +917,30 @@ export default function OrchestratedAgents() {
               coverage={agendaUpdate}
             />
 
-            <MCTSTreeViz
-              tree={mctsTree}
-              agendaItems={agendaItems}
-              addressedTopics={addressedTopics}
-              predictedNext={predictedNext}
-              currentTopic={currentTopic}
-              title={mctsTitle}
-              weakTopics={weakTopics}
-              topicQualities={topicQualities}
-            />
+            {/* ── MCTS viz (square, collapsible) ── */}
+            <div className={`oa-panel oa-mcts-panel${mctsHidden ? ' oa-mcts-panel--hidden' : ''}`}>
+              <button
+                className="oa-panel__header oa-panel__header--toggle"
+                onClick={() => setMctsHidden(v => !v)}
+              >
+                <span className="oa-panel__title">MCTS Topic Tree</span>
+                <span className="oa-panel__chevron">{mctsHidden ? '▶' : '▼'}</span>
+              </button>
+              {!mctsHidden && (
+                <div className="oa-mcts-panel__body">
+                  <MCTSTreeViz
+                    tree={mctsTree}
+                    agendaItems={agendaItems}
+                    addressedTopics={addressedTopics}
+                    predictedNext={predictedNext}
+                    currentTopic={currentTopic}
+                    title={mctsTitle}
+                    weakTopics={weakTopics}
+                    topicQualities={topicQualities}
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Middle column — Your argument + parallel agent evaluations */}
