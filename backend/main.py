@@ -1167,11 +1167,23 @@ async def _process_ma_transcript(sid: str, transcript: str) -> None:
         tg.start_soon(_fire_score)
 
         async def _fire_opponent(text=flushed, ts=tracker_state, pn=predicted_next):
+            # Snapshot the number of judge questions asked before we start generating.
+            # If that count increases by the time we're ready to send, a judge fired
+            # this turn — the opponent must stay silent so it doesn't talk over the bench.
+            s_pre = multi_agent_manager.session_data.get(sid, {})
+            questions_before = len(s_pre.get('questions_asked', []))
+
             traj_ctx = _build_trajectory_context(ts, pn or []) if ts else None
             opp = await global_opponent_engine.generate_response(
                 sid, text, trajectory_context=traj_ctx,
             )
             if opp:
+                # Re-check: if a judge question fired while we were generating, skip.
+                s_post = multi_agent_manager.session_data.get(sid, {})
+                if len(s_post.get('questions_asked', [])) > questions_before:
+                    logger.debug("[MultiAgent] Opponent suppressed — judge asked a question this turn")
+                    return
+
                 tts_p = get_tts_provider()
                 opp_cfg = await anyio.to_thread.run_sync(load_opponent_config)
                 audio_b64 = await tts_p.synthesize(opp.argument, voice=opp_cfg.voice_id or "default")
