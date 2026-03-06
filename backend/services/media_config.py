@@ -97,6 +97,11 @@ def load_tts_config() -> TTSConfig:
         env_provider = os.getenv("TTS_PROVIDER", "").lower().strip()
         if env_provider:
             cfg.provider = env_provider
+        # Normalise fields that may be absent in older config files
+        if not (cfg.model or "").strip():
+            cfg.model = "tts-1"
+        if not (cfg.voice or "").strip():
+            cfg.voice = "onyx"
         return cfg
     except Exception as exc:
         logger.warning("Failed to load tts_config.json, using defaults: %s", exc)

@@ -768,21 +768,15 @@ async def get_default_tts_config_endpoint():
 
 @app.post("/api/tts-config")
 async def save_tts_config_endpoint(req: TTSConfigRequest):
-    _openai_voices = {"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "shimmer", "verse"}
-    _groq_voices = {"autumn", "diana", "hannah", "austin", "daniel", "troy"}
-    provider = os.getenv("TTS_PROVIDER", "openai").lower()
-    if provider == "groq" and req.voice and req.voice not in _groq_voices:
-        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(_groq_voices)} for Groq")
-    elif provider != "groq" and req.voice and req.voice not in _openai_voices:
-        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(_openai_voices)}")
-    if not req.model.strip():
-        raise HTTPException(status_code=422, detail="model must not be empty")
+    # Voice validation is intentionally lenient: the TTS provider falls back to
+    # its default voice for unrecognised values, so we never block a save over it.
+    # Model defaults to "tts-1" if the field arrives empty.
     cfg = TTSConfig(
         enabled=req.enabled,
         api_key=req.api_key,
         base_url=req.base_url,
         voice=req.voice,
-        model=req.model,
+        model=req.model.strip() or "tts-1",
     )
     await anyio.to_thread.run_sync(lambda: save_tts_config(cfg))
     return _redact_api_keys(media_config_to_dict(cfg))

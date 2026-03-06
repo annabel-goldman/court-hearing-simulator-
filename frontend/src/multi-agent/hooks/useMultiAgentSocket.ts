@@ -122,6 +122,9 @@ export function useMultiAgentSocket({
           case 'agents_updated':
             console.log('[MultiAgentSocket] Agents updated:', message.data);
             break;
+          case 'agenda_set_ack':
+            // Server acknowledges set_agenda; no client action needed.
+            break;
           default:
             console.log('[MultiAgentSocket] Unknown message type:', message.type);
         }
