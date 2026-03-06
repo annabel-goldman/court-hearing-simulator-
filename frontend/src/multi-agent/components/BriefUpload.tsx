@@ -10,12 +10,16 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { BriefData } from '../types';
 import { Button, Alert, Card, CardHeader, CardContent, FileUpload } from './ui';
+import { SummaryDisplay } from './features';
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 
 interface BriefUploadProps {
   onBriefsReady: (userBrief: BriefData, opposingBrief: BriefData) => void;
+  onSummaryGenerated: (summary: string) => void;
 }
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function extractTextFromPdf(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
@@ -38,11 +42,12 @@ function countWords(text: string): number {
   return text.split(/\s+/).length;
 }
 
-export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
+export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadProps) {
   const [userBrief, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBrief, setOpposingBrief] = useState<BriefData | null>(null);
+  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isStarting, setIsStarting] = useState(false);
 
   const handleFileUpload = useCallback(async (file: File, type: 'user' | 'opposing') => {
     try {
@@ -61,14 +66,39 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
     }
   }, []);
 
-  const handleStart = useCallback(() => {
-    if (!userBrief || !opposingBrief || isStarting) return;
-    setIsStarting(true);
-    setError(null);
-    onBriefsReady(userBrief, opposingBrief);
-  }, [userBrief, opposingBrief, isStarting, onBriefsReady]);
+  const handleGenerateSummary = useCallback(async () => {
+    if (!userBrief || !opposingBrief) return;
 
-  const canStart = userBrief && opposingBrief;
+    setIsGeneratingSummary(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/multi-agent/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_brief: userBrief.text,
+          opposing_brief: opposingBrief.text,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate summary');
+      }
+
+      const data = await response.json();
+      setSummary(data.summary);
+      onSummaryGenerated(data.summary);
+      onBriefsReady(userBrief, opposingBrief);
+    } catch (err) {
+      console.error('Failed to generate summary:', err);
+      setError('Failed to generate summary. Please try again.');
+    } finally {
+      setIsGeneratingSummary(false);
+    }
+  }, [userBrief, opposingBrief, onBriefsReady, onSummaryGenerated]);
+
+  const canGenerateSummary = userBrief && opposingBrief && !summary;
 
   return (
     <Card>
@@ -78,7 +108,7 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
           <FileUpload
-            label="Petitioner's Brief"
+            label="Your Brief"
             file={userBrief ? { 
               name: userBrief.name, 
               wordCount: countWords(userBrief.text) 
@@ -88,7 +118,7 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
           />
 
           <FileUpload
-            label="Respondent's Brief"
+            label="Opposing Counsel's Brief"
             file={opposingBrief ? { 
               name: opposingBrief.name, 
               wordCount: countWords(opposingBrief.text) 
@@ -98,17 +128,19 @@ export function BriefUpload({ onBriefsReady }: BriefUploadProps) {
           />
         </div>
 
-        {canStart && (
+        {canGenerateSummary && (
           <Button
             variant="primary"
             size="lg"
             fullWidth
-            disabled={isStarting}
-            onClick={handleStart}
+            onClick={handleGenerateSummary}
+            isLoading={isGeneratingSummary}
           >
-            Start
+            Generate Brief Summary
           </Button>
         )}
+
+        {summary && <SummaryDisplay summary={summary} />}
       </CardContent>
     </Card>
   );

@@ -51,33 +51,9 @@
   --ma-space-lg: 1.5rem;
   --ma-space-xl: 2rem;
   
-  /* Accent — opponent / respondent (orange) */
-  --ma-opponent: #e67e22;
-  --ma-opponent-bg: rgba(230, 126, 34, 0.15);
-
   /* Border radius */
   --ma-radius-sm: 0.25rem;
   --ma-radius-md: 0.5rem;
   --ma-radius-lg: 0.75rem;
   --ma-radius-full: 9999px;
-}
-
-/* ── Invisible scrollbar utility ───────────────────────────────────────────── */
-/* Apply to any element that should scroll without a visible scrollbar.        */
-
-.ma-invisible-scroll,
-.ma-invisible-scroll * {
-  scrollbar-width: none;           /* Firefox */
-}
-.ma-invisible-scroll::-webkit-scrollbar,
-.ma-invisible-scroll *::-webkit-scrollbar {
-  display: none;                   /* Chrome / Safari / Edge */
-}
-/* Also hide scrollbars on html/body for global page scroll */
-html, body {
-  scrollbar-width: none;
-}
-html::-webkit-scrollbar,
-body::-webkit-scrollbar {
-  display: none;
 }

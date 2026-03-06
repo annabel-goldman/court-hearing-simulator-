@@ -35,12 +35,8 @@
 .ma-status-badge {
   padding: 0.25rem 0.75rem;
   border-radius: var(--ma-radius-full);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 0.875rem;
   background-color: var(--ma-bg-tertiary);
-  transition: color 0.25s ease, background-color 0.25s ease;
 }
 
 .ma-status-badge--connected {

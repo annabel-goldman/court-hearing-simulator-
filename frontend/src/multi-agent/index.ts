@@ -29,14 +29,4 @@ export type {
   SimulationPhase,
   MultiAgentSessionConfig,
   MultiAgentSocketMessage,
-  // Shared orchestrated-agent types (canonical source — no circular imports)
-  AgendaItem,
-  PredictedTopic,
-  AgendaUpdate,
-  AgendaConfidence,
-  TopicCoverage,
-  CounterArgument,
-  MCTSTree,
-  MCTSNode,
-  MCTSEdge,
 } from './types';

@@ -18,34 +18,24 @@
 }
 
 .ma-recording-status__dot {
-  width: 0.65rem;
-  height: 0.65rem;
+  width: 0.75rem;
+  height: 0.75rem;
   background-color: var(--ma-error);
   border-radius: 50%;
-  animation: ma-recording-glow 1.5s ease-in-out infinite;
-  box-shadow: 0 0 4px rgba(239, 68, 68, 0.4);
+  animation: ma-pulse 1.5s infinite;
 }
 
 .ma-recording-status__text {
-  color: #f87171;
-  font-weight: 600;
-  font-size: 0.78rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  color: #f87171; /* red-400 */
+  font-weight: 500;
+  font-size: 0.875rem;
 }
 
 @keyframes ma-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.5; }
-}
-
-@keyframes ma-recording-glow {
   0%, 100% {
     opacity: 1;
-    box-shadow: 0 0 4px rgba(239, 68, 68, 0.4);
   }
   50% {
-    opacity: 0.6;
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+    opacity: 0.5;
   }
 }

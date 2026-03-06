@@ -6,7 +6,6 @@
  * Styles: styles/recording.css
  */
 
-import { memo } from 'react';
 import { Button } from '../ui';
 import type { SimulationPhase } from '../../types';
 import '../../styles/recording.css';
@@ -19,7 +18,7 @@ interface RecordingControlsProps {
   onReset: () => void;
 }
 
-export const RecordingControls = memo(function RecordingControls({
+export function RecordingControls({
   phase,
   hasAgents,
   onStart,
@@ -35,18 +34,7 @@ export const RecordingControls = memo(function RecordingControls({
           onClick={onStart}
           disabled={!hasAgents}
         >
-          Start Hearing
-        </Button>
-      )}
-
-      {phase === 'INTRO' && (
-        <Button
-          variant="warning"
-          size="lg"
-          disabled
-          isLoading
-        >
-          Judge is speaking…
+          Start Recording
         </Button>
       )}
 
@@ -71,4 +59,4 @@ export const RecordingControls = memo(function RecordingControls({
       )}
     </div>
   );
-});
+}
