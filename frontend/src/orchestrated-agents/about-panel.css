@@ -1,0 +1,186 @@
+/**
+ * About Panel — oa-about-* prefix
+ * Full-width collapsible strip sitting between the header and the setup section.
+ */
+
+.oa-about {
+  width: 90%;
+  margin: 0 auto;
+  border: 1px solid var(--ma-border-default, rgba(216, 176, 112, 0.35));
+  border-radius: 0.5rem;
+  background: rgba(38, 26, 18, 0.55);
+  backdrop-filter: blur(0.25rem);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.oa-about:hover {
+  border-color: var(--ma-border-muted, rgba(216, 176, 112, 0.5));
+}
+
+/* ── Toggle bar ── */
+
+.oa-about__toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1.1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ma-text-muted, #d3bd97);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: color 0.15s ease;
+}
+
+.oa-about__toggle:hover {
+  color: var(--ma-text-secondary, #efdac0);
+}
+
+.oa-about__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.oa-about__chevron {
+  font-size: 0.65rem;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.oa-about__toggle:hover .oa-about__chevron {
+  opacity: 1;
+}
+
+/* ── Body ── */
+
+.oa-about__body {
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid var(--ma-border-default, rgba(216, 176, 112, 0.2));
+}
+
+/* ── Grid layout — 2 columns on wide screens ── */
+
+.oa-about__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem 2rem;
+  padding-top: 1.1rem;
+}
+
+@media (max-width: 800px) {
+  .oa-about__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Sections ── */
+
+.oa-about__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.oa-about__heading {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ma-text-dim, #b99a70);
+  border-bottom: 1px solid var(--ma-border-default, rgba(216, 176, 112, 0.2));
+  padding-bottom: 0.3rem;
+}
+
+.oa-about__text {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.65;
+  color: var(--ma-text-secondary, #efdac0);
+}
+
+/* ── Steps list ── */
+
+.oa-about__steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.oa-about__steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--ma-text-secondary, #efdac0);
+}
+
+.oa-about__step-num {
+  flex-shrink: 0;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(216, 176, 112, 0.15);
+  border: 1px solid rgba(216, 176, 112, 0.3);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ma-text-dim, #b99a70);
+  margin-top: 0.1rem;
+}
+
+/* ── Bullet list ── */
+
+.oa-about__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.oa-about__list li {
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--ma-text-secondary, #efdac0);
+  padding-left: 1rem;
+  position: relative;
+}
+
+.oa-about__list li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: var(--ma-text-dim, #b99a70);
+  font-size: 0.75rem;
+}
+
+.oa-about__list strong {
+  color: var(--ma-text-primary, #fff2dd);
+  font-weight: 600;
+}
+
+.oa-about__list code,
+.oa-about__steps code {
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  background: rgba(216, 176, 112, 0.1);
+  border: 1px solid rgba(216, 176, 112, 0.2);
+  border-radius: 0.2rem;
+  padding: 0.05rem 0.3rem;
+  color: var(--ma-text-primary, #fff2dd);
+}

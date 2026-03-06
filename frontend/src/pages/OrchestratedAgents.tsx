@@ -43,6 +43,7 @@ import { AgendaPanel } from '../orchestrated-agents/AgendaPanel';
 import { JudgeConfigPanel } from '../orchestrated-agents/JudgeConfigPanel';
 import { OpponentConfigPanel } from '../orchestrated-agents/OpponentConfigPanel';
 import { SystemConfigPanel } from '../orchestrated-agents/SystemConfigPanel';
+import { AboutPanel } from '../orchestrated-agents/AboutPanel';
 import { JudgeActivityFeed } from '../orchestrated-agents/JudgeActivityFeed';
 import { ScoreLog } from '../orchestrated-agents/ScoreLog';
 import { OpponentFeed } from '../orchestrated-agents/OpponentFeed';
@@ -873,6 +874,8 @@ export default function OrchestratedAgents() {
           </div>
         </div>
       </header>
+
+      <AboutPanel />
 
       {/* ── Setup & Configuration (full-width, collapsible) ── */}
       <div className={`oa-setup-section oa-setup-section--fullwidth${

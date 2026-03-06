@@ -134,8 +134,10 @@ def get_tts_provider(provider_name: str = "openai") -> TTSProvider:
     try:
         from services.media_config import load_tts_config
         cfg = load_tts_config()
-        if not cfg.enabled:
-            return _DisabledTTSProvider()
+        # `enabled` flag from the config is intentionally ignored here — TTS
+        # is always attempted when a valid endpoint is reachable.  The provider
+        # itself silently returns "" when no real API key is available, so
+        # disabling via config is unnecessary and caused silent failures.
         provider = getattr(cfg, "provider", "openai").lower().strip()
         if provider == "groq":
             return OpenAITTSProvider(
