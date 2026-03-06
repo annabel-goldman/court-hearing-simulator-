@@ -1,38 +1,33 @@
 /**
  * MCTSTreeViz
  *
- * Radial SVG visualization of the MCTS search tree.
+ * Level-first SVG visualization of the MCTS search tree.
  *
- * Layout
- * ------
- * Root sits at the center.  Children fan outward on concentric rings,
- * each depth on its own ring with generous spacing.
+ * Layout — Projection tree (live hearing)
+ * ----------------------------------------
+ * Root sits at the top-center.  Each depth level is a horizontal row;
+ * nodes at the same depth share the same Y coordinate.
  *
+ * Within each row, nodes are sorted left-to-right by:
+ *   1. Parent X (preserves tree structure visually)
+ *   2. Weak topics first (leftmost in their parent group)
+ *   3. Visit count descending (hot paths on the right within a group)
+ *   4. Node ID ascending (tie-breaker for stability)
+ *
+ * The best path (greedy highest-visits chain from root) is highlighted
+ * with gold edges and dashed rings — it reads as a sequential trajectory.
+ * Horizontal dashed guide lines mark each depth level.
+ *
+ * Layout — Preview/generation tree (agenda streaming)
+ * -----------------------------------------------------
  * When `agendaItems` are provided, depth-1 (lens) and depth-2 (topic)
- * nodes are positioned at fixed angles derived from the agenda ordering —
- * each lens gets an equal sector of the circle and its topics are evenly
- * distributed within that sector.  This visually aligns the tree with
- * the Agenda Panel so each agenda topic can be traced outward into
- * the paths MCTS explored from it.
- *
- * Fallback (no agenda):
- *   depth-1   golden-angle spread around 360°    (ring r = 130 px)
- *   depth-2   symmetric fan from parent angle     (ring r = 220 px)
- *   depth-3   symmetric fan                       (ring r = 295 px)
- *   depth-4   symmetric fan                       (ring r = 350 px)
- *   depth-5   symmetric fan                       (ring r = 390 px)
- *
- * Sibling order is derived from the tree edge list sorted by node ID,
- * not from arrival order, so positions are deterministic regardless of
- * which streaming batch a node first appears in.
+ * nodes use the original agenda-aligned radial layout so they align with
+ * the Agenda Panel.  Only the structural fallback is level-first.
  *
  * Stability
  * ---------
  * Every node receives its position the first time it appears and that
  * position never changes, so the tree grows without any node jumping.
- * When the `done` event fires (streaming → final labeled tree), nodes
- * not included in the pruned top-paths simply disappear — that transition
- * IS the pruning visualization.
  *
  * Scroll / zoom
  * -------------
@@ -67,8 +62,9 @@ interface Props {
 
 const SVG_SIZE   = 800;
 const CENTER     = SVG_SIZE / 2;
-const MAX_SLOT   = 12;         // max children rendered per node; excess are skipped
+const MAX_SLOT   = 14;         // max nodes rendered per level; excess are skipped
 
+/** Y coordinate (px from top) for each depth level in the projection tree. */
 /** Distance from CENTER for each depth ring. */
 const RING_RADIUS: Record<number, number> = {
   1: 130,
@@ -88,9 +84,7 @@ const DEPTH_STEP: Record<number, number> = {
 };
 const DEFAULT_STEP = 0.08; // ≈ 4.5° for depth ≥ 6
 
-/** Minimum distance (px) between any two node centres — prevents overlap.
- *  Max node radius is 11 px, so two nodes touching = 22 px; 42 px gives
- *  generous padding so circles never visually collide. */
+/** Minimum distance (px) between any two node centres — prevents overlap. */
 const MIN_NODE_GAP = 42;
 
 // ── Visual helpers ────────────────────────────────────────────────────────────
@@ -241,12 +235,20 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
     prevAgendaCountRef.current = agendaItems.length;
   }
 
-  // ── Radial graph layout ───────────────────────────────────────────────────
+  // ── Graph layout ──────────────────────────────────────────────────────────
 
   /**
-   * Get the sorted sibling list for a node (all children of the same parent),
-   * ordered by node ID for deterministic positioning regardless of arrival
-   * order or streaming batches.
+   * Assign a stable radial position for `node`.
+   *
+   * Two layout strategies:
+   *
+   * **Preview tree** (depth-1 = lens names, depth-2 = topic titles):
+   *   Agenda-aligned — lenses get fixed angles from an equal-sector split,
+   *   topics are placed at fixed angles within their lens's sector.
+   *
+   * **Projection tree** (all depths are topic titles):
+   *   Structural — depth-1 nodes arc around the full circle, deeper nodes
+   *   fan symmetrically from their parent's outward angle.
    */
   function getSiblings(nodeId: number): number[] {
     const parentId = parentIdRef.current.get(nodeId);
@@ -257,30 +259,6 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
       .sort((a, b) => a - b);
   }
 
-  /**
-   * Assign a stable position for `node`.
-   *
-   * Two layout strategies:
-   *
-   * **Preview tree** (depth-1 = lens names, depth-2 = topic titles):
-   *   Agenda-aligned — lenses get fixed angles from an equal-sector split,
-   *   topics are placed at fixed angles within their lens's sector.
-   *
-   * **Final / projection MCTS tree** (all depths are topic titles):
-   *   Structural — depth-1 children are spaced in equal arcs around the
-   *   full circle, and deeper nodes fan symmetrically from their parent's
-   *   outward angle.  The fan step is adaptive: it shrinks so the fan
-   *   never exceeds ~70 % of the parent's angular sector, preventing
-   *   sibling fans from overlapping.
-   *
-   * Detection: if a depth-1 node's label appears in `lensAngleMap` it's
-   * a preview tree; otherwise it's a final/projection tree.
-   *
-   * Sibling order is derived from the tree's edge list (sorted by node ID)
-   * so positions are deterministic regardless of streaming batch order.
-   *
-   * Returns null for nodes at depth > 5 or beyond MAX_SLOT siblings.
-   */
   function assignPosition(node: MCTSNode): { x: number; y: number } | null {
     if (node.depth === 0) return { x: CENTER, y: CENTER };
     if (node.depth > 5) return null;
@@ -289,16 +267,11 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
     const radius   = RING_RADIUS[node.depth] ?? DEFAULT_RING;
 
     // ── Agenda-aligned positioning (preview tree only) ──────────────────
-    // The preview tree has lens names at depth 1 and topic titles at
-    // depth 2.  We only use agenda maps when the structure matches —
-    // the final MCTS tree has topic titles at every depth and would
-    // cluster incorrectly if we placed depth-1 nodes at topic angles.
     if (node.depth === 1 && node.label && lensAngleMap.has(node.label)) {
       const angle = lensAngleMap.get(node.label)!;
       return { x: CENTER + radius * Math.cos(angle), y: CENTER + radius * Math.sin(angle) };
     }
     if (node.depth === 2 && node.label && topicAngleMap.has(node.label)) {
-      // Only honour the topic map when the parent is a lens (preview tree).
       const parentNode = parentId !== undefined
         ? tree?.nodes.find(n => n.id === parentId)
         : undefined;
@@ -308,28 +281,22 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
       }
     }
 
-    // ── Structure-based positioning ─────────────────────────────────────
+    // ── Structural radial positioning (projection tree) ──────────────────
     const siblings = getSiblings(node.id);
     const sibIdx   = siblings.indexOf(node.id);
     const sibTotal = siblings.length;
     if (sibIdx < 0 || sibIdx >= MAX_SLOT) return null;
 
     if (node.depth === 1) {
-      // Equal-arc spacing — all depth-1 nodes arrive together in the
-      // final tree, so even spacing gives the cleanest radial layout.
       const angle = -Math.PI / 2 + sibIdx * (2 * Math.PI) / Math.max(sibTotal, 1);
       return { x: CENTER + radius * Math.cos(angle), y: CENTER + radius * Math.sin(angle) };
     }
 
-    // Depth 2+: fan symmetrically around the parent's outward angle.
     const parentPos = parentId !== undefined ? positionsRef.current.get(parentId) : undefined;
     const baseAngle = parentPos
       ? Math.atan2(parentPos.y - CENTER, parentPos.x - CENTER)
       : 0;
 
-    // Adaptive step — shrink the fan so it fits inside ~70 % of the
-    // parent's angular sector.  This prevents siblings' fans from
-    // overlapping when many depth-1 branches exist.
     const parentSibCount = parentId !== undefined ? getSiblings(parentId).length : 1;
     const sectorArc      = (2 * Math.PI) / Math.max(parentSibCount, 1);
     const maxStep        = DEPTH_STEP[node.depth] ?? DEFAULT_STEP;
@@ -437,6 +404,29 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     predictedNext.join(','),
   ]);
+
+  // ── Seed-topic highlight: root → most-visited depth-1 child ────────────
+  // On initial tree creation only the starting/seed topic edge is lit —
+  // that's the topic with the highest weight that seeds the projection.
+  const bestPathIds = useMemo(() => {
+    const ids = new Set<number>();
+    if (!tree) return ids;
+    const root = tree.nodes.find(n => n.depth === 0);
+    if (!root) return ids;
+    ids.add(root.id);
+    const depth1 = tree.edges
+      .filter(e => e.source === root.id)
+      .map(e => tree.nodes.find(n => n.id === e.target))
+      .filter((n): n is MCTSNode => n !== undefined);
+    if (depth1.length === 0) return ids;
+    const top = depth1.reduce((best, n) => n.visits > best.visits ? n : best);
+    ids.add(top.id);
+    return ids;
+  }, [tree]);
+
+  // Detect projection tree: depth-1 nodes are topic titles, not lens names
+  const isProjectionTree = !!(tree?.nodes &&
+    tree.nodes.filter(n => n.depth === 1).every(n => !lensAngleMap.has(n.label)));
 
   const hoveredNode = hoveredId !== null
     ? tree?.nodes.find(n => n.id === hoveredId) ?? null
@@ -589,6 +579,19 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
               );
             })}
 
+            {/* Best-path gold edges — rendered above regular edges, below nodes */}
+            {isProjectionTree && tree.edges.map(edge => {
+              if (!bestPathIds.has(edge.source) || !bestPathIds.has(edge.target)) return null;
+              const src = positionsRef.current.get(edge.source);
+              const tgt = positionsRef.current.get(edge.target);
+              if (!src || !tgt) return null;
+              return (
+                <line key={`bp-${edge.source}-${edge.target}`}
+                  x1={src.x} y1={src.y} x2={tgt.x} y2={tgt.y}
+                  stroke="#f0c040" strokeWidth={2.5} opacity={0.5} strokeLinecap="round" />
+              );
+            })}
+
             {/* Nodes */}
             {tree.nodes.map(node => {
               // Skip nodes not in the relevant set when filtering
@@ -607,6 +610,12 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
                   onMouseEnter={() => setHoveredId(node.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
+                  {/* Best-path dashed gold ring */}
+                  {isProjectionTree && bestPathIds.has(node.id) && node.depth > 0 && !isCurrent && (
+                    <circle cx={pos.x} cy={pos.y} r={r + 8}
+                      fill="none" stroke="#f0c040" strokeWidth={1.5} opacity={0.45}
+                      strokeDasharray="3 4" style={{ pointerEvents: 'none' }} />
+                  )}
                   {/* Current-topic pulse ring */}
                   {isCurrent && (
                     <circle cx={pos.x} cy={pos.y} r={r + 10}
@@ -647,6 +656,75 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
                 </g>
               );
             })}
+
+            {/* Progress path: current topic → top predicted-next topic */}
+            {(() => {
+              if (!currentTopic || predictedNext.length === 0) return null;
+              const topPredicted = predictedNext[0];
+              if (topPredicted === currentTopic) return null;
+
+              let srcPos: { x: number; y: number } | null = null;
+              let tgtPos: { x: number; y: number } | null = null;
+              let tgtRadius = 5;
+
+              for (const node of tree.nodes) {
+                if (node.label === currentTopic) {
+                  const p = positionsRef.current.get(node.id);
+                  if (p) srcPos = p;
+                }
+                if (node.label === topPredicted) {
+                  const p = positionsRef.current.get(node.id);
+                  if (p) { tgtPos = p; tgtRadius = nodeRadius(node, maxVisits); }
+                }
+              }
+
+              if (!srcPos || !tgtPos) return null;
+              const dx = tgtPos.x - srcPos.x;
+              const dy = tgtPos.y - srcPos.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 20) return null;
+
+              // Stop the line just before the target node edge
+              const ux = dx / dist;
+              const uy = dy / dist;
+              const endX = tgtPos.x - ux * (tgtRadius + 5);
+              const endY = tgtPos.y - uy * (tgtRadius + 5);
+
+              // Arrowhead polygon at the tip
+              const ARROW = 8;
+              const ax1 = endX - ARROW * ux + (ARROW * 0.45) * uy;
+              const ay1 = endY - ARROW * uy - (ARROW * 0.45) * ux;
+              const ax2 = endX - ARROW * ux - (ARROW * 0.45) * uy;
+              const ay2 = endY - ARROW * uy + (ARROW * 0.45) * ux;
+
+              const label = topPredicted.length > 22 ? topPredicted.slice(0, 20) + '…' : topPredicted;
+
+              return (
+                <g key="mcts-progress" style={{ pointerEvents: 'none' }}>
+                  {/* Glow */}
+                  <line x1={srcPos.x} y1={srcPos.y} x2={endX} y2={endY}
+                    stroke="#4ade80" strokeWidth={6} opacity={0.1} strokeLinecap="round" />
+                  {/* Marching-ants dash */}
+                  <line x1={srcPos.x} y1={srcPos.y} x2={endX} y2={endY}
+                    stroke="#4ade80" strokeWidth={1.5} strokeDasharray="6 4" strokeLinecap="round"
+                    style={{ animation: 'mcts-flow 0.7s linear infinite' }} />
+                  {/* Arrowhead */}
+                  <polygon points={`${endX},${endY} ${ax1},${ay1} ${ax2},${ay2}`}
+                    fill="#4ade80" opacity={0.9} />
+                  {/* Label below target node */}
+                  <text x={tgtPos.x} y={tgtPos.y + tgtRadius + 14}
+                    textAnchor="middle" fill="#4ade80" fontSize={7.5}
+                    fontFamily="system-ui,sans-serif" fontWeight="600">
+                    {label}
+                  </text>
+                  <text x={tgtPos.x} y={tgtPos.y + tgtRadius + 23}
+                    textAnchor="middle" fill="rgba(74,222,128,0.55)" fontSize={6.5}
+                    fontFamily="system-ui,sans-serif">
+                    ↑ predicted next
+                  </text>
+                </g>
+              );
+            })()}
 
             {/* Hover tooltip — rendered last so it's always on top */}
             {hoveredNode && (() => {
@@ -730,6 +808,7 @@ export const MCTSTreeViz = memo(function MCTSTreeViz({
           <span className="mcts-tree-viz__legend-dot" style={{ background: '#f0c040' }} /> Root
           <span className="mcts-tree-viz__legend-dot mcts-tree-viz__legend-dot--pulse" style={{ background: '#facc15' }} /> Current
           <span className="mcts-tree-viz__legend-dot" style={{ background: '#4ade80' }} /> Predicted next
+          <span style={{ color: '#4ade80', fontSize: '0.7rem', marginLeft: 2 }}>⇢ progressing to</span>
           <span className="mcts-tree-viz__legend-dot" style={{ background: '#22d3ee' }} /> Covered
           <span className="mcts-tree-viz__legend-dot" style={{ background: '#fb923c' }} /> Weak
           <span className="mcts-tree-viz__legend-dot" style={{ background: '#f87171' }} /> Not covered

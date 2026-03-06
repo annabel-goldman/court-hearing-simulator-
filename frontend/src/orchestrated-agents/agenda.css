@@ -16,6 +16,10 @@
   100% { opacity: 1; transform: scale(1); }
 }
 
+@keyframes mcts-flow {
+  to { stroke-dashoffset: -10; }
+}
+
 .mcts-tree-viz {
   background: var(--ma-surface, #1a1a2e);
   border: 1px solid var(--ma-border, rgba(255,255,255,0.1));

@@ -113,6 +113,16 @@ FRONTIER_QUALITY_GATE = 0.3
 # Minimum flushes on the current topic before frontier expansion.
 FRONTIER_MIN_FLUSHES = 2
 
+# Max topics passed to run_projection — focuses MCTS on the most likely
+# path continuation rather than the full frontier.  Keeps projections fast
+# and meaningful even after the frontier has grown large.
+PROJECTION_TOP_K = 6
+
+# Minimum quality score on the current (most recent) addressed topic before
+# MCTS projection is allowed to run.  Prevents premature prediction while
+# the student is still mid-argument on the first topic.
+PROJECTION_QUALITY_GATE = 0.85
+
 # Evict WS sessions that have been idle for this long (network-drop guard).
 _SESSION_TTL = 3600.0  # 1 hour
 
@@ -478,18 +488,50 @@ async def multi_agent_summarize(request: MultiAgentSummarizeRequest):
 
 
 def _extract_final_draft(text: str) -> str:
-    """Strip inline 'Thinking Process' / draft analysis that some models emit as plain text.
+    """Strip inline reasoning / draft analysis that some models emit as plain text.
 
-    Some thinking-capable models (e.g. DeepSeek-R1 via OpenRouter) write their
-    chain-of-thought as numbered sections ("1. **Analyze...**", "2. **Drafting...**")
-    rather than inside <think> tags, so extract_content's tag-stripping won't catch it.
-    This function detects that pattern and returns only the last coherent speech block.
+    Handles three leak patterns:
+
+    1. Numbered bold sections — DeepSeek-R1 / OpenRouter style:
+         "1. **Analyze the case...**\\n..."
+
+    2. Bullet-point constraint checking — inline self-review before or after speech:
+         "* 3-5 sentences? Yes (4 sentences)."
+         "* \\"We convene to assess...\\" (21 words)"
+
+    3. Everything else: return text unchanged.
     """
+    # ── Pattern 2: bullet-point constraint checking ───────────────────────────
+    # Detect: lines like "* 3-5 sentences? Yes", "* Under 80 words?",
+    # "* "Sentence." (N words)", "* No quotation marks? Yes."
+    _BULLET_CHECK = re.compile(
+        r'^\*\s+(?:\d+-\d+\s+sentences|Under\s+\d+\s+words|No\s+quotation|\w+.*\?\s*(?:Yes|No|\d))',
+        re.MULTILINE | re.IGNORECASE,
+    )
+    if _BULLET_CHECK.search(text):
+        # Priority 1: prose lines that are NOT bullet lines and look like speech
+        # (contain a capital letter start and end with sentence-ending punctuation).
+        prose_lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith('*') and not stripped.startswith('#'):
+                prose_lines.append(stripped)
+        prose = ' '.join(prose_lines).strip()
+        if len(prose) > 40:
+            return prose
+
+        # Priority 2: quoted strings embedded in bullet lines — the model often
+        # writes "* \"Sentence.\" (N words)" — extract the quoted fragments.
+        quoted = re.findall(r'"([^"]{15,})"', text)
+        if quoted:
+            return ' '.join(q.strip().rstrip('.') + '.' for q in quoted
+                            if not re.search(r'\?\s*(?:Yes|No)', q))
+
+    # ── Pattern 1: numbered bold sections ────────────────────────────────────
     if not re.search(r'Thinking Process|^\d+\.\s+\*\*', text, re.MULTILINE):
         return text
 
-    # Strategy 1: extract speech blocks that appear between a section header and
-    # a metadata line (*Word Count*, *Sentence Count*, *Constraint*, next numbered section).
+    # Strategy 1a: extract speech blocks between a section header and a metadata line.
     drafts = re.findall(
         r'\d+\.\s+\*\*[^*\n]+\*\*:?\s*([\s\S]+?)(?=\*Word Count|\*Sentence|\*Constraint|\n\d+\.|\Z)',
         text,
@@ -500,7 +542,7 @@ def _extract_final_draft(text: str) -> str:
         if len(candidate) > 20:
             return candidate
 
-    # Strategy 2: take everything after the last bold section header
+    # Strategy 1b: take everything after the last bold section header.
     m = re.search(r'\d+\.\s+\*\*[^*\n]+\*\*:?\s*([\s\S]+)$', text)
     if m:
         candidate = m.group(1).strip().strip('"')
@@ -535,21 +577,19 @@ async def generate_judge_intro(request: JudgeIntroRequest):
         )
 
     system_msg = (
-        "You are the Chief Justice of an appellate moot-court panel. "
-        "Output ONLY the opening statement — no analysis, no revision steps, "
-        "no word counts, no commentary. Speak directly and formally."
+        "You are the Chief Justice of an appellate moot-court panel opening oral argument. "
+        "Your response must be ONLY the spoken opening statement itself — 3 to 5 sentences, "
+        "under 80 words, formal register, no quotation marks. "
+        "Do not include any analysis, self-checks, word counts, bullet points, "
+        "revision notes, or commentary of any kind. "
+        "Speak the statement directly, as if addressing the courtroom."
     )
     prompt = (
-        "Write a brief, authoritative opening statement (3-5 sentences) to begin the hearing. "
-        "Summarize the case in one sentence, note the key issues the court will examine, "
-        "and invite counsel for the petitioner to begin.\n\n"
         f"Case summary: {request.case_summary}\n"
         f"{topics_hint}\n\n"
-        "Rules:\n"
-        "- Be formal but natural, as a real chief justice would speak.\n"
-        "- Do NOT use quotation marks around your output.\n"
-        "- Keep it under 80 words.\n"
-        "- End by inviting the petitioner's counsel to proceed."
+        "Deliver the opening statement now. "
+        "Summarise the case in one sentence, note the key issues, "
+        "then invite petitioner's counsel to proceed."
     )
 
     try:
@@ -1347,9 +1387,8 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                         pts_raw      = payload.get("predicted_topic_sets")
                         agenda_items = payload.get("agenda_items", [])
 
-                        # Build reverse lookup: topic_title → {agenda_id, agent_id, description}
+                        # Build topic_map from agenda_items (used for agent question context).
                         topic_map: dict = {}
-                        all_topics: list = []
                         for item in agenda_items:
                             for t in item.get("topics", []):
                                 topic_map[t["title"]] = {
@@ -1357,30 +1396,45 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                     "agent_id":    item.get("agentId"),
                                     "description": t.get("description", ""),
                                 }
-                                all_topics.append({
-                                    "title": t["title"],
-                                    "description": t.get("description", ""),
-                                })
 
-                        # Sparse MCTS: preserve the full candidate pool (with
-                        # exploitability + lens) for lazy expansion.
+                        # Initialize all_topics from the full scored pool when available.
+                        # This lets MCTS projection traverse beyond the initial depth-2
+                        # paths immediately — the frontier gates which topics are active.
                         full_pool_raw = pts_raw.get("full_topic_pool", []) if pts_raw else []
-                        full_topic_pool = [
-                            {
-                                "title": t["title"],
-                                "description": t.get("description", ""),
-                                "exploitability": t.get("exploitability", 0.5),
-                                "lens": t.get("lens", ""),
-                            }
-                            for t in full_pool_raw
-                        ] if full_pool_raw else [{**t, "exploitability": 0.5, "lens": ""} for t in all_topics]
+                        already_fully_expanded = bool(full_pool_raw)
 
-                        # Enrich all_topics with exploitability + lens from pool
-                        pool_lookup = {t["title"]: t for t in full_topic_pool}
-                        for t in all_topics:
-                            pool_entry = pool_lookup.get(t["title"], {})
-                            t["exploitability"] = pool_entry.get("exploitability", 0.5)
-                            t["lens"] = pool_entry.get("lens", "")
+                        if full_pool_raw:
+                            full_topic_pool = [
+                                {
+                                    "title":         t["title"],
+                                    "description":   t.get("description", ""),
+                                    "exploitability": t.get("exploitability", 0.5),
+                                    "lens":          t.get("lens", ""),
+                                }
+                                for t in full_pool_raw
+                            ]
+                            # all_topics = entire pool; weights already scored by Phase 1
+                            all_topics = list(full_topic_pool)
+                            # Populate topic_map for pool topics not in agenda_items
+                            for t in full_topic_pool:
+                                if t["title"] not in topic_map:
+                                    topic_map[t["title"]] = {
+                                        "agenda_id":   None,
+                                        "agent_id":    None,
+                                        "description": t.get("description", ""),
+                                    }
+                        else:
+                            # Fallback: no pool available — build from agenda_items only
+                            all_topics = []
+                            for item in agenda_items:
+                                for t in item.get("topics", []):
+                                    all_topics.append({
+                                        "title":          t["title"],
+                                        "description":    t.get("description", ""),
+                                        "exploitability": 0.5,
+                                        "lens":           "",
+                                    })
+                            full_topic_pool = [{**t} for t in all_topics]
 
                         # Pick the initial random buff topic (one of top 5 by exploitability)
                         sorted_by_exploit = sorted(
@@ -1414,7 +1468,7 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             "frontier_flush_count": 0,
                             "case_summary":         pts_raw.get("case_summary", "") if pts_raw else "",
                             "full_topic_pool":      full_topic_pool,
-                            "sparse_expanded":      False,
+                            "sparse_expanded":      already_fully_expanded,
                         })
                         logger.info(
                             "[MultiAgent] set_agenda: tracker_ready=%s, topics_indexed=%d, "
@@ -1604,14 +1658,62 @@ def _build_opponent_bonus_map(session_id: str, all_topics: list) -> dict[str, fl
     return bonus_map
 
 
-def _build_mcts_weights(session: dict, session_id: str, state, quality_map: dict) -> MCTSWeights:
+def _update_topic_weights(
+    session: dict,
+    quality_map: dict,
+    opponent_bonus_map: dict,
+) -> None:
+    """Dynamically adjust per-topic exploitability weights from live hearing signals.
+
+    Called before each MCTS projection so weights reflect the current state of
+    the hearing rather than the static Phase-1 brief scores.
+
+    Signals applied (all clamped to [0.1, 1.0]):
+    - Addressed + poorly argued (q < 0.3) → boost (+0.04): judge probes again.
+    - Addressed + well covered (q > 0.7) → decay (−0.03): panel moves on.
+    - Unaddressed + opponent pressure → boost proportional to strength.
+    - Unaddressed + partially touched (0 < q < 0.4) → small boost (+0.03).
+    - Completely untouched (q is None) → tiny urgency boost (+0.012 per flush).
+    """
+    addressed = session.get("addressed_titles", set())
+    for t in session.get("all_topics", []):
+        title = t["title"]
+        current = t.get("exploitability", 0.5)
+        delta = 0.0
+        q = quality_map.get(title)
+
+        if title in addressed:
+            if q is not None:
+                if q < 0.3:
+                    delta += 0.04   # weak argument → judge returns to probe
+                elif q > 0.7:
+                    delta -= 0.03   # strong coverage → deprioritize
+        else:
+            opp = opponent_bonus_map.get(title, 0.0)
+            if opp > 0:
+                delta += opp * 0.4  # opponent pressure → hotter topic
+            if q is not None and q < 0.4:
+                delta += 0.03       # touched but underdeveloped
+            if q is None:
+                delta += 0.012      # urgency: untouched topics accumulate weight
+
+        t["exploitability"] = max(0.1, min(1.0, current + delta))
+
+
+def _build_mcts_weights(
+    session: dict,
+    session_id: str,
+    quality_map: dict,
+    opponent_bonus: dict | None = None,
+) -> MCTSWeights:
     """Assemble the full MCTSWeights for a live MCTS projection."""
     all_topics = session.get("all_topics", [])
     addressed = session.get("addressed_titles", set())
     path_so_far = session.get("path_so_far", [])
 
     exploitability_map = _build_exploitability_map(session)
-    opponent_bonus = _build_opponent_bonus_map(session_id, all_topics)
+    if opponent_bonus is None:
+        opponent_bonus = _build_opponent_bonus_map(session_id, all_topics)
 
     # Initial buff: only when no topics have been addressed yet
     initial_buff: dict[str, float] = {}
@@ -1650,16 +1752,29 @@ def _expand_frontier_if_ready(session: dict, quality_map: dict) -> bool:
 
     if not path_so_far:
         return False
-    if session.get("_last_frontier_expand_flush") == frontier_flush:
-        return False  # already expanded this flush
 
     current_topic = path_so_far[-1]
+
+    # One expansion per topic — once we've expanded for this topic, don't
+    # re-expand on every subsequent flush (the old per-flush cooldown was
+    # insufficient: frontier_flush increments each flush, so the gate
+    # re-opened on every flush after FRONTIER_MIN_FLUSHES was reached).
+    if session.get("_last_frontier_expand_topic") == current_topic:
+        return False
+
     current_quality = quality_map.get(current_topic, 0.0)
 
-    # Check if the current topic meets the progression threshold
+    # Check if the current topic meets any progression threshold:
+    #   1. Quality threshold crossed (student made a real attempt), OR
+    #   2. Enough flushes spent on this topic, OR
+    #   3. An agent question was asked on this topic (judge has probed it)
     last_path_flush = session.get("_last_path_update_flush", 0)
     flushes_on_topic = frontier_flush - last_path_flush
-    if current_quality < FRONTIER_QUALITY_GATE and flushes_on_topic < FRONTIER_MIN_FLUSHES:
+    question_probed = any(
+        q.get("path_topic") == current_topic
+        for q in session.get("questions_asked", [])
+    )
+    if current_quality < FRONTIER_QUALITY_GATE and flushes_on_topic < FRONTIER_MIN_FLUSHES and not question_probed:
         return False
 
     # Expand: add next batch of topics sorted by exploitability + lens continuity
@@ -1685,7 +1800,7 @@ def _expand_frontier_if_ready(session: dict, quality_map: dict) -> bool:
     new_titles = [t["title"] for t in candidates[:FRONTIER_BATCH_SIZE]]
     frontier.update(new_titles)
     session["frontier_titles"] = frontier
-    session["_last_frontier_expand_flush"] = frontier_flush  # cooldown: don't re-expand same flush
+    session["_last_frontier_expand_topic"] = current_topic  # one expansion per topic
 
     logger.info(
         "[Frontier] Expanded by %d topics (current=%s, quality=%.2f): %s",
@@ -1802,8 +1917,17 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
             last_mcts_flush_prev = session.get("last_mcts_flush", -MCTS_DEBOUNCE_TURNS)
             since_last_mcts      = flush_count - last_mcts_flush_prev
 
+            # Only project once the student has substantially addressed the
+            # current topic.  No addressed topic → no projection yet.
+            current_topic_quality = (
+                quality_map.get(path_so_far_list[-1], 0.0)
+                if path_so_far_list else 0.0
+            )
+            topic_ready = current_topic_quality >= PROJECTION_QUALITY_GATE
+
             run_mcts = (
                 len(remaining) >= 2
+                and topic_ready
                 and (
                     just_expanded
                     or (word_count >= MCTS_MIN_WORDS and since_last_mcts >= MCTS_DEBOUNCE_TURNS)
@@ -1833,8 +1957,12 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
 
     if run_mcts:
         try:
-            # Build consolidated weights for the MCTS projection.
-            mcts_weights = _build_mcts_weights(session, session_id, state, quality_map)
+            # Update per-topic exploitability weights from live signals before projection.
+            opp_bonus = _build_opponent_bonus_map(session_id, all_topics)
+            _update_topic_weights(session, quality_map, opp_bonus)
+
+            # Build consolidated weights, reusing the opponent bonus already computed.
+            mcts_weights = _build_mcts_weights(session, session_id, quality_map, opponent_bonus=opp_bonus)
 
             # Embed path topics so cosine flow works from the last path topic.
             path_vecs: dict[str, list] = {}
@@ -1853,9 +1981,16 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
 
             path_tuple = tuple(path_so_far_list)
 
+            # Focus projection on the most likely path continuation —
+            # top PROJECTION_TOP_K topics by current exploitability weight.
+            # After _update_topic_weights, weights reflect live hearing signals.
+            focused = remaining if len(remaining) <= PROJECTION_TOP_K else sorted(
+                remaining, key=lambda t: t.get("exploitability", 0.5), reverse=True
+            )[:PROJECTION_TOP_K]
+
             proj_fn = functools.partial(
                 run_projection,
-                remaining,
+                focused,
                 root_label=root_label,
                 weights=mcts_weights,
                 path_so_far=path_tuple,
@@ -1873,10 +2008,17 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
             # reusing a stale result for another full debounce cycle.
             session["last_mcts_flush"] = last_mcts_flush_prev
     else:
-        reason = (
-            f"words={word_count}<{MCTS_MIN_WORDS}" if word_count < MCTS_MIN_WORDS
-            else f"debounce ({since_last_mcts}/{MCTS_DEBOUNCE_TURNS} flushes)"
-        )
+        if not topic_ready:
+            reason = (
+                f"quality gate: topic={path_so_far_list[-1]!r} "
+                f"q={current_topic_quality:.2f}<{PROJECTION_QUALITY_GATE}"
+                if path_so_far_list
+                else "no topic addressed yet"
+            )
+        elif word_count < MCTS_MIN_WORDS:
+            reason = f"words={word_count}<{MCTS_MIN_WORDS}"
+        else:
+            reason = f"debounce ({since_last_mcts}/{MCTS_DEBOUNCE_TURNS} flushes)"
         logger.debug("[MCTS] Skipped projection (%s), reusing cached %d topics", reason, len(predicted_next))
 
     # ── Send agenda update to frontend ────────────────────────────────────
@@ -2220,6 +2362,7 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                 "selected":     is_winner,
                 "audio":        audio_b64 if is_winner else "",
                 "audio_format": audio_format if is_winner else "",
+                "path_topic":   session.get("path_so_far", [])[-1] if session.get("path_so_far") else "",
             }
             if is_winner:
                 session['questions_asked'].append(question_data)

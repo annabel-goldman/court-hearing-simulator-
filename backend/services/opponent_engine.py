@@ -216,11 +216,13 @@ class OpponentEngine:
         """
         state = self.sessions.get(session_id)
         if not state or not state.opposing_brief:
-            logger.debug("[OpponentEngine] No session or brief for %s — skipping", session_id)
+            logger.info("[OpponentEngine] No session or brief for %s — skipping (pass opposing_brief in config)", session_id)
             return None
 
         # Don't respond to very short utterances
-        if len(advocate_utterance.split()) < 8:
+        word_count = len(advocate_utterance.split())
+        if word_count < 8:
+            logger.debug("[OpponentEngine] Utterance too short (%d words) for %s — skipping", word_count, session_id)
             return None
 
         client, model = get_task_client("opponent_response")
