@@ -28,7 +28,7 @@ import type {
   OpponentResponse,
   SimulationPhase,
 } from '../multi-agent/types';
-import { Alert } from '../multi-agent/components/ui';
+import { Alert, Button } from '../multi-agent/components/ui';
 import {
   RecordingControls,
   RecordingStatus,
@@ -51,6 +51,7 @@ import type { AgendaItem, PredictedTopic } from '../multi-agent/types';
 import '../multi-agent/styles/index.css';
 import '../orchestrated-agents/agenda.css';
 import '../orchestrated-agents/system-config.css';
+import '../orchestrated-agents/playground-theme.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -394,14 +395,18 @@ export default function OrchestratedAgents() {
     pendingNodesRef.current = [];
     previewIdRef.current = 10001;
     seenPreviewTopicsRef.current.clear();
+    // Queue: accumulate agendas by prediction_id, display in sorted order
+    const agendaByPredId = new Map<number, AgendaItem>();
+    // Buffer preview nodes by pred_id, flush in order so MCTS viz matches agenda
+    const previewNodesByPred = new Map<number, Array<{ id: number; p: number; d: number; label?: string }>>();
+    let nextPredToFlush = 1;
     if (mctsFlushRef.current) clearInterval(mctsFlushRef.current);
     setMctsTree({ nodes: [], edges: [] });
 
-    // Flush up to BATCH_SIZE pending nodes into state every FLUSH_MS ms.
-    // This rate-limits visual growth so the tree visibly builds rather than
-    // snapping in all at once (MCTS runs in sub-second time on CPU).
-    const BATCH_SIZE = 1;
-    const FLUSH_MS   = 120;
+    // Flush up to BATCH_SIZE pending nodes every FLUSH_MS ms.
+    // Small batches for gradual visible growth, tuned to agenda arrival.
+    const BATCH_SIZE = 2;
+    const FLUSH_MS   = 100;
     mctsFlushRef.current = setInterval(() => {
       const batch = pendingNodesRef.current.splice(0, BATCH_SIZE);
       if (batch.length === 0) return;
@@ -464,21 +469,23 @@ export default function OrchestratedAgents() {
             setGenerationStatus(detail || '');
 
           } else if (event.type === 'agenda') {
-            // One lens agenda just completed — add it immediately
+            // One lens agenda just completed — queue by prediction_id, display in order
             const ag = event.data as {
               prediction_id: number; lens: string; rationale: string; topics: PredictedTopic[];
             };
             if (ag.topics.length > 0 && ag.rationale !== 'Parse error.') {
-              setAgendaItems(prev => [
-                ...prev,
-                {
-                  id: String(ag.prediction_id),
-                  lens: ag.lens,
-                  rationale: ag.rationale,
-                  topics: ag.topics,
-                  agentId: null,
-                },
-              ]);
+              const item: AgendaItem = {
+                id: String(ag.prediction_id),
+                lens: ag.lens,
+                rationale: ag.rationale,
+                topics: ag.topics,
+                agentId: null,
+              };
+              agendaByPredId.set(ag.prediction_id, item);
+              const sorted = Array.from(agendaByPredId.entries())
+                .sort(([a], [b]) => a - b)
+                .map(([, v]) => v);
+              setAgendaItems(sorted);
 
               // Ensure preview root exists before enqueueing children
               setMctsTree(prev => {
@@ -499,20 +506,23 @@ export default function OrchestratedAgents() {
               for (const t of newTopics) seenPreviewTopicsRef.current.add(t.title);
 
               const lensId = previewIdRef.current++;
-              pendingNodesRef.current.push({
-                id: lensId,
-                p: 10000,
-                d: 1,
-                label: ag.lens,
-              });
-
+              const nodesForThisPred: Array<{ id: number; p: number; d: number; label?: string }> = [
+                { id: lensId, p: 10000, d: 1, label: ag.lens },
+              ];
               for (const topic of newTopics) {
-                pendingNodesRef.current.push({
+                nodesForThisPred.push({
                   id: previewIdRef.current++,
                   p: lensId,
                   d: 2,
                   label: topic.title,
                 });
+              }
+              previewNodesByPred.set(ag.prediction_id, nodesForThisPred);
+              while (previewNodesByPred.has(nextPredToFlush)) {
+                const batch = previewNodesByPred.get(nextPredToFlush)!;
+                previewNodesByPred.delete(nextPredToFlush);
+                pendingNodesRef.current.push(...batch);
+                nextPredToFlush++;
               }
             }
 
@@ -525,6 +535,8 @@ export default function OrchestratedAgents() {
             setGenerationStatus('');
 
             const data = event.data as Record<string, unknown>;
+            const rawPreds = (data.predictions as Array<{ prediction_id: number; lens: string; rationale: string; topics: PredictedTopic[] }>) ?? [];
+            const filtered = rawPreds.filter(p => p.topics.length > 0 && p.rationale !== 'Parse error.');
             setPredictedTopicSets(data);
             if (data.mcts_tree) setMctsTree(data.mcts_tree as MCTSTree);
 
@@ -534,19 +546,13 @@ export default function OrchestratedAgents() {
               setBriefSummary(data.case_summary);
             }
 
-            const items: AgendaItem[] = (
-              (data.predictions as Array<{
-                prediction_id: number; lens: string; rationale: string; topics: PredictedTopic[];
-              }>) ?? []
-            )
-              .filter(p => p.topics.length > 0 && p.rationale !== 'Parse error.')
-              .map((p) => ({
-                id: String(p.prediction_id),
-                lens: p.lens,
-                rationale: p.rationale,
-                topics: p.topics,
-                agentId: null,
-              }));
+            const items: AgendaItem[] = filtered.map((p) => ({
+              id: String(p.prediction_id),
+              lens: p.lens,
+              rationale: p.rationale,
+              topics: p.topics,
+              agentId: null,
+            }));
 
             setAgendaItems(items);
 
@@ -576,11 +582,16 @@ export default function OrchestratedAgents() {
     }
     if (startingRef.current) return;  // prevent double-click
     startingRef.current = true;
-
+    try {
     // ── Phase 1: Connect WebSocket and send config ────────────────────
     if (!isConnected) {
-      connect();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        await connect();
+      } catch (e) {
+        console.error('[handleStartSimulation] WebSocket connection failed:', e);
+        setPhase('SETUP');
+        return;
+      }
     }
     
     sendConfig(activeAgents, briefSummary, opposingBriefText);
@@ -677,6 +688,7 @@ export default function OrchestratedAgents() {
     } catch (e) {
       console.error('Recording start failed:', e);
       setPhase('READY');
+    }
     } finally {
       startingRef.current = false;
     }
@@ -705,7 +717,8 @@ export default function OrchestratedAgents() {
     setMctsTree(null);
   }, []);
 
-  /** Full session clear — resets everything back to SETUP. */
+  /** Full session clear — resets the hearing but preserves briefs/agenda
+   *  so you can immediately start a new hearing without re-uploading. */
   const handleClearSession = useCallback(() => {
     // Stop any in-flight recording / connection
     stopRecording();
@@ -731,21 +744,12 @@ export default function OrchestratedAgents() {
     // Cancel any running MCTS flush timer
     if (mctsFlushRef.current) { clearInterval(mctsFlushRef.current); mctsFlushRef.current = null; }
     pendingNodesRef.current = [];
-    previewIdRef.current = 10001;
-    seenPreviewTopicsRef.current.clear();
 
-    // Reset all state back to initial — including a fresh session ID so the
-    // backend doesn't confuse old and new session data.
+    // Fresh session ID so the backend doesn't confuse old and new session data.
     setSessionId(generateSessionId());
-    setPhase('SETUP');
-    setUserBrief(null);
-    setOpposingBriefText('');
-    setBriefSummary('');
-    setAgendaItems([]);
-    setIsGeneratingAgenda(false);
-    setAgendaError(null);
-    setGenerationStatus('');
-    setPredictedTopicSets(null);
+
+    // Clear hearing state but keep briefs, agenda, and topic sets so the
+    // user can start a new hearing immediately.
     setTranscript('');
     setChatMessages([]);
     currentSpeechRef.current = '';
@@ -753,12 +757,13 @@ export default function OrchestratedAgents() {
     setQuestions([]);
     setOpponentResponses([]);
     setScores([]);
-    setInactiveAgentIds(new Set());
     setAgendaUpdate(null);
-    setMctsTree(null);
     setElapsedSeconds(0);
     setJudgeIntroText(null);
-  }, [stopRecording, disconnect]);
+
+    // Go to READY if we already have an agenda, otherwise SETUP
+    setPhase(agendaItems.length > 0 ? 'READY' : 'SETUP');
+  }, [stopRecording, disconnect, clearSilenceTimer, agendaItems.length]);
 
   const handleAgentsChange = useCallback(
     (newAgents: Agent[]) => {
@@ -808,7 +813,7 @@ export default function OrchestratedAgents() {
   );
 
   return (
-    <div className="ma-page ma-invisible-scroll">
+    <div className="ma-page oa-page ma-invisible-scroll">
       {/* ── Header ── */}
       <header className="ma-header">
         <div className="ma-header__inner">
@@ -820,6 +825,13 @@ export default function OrchestratedAgents() {
           </div>
           <div className="ma-header__status">
             <nav className="oa-header-nav">
+              <Link
+                to="/"
+                state={{ returnToWelcome: true }}
+                className="oa-header-nav__link"
+              >
+                ← Back to The Bench
+              </Link>
               <Link
                 to="/multi-agent"
                 className="oa-header-nav__link"
@@ -870,6 +882,7 @@ export default function OrchestratedAgents() {
         <div className="oa-setup-section__body oa-setup-section__body--horizontal">
           <BriefUpload
             onBriefsReady={handleBriefsReady}
+            skipSummary
           />
 
           {!isLoadingAgents && (
@@ -911,10 +924,11 @@ export default function OrchestratedAgents() {
 
           {/* Middle column — Your argument + parallel agent evaluations */}
           <div className="ma-main__column ma-main__column--mid">
-            {/* ── Turn Indicator ── */}
+            {/* ── Sticky hearing bar: turn indicator + recording controls during session ── */}
             {(phase === 'INTRO' || phase === 'RECORDING' || phase === 'FINISHED') && (
-              <div
-                className={`oa-turn ${
+              <div className="oa-hearing-bar">
+                <div
+                  className={`oa-turn ${
                   phase === 'INTRO'
                     ? 'oa-turn--judge'
                     : phase === 'FINISHED'
@@ -952,6 +966,29 @@ export default function OrchestratedAgents() {
                   )}
                 </span>
               </div>
+                {(phase === 'RECORDING' || phase === 'FINISHED') && (
+                  <div className="oa-hearing-bar__controls">
+                    {phase === 'RECORDING' && (
+                      <Button
+                        variant="danger"
+                        size="lg"
+                        onClick={handleStopSimulation}
+                      >
+                        End Hearing
+                      </Button>
+                    )}
+                    {phase === 'FINISHED' && (
+                      <Button
+                        variant="primary"
+                        size="lg"
+                        onClick={handleResetSession}
+                      >
+                        Start New Hearing
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Judge Introduction Banner */}
@@ -981,9 +1018,12 @@ export default function OrchestratedAgents() {
                 {recordingError && <Alert variant="error">{recordingError}</Alert>}
 
                 {phase === 'SETUP' && (
-                  <p className="ma-section__help">
-                    Upload both briefs and generate the agenda to begin the hearing.
+                  <p className="oa-setup-guide">
+                    Upload both briefs, then click <strong>Start</strong> to create your agenda. Assign agents to topics, then start the hearing.
                   </p>
+                )}
+                {phase === 'READY' && (
+                  <p className="oa-ready-hint">Agenda ready. Click <strong>Start Hearing</strong> when you&apos;re ready to argue.</p>
                 )}
 
                 <RecordingControls
@@ -992,6 +1032,9 @@ export default function OrchestratedAgents() {
                   onStart={handleStartSimulation}
                   onStop={handleStopSimulation}
                   onReset={handleResetSession}
+                  startLabel="Start Hearing"
+                  stopLabel="End Hearing"
+                  resetLabel="Start New Hearing"
                 />
 
                 <TranscriptDisplay transcript={transcript} chatMessages={chatMessages} />
@@ -999,7 +1042,7 @@ export default function OrchestratedAgents() {
                 {/* ── Toggleable agent chips ── */}
                 {agents.length > 0 && (
                   <div className="oa-agent-toggles">
-                    <p className="oa-agent-toggles__label">Active Judges — click to toggle</p>
+                    <p className="oa-agent-toggles__label">Panel judges — click to mute or unmute</p>
                     <div className="oa-agent-toggles__list">
                       {agents.map(agent => {
                         const active = !inactiveAgentIds.has(agent.id);
@@ -1025,27 +1068,6 @@ export default function OrchestratedAgents() {
               </div>
             </div>
 
-            {/* ── Agent Questions (parallel evaluations, collapsible) ── */}
-            <div className={`oa-panel${agentQuestionsCollapsed ? ' oa-panel--collapsed' : ''}`}>
-              <button
-                className="oa-panel__header oa-panel__header--toggle"
-                onClick={() => setAgentQuestionsCollapsed(c => !c)}
-              >
-                <span className="oa-panel__title">
-                  Agent Questions
-                  {questions.length > 0 && (
-                    <span className="oa-panel__count">{questions.length}</span>
-                  )}
-                </span>
-                <span className="oa-panel__chevron">{agentQuestionsCollapsed ? '▶' : '▼'}</span>
-              </button>
-              {!agentQuestionsCollapsed && (
-                <div className="oa-panel__body">
-                  <QuestionFeed agents={agents} questions={questions} />
-                </div>
-              )}
-            </div>
-
             {/* ── Argument Scores ── */}
             <div className="oa-panel">
               <div className="oa-panel__header">
@@ -1060,16 +1082,16 @@ export default function OrchestratedAgents() {
           {/* Right column — Judge output + Opponent output */}
           <div className="ma-main__column ma-main__column--right">
             <div className="oa-panel">
-              <div className="oa-panel__header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div className="oa-panel__header oa-panel__header--with-action">
                 <span className="oa-panel__title">Judge Activity</span>
                 {voices.length > 0 && (
                   <select
+                    className="oa-voice-select"
                     value={judgeVoiceId}
                     onChange={e => handleJudgeVoiceChange(e.target.value)}
-                    title="Voice for judge panel (winning agent)"
-                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.3rem', background: 'var(--oa-bg-panel, #1a1f2e)', color: 'var(--oa-text-secondary, #9ca3af)', border: '1px solid var(--oa-border, #2d3548)', borderRadius: '4px', maxWidth: '130px' }}
+                    title="Voice for judge questions"
                   >
-                    <option value="">default voice</option>
+                    <option value="">Default voice</option>
                     {voices.map(v => (
                       <option key={v.id} value={v.id}>{v.name}</option>
                     ))}
@@ -1082,16 +1104,16 @@ export default function OrchestratedAgents() {
             </div>
 
             <div className="oa-panel">
-              <div className="oa-panel__header" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div className="oa-panel__header oa-panel__header--with-action">
                 <span className="oa-panel__title">Opposing Counsel</span>
                 {voices.length > 0 && (
                   <select
+                    className="oa-voice-select"
                     value={opponentVoiceId}
                     onChange={e => handleOpponentVoiceChange(e.target.value)}
                     title="Voice for opposing counsel"
-                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.3rem', background: 'var(--oa-bg-panel, #1a1f2e)', color: 'var(--oa-text-secondary, #9ca3af)', border: '1px solid var(--oa-border, #2d3548)', borderRadius: '4px', maxWidth: '130px' }}
                   >
-                    <option value="">default voice</option>
+                    <option value="">Default voice</option>
                     {voices.map(v => (
                       <option key={v.id} value={v.id}>{v.name}</option>
                     ))}
@@ -1101,6 +1123,30 @@ export default function OrchestratedAgents() {
               <div className="oa-panel__body">
                 <OpponentFeed responses={opponentResponses} />
               </div>
+            </div>
+
+            {/* ── Agent Questions (vertical list, below Opposing Counsel) ── */}
+            <div className={`oa-panel${agentQuestionsCollapsed ? ' oa-panel--collapsed' : ''}`}>
+              <button
+                className="oa-panel__header oa-panel__header--toggle"
+                onClick={() => setAgentQuestionsCollapsed(c => !c)}
+              >
+                <span className="oa-panel__title">
+                  Questions the bench may ask
+                  {questions.length > 0 && (
+                    <span className="oa-panel__count">{questions.length}</span>
+                  )}
+                </span>
+                <span className="oa-panel__chevron">{agentQuestionsCollapsed ? '▶' : '▼'}</span>
+              </button>
+              {!agentQuestionsCollapsed && (
+                <div className="oa-panel__body">
+                  <p className="oa-panel__hint">
+                    This is a range of questions the judge is thinking from right now.
+                  </p>
+                  <QuestionFeed agents={agents} questions={questions} />
+                </div>
+              )}
             </div>
           </div>
         </div>

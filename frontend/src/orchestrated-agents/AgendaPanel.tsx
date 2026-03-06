@@ -86,7 +86,7 @@ export const AgendaPanel = memo(function AgendaPanel({
           </div>
         ) : items.length === 0 ? (
           <p className="oa-agenda__empty">
-            Upload both briefs and generate a summary to see the projected hearing agenda.
+            Upload your brief and the opposing brief, then click Start to create your projected hearing agenda.
           </p>
         ) : (
           <div className="oa-agenda">

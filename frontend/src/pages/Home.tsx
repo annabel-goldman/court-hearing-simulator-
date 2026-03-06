@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { JudgeAvatarDifficulty } from '../3d-rendering/types'
@@ -95,6 +95,7 @@ async function extractTextFromPdf(file: File): Promise<string> {
 
 export default function Home() {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [stage, setStage] = useState<HomeStage>('landing')
   const [landingPhase, setLandingPhase] = useState<LandingPhase>('intro')
@@ -103,6 +104,7 @@ export default function Home() {
   const [deskEntering, setDeskEntering] = useState(false)
   const [landingActivated, setLandingActivated] = useState(false)
   const [showLandingButton, setShowLandingButton] = useState(false)
+  const [musicMuted, setMusicMuted] = useState(false)
 
   const [fileA, setFileA] = useState<UploadedFile | null>(null)
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
@@ -138,6 +140,16 @@ export default function Home() {
     gainNode: GainNode
     pulseIntervalId: number
   } | null>(null)
+
+  useEffect(() => {
+    const state = location.state as { returnToWelcome?: boolean } | null
+    if (state?.returnToWelcome) {
+      setStage('landing')
+      setLandingPhase('welcome')
+      setLandingActivated(true)
+      setShowLandingButton(true)
+    }
+  }, [location.state])
 
   const getAudioContext = () => {
     if (typeof window === 'undefined') return null
@@ -653,6 +665,16 @@ export default function Home() {
     setInfoModalOpen(true)
   }
 
+    const toggleMusicMuted = () => {
+    if (musicMuted) {
+      startBackgroundMusic()
+      setMusicMuted(false)
+    } else {
+      stopBackgroundMusic()
+      setMusicMuted(true)
+    }
+  }
+
   const openSettingsModal = () => {
     markSettingsPulseSeen()
     setInfoModalOpen(false)
@@ -785,6 +807,25 @@ export default function Home() {
               </text>
             </svg>
           </button>
+          {landingPhase === 'welcome' && (
+            <button
+              type="button"
+              className="landing-mute-btn"
+              onClick={toggleMusicMuted}
+              aria-label={musicMuted ? 'Unmute background music' : 'Mute background music'}
+              title={musicMuted ? 'Unmute music' : 'Mute music'}
+            >
+              {musicMuted ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
+                  <path d="M11 5L6 9H2v6h4l5 4V5zm4.54 3.46l-1.41 1.41c.81.81 1.31 1.92 1.31 3.13s-.5 2.33-1.31 3.13l1.41 1.41c1.04-1.04 1.68-2.47 1.68-4.54s-.64-3.5-1.68-4.54zm2.13 2.13l-1.41 1.41c.33.33.54.78.54 1.27s-.21.94-.54 1.27l1.41 1.41c.63-.63 1.02-1.5 1.02-2.47s-.39-1.84-1.02-2.47z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                </svg>
+              )}
+            </button>
+          )}
         </div>
         <div className={`landing-content ${landingPhase === 'intro' ? 'landing-single-intro' : ''}`}>
           {landingPhase === 'intro' ? (
@@ -804,6 +845,14 @@ export default function Home() {
             </>
           ) : (
             <>
+              <button
+                type="button"
+                className={`landing-back-btn ${showLandingButton ? 'is-visible' : ''}`}
+                onClick={() => { setLandingPhase('intro'); setLandingActivated(false); setShowLandingButton(false); }}
+                aria-label="Back to start"
+              >
+                ← Back
+              </button>
               <img
                 src={BENCH_LOGO_SRC}
                 alt="The Bench"
@@ -819,6 +868,13 @@ export default function Home() {
                   aria-hidden={!showLandingButton}
                 >
                   upload your briefs
+                </button>
+                <button
+                  type="button"
+                  className={`landing-playground-btn ${showLandingButton ? 'is-visible' : ''}`}
+                  onClick={() => navigate('/orchestrated-agents')}
+                >
+                  Playground Mode
                 </button>
               </div>
             </>
@@ -1110,6 +1166,13 @@ export default function Home() {
               disabled={!canEnter}
             >
               {intakePhase === 'idle' ? 'Continue' : intakePhase === 'launching' ? 'Submitting…' : 'Reviewing…'}
+            </button>
+            <button
+              type="button"
+              className="settings-playground-btn"
+              onClick={() => navigate('/orchestrated-agents')}
+            >
+              Playground Mode
             </button>
             <button
               type="button"

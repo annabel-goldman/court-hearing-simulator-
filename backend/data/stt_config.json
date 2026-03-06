@@ -1,0 +1,9 @@
+{
+  "provider": "groq",
+  "api_key": "",
+  "base_url": "https://api.groq.com/openai/v1",
+  "model": "whisper-large-v3-turbo",
+  "whisper_model": "medium",
+  "device": "cuda",
+  "compute_type": "float16"
+}

@@ -5,7 +5,7 @@
  * Uses shared UI components for consistent styling.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { BriefData } from '../types';
@@ -16,7 +16,9 @@ GlobalWorkerOptions.workerSrc = workerSrc;
 
 interface BriefUploadProps {
   onBriefsReady: (userBrief: BriefData, opposingBrief: BriefData) => void;
-  onSummaryGenerated: (summary: string) => void;
+  onSummaryGenerated?: (summary: string) => void;
+  /** When true, Start skips the summarize API and calls onBriefsReady directly (e.g. OrchestratedAgents uses projected-timeline which generates agenda + summary) */
+  skipSummary?: boolean;
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -42,12 +44,17 @@ function countWords(text: string): number {
   return text.split(/\s+/).length;
 }
 
-export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadProps) {
+export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = false }: BriefUploadProps) {
   const [userBrief, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBrief, setOpposingBrief] = useState<BriefData | null>(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  const [started, setStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userBrief || !opposingBrief) setStarted(false);
+  }, [userBrief, opposingBrief]);
 
   const handleFileUpload = useCallback(async (file: File, type: 'user' | 'opposing') => {
     try {
@@ -66,8 +73,14 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
     }
   }, []);
 
-  const handleGenerateSummary = useCallback(async () => {
+  const handleStart = useCallback(async () => {
     if (!userBrief || !opposingBrief) return;
+
+    if (skipSummary) {
+      setStarted(true);
+      onBriefsReady(userBrief, opposingBrief);
+      return;
+    }
 
     setIsGeneratingSummary(true);
     setError(null);
@@ -88,7 +101,7 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
 
       const data = await response.json();
       setSummary(data.summary);
-      onSummaryGenerated(data.summary);
+      onSummaryGenerated?.(data.summary);
       onBriefsReady(userBrief, opposingBrief);
     } catch (err) {
       console.error('Failed to generate summary:', err);
@@ -96,9 +109,9 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
     } finally {
       setIsGeneratingSummary(false);
     }
-  }, [userBrief, opposingBrief, onBriefsReady, onSummaryGenerated]);
+  }, [userBrief, opposingBrief, onBriefsReady, onSummaryGenerated, skipSummary]);
 
-  const canGenerateSummary = userBrief && opposingBrief && !summary;
+  const canStart = userBrief && opposingBrief && !started && (skipSummary || !summary);
 
   return (
     <Card>
@@ -128,15 +141,15 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated }: BriefUploadPr
           />
         </div>
 
-        {canGenerateSummary && (
+        {canStart && (
           <Button
             variant="primary"
             size="lg"
             fullWidth
-            onClick={handleGenerateSummary}
+            onClick={handleStart}
             isLoading={isGeneratingSummary}
           >
-            Generate Brief Summary
+            Start
           </Button>
         )}
 

@@ -158,11 +158,13 @@ You MUST respond in EXACTLY this format (nothing else):
 ASK: yes
 QUESTION: Your one-sentence question to the attorney
 
-Or if you truly have no question:
+Or if you choose not to interrupt right now:
 
 ASK: no
+QUESTION: The question you are considering (or would ask later)
 
-Remember: when in doubt, ASK. Good judges probe aggressively.
+Always provide both ASK and QUESTION. The QUESTION is the probing question you have in mind
+for the advocate; include it even when ASK is no. Remember: when in doubt, ASK.
 
 /no_think"""
 

@@ -1,0 +1,302 @@
+/**
+ * Playground Page Theme — Welcome Stage Palette
+ *
+ * Overrides multi-agent variables when rendered as the Orchestrated Agents
+ * (Playground) page, matching the warm sepia/gold aesthetic of the welcome stage.
+ * Add .oa-page to the root container to apply.
+ */
+
+.oa-page {
+  /* Override --ma-* variables to match welcome/landing stage */
+  --ma-bg-primary: #1a110c;
+  --ma-bg-secondary: #261a12;
+  --ma-bg-tertiary: #35281d;
+  --ma-bg-input: #1e1510;
+
+  --ma-text-primary: #fff2dd;
+  --ma-text-secondary: #efdac0;
+  --ma-text-muted: #d3bd97;
+  --ma-text-dim: #b99a70;
+
+  --ma-border-default: rgba(216, 176, 112, 0.45);
+  --ma-border-muted: rgba(200, 168, 110, 0.6);
+
+  /* Status colors — warm variants */
+  --ma-success: #5db87a;
+  --ma-success-bg: rgba(93, 184, 122, 0.2);
+  --ma-error: #d96666;
+  --ma-error-bg: rgba(217, 102, 102, 0.2);
+  --ma-warning: #d4a84b;
+  --ma-warning-bg: rgba(212, 168, 75, 0.2);
+  --ma-info: #7a9fd4;
+  --ma-info-bg: rgba(122, 159, 212, 0.2);
+
+  /* Button colors — gold/amber palette */
+  --ma-btn-primary: #b8925c;
+  --ma-btn-primary-hover: #c9a66e;
+  --ma-btn-success: #5db87a;
+  --ma-btn-success-hover: #6ec98a;
+  --ma-btn-danger: #c45c5c;
+  --ma-btn-danger-hover: #d96666;
+  --ma-btn-warning: #c99a3d;
+  --ma-btn-warning-hover: #d4a84b;
+  --ma-btn-secondary: #5c4a35;
+  --ma-btn-secondary-hover: #6d5a42;
+  --ma-btn-disabled: #4a3d2e;
+
+  /* Config panel accents — warm tones */
+  --ma-opponent: #c99a5c;
+
+  /* Surface/border for MCTS tree etc. */
+  --ma-surface: #1e1610;
+  --ma-border: rgba(216, 176, 112, 0.35);
+}
+
+/* Page background — matches landing-stage gradient */
+.oa-page.ma-page {
+  background:
+    linear-gradient(12deg, rgba(216, 178, 122, 0.08), transparent 35%),
+    linear-gradient(220deg, rgba(95, 64, 33, 0.2), transparent 42%),
+    repeating-linear-gradient(
+      132deg,
+      rgba(243, 219, 176, 0.05) 0px,
+      rgba(243, 219, 176, 0.05) 2px,
+      transparent 2px,
+      transparent 29px
+    ),
+    linear-gradient(145deg, #2e1d12 0%, #452d1b 38%, #2a1b13 68%, #18110c 100%);
+  font-family: 'Spectral', Georgia, serif;
+}
+
+/* Header — warm bar matching desk-stage nav */
+.oa-page .ma-header {
+  background: rgba(26, 17, 12, 0.92);
+  border-bottom: 1px solid rgba(216, 176, 112, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+/* Nav links — gold accent for active */
+.oa-page .oa-header-nav__link--active {
+  color: #e8c882;
+}
+
+.oa-page .oa-header-nav__link:hover {
+  color: #f0d8ae;
+}
+
+/* Setup section toggle — paper-like */
+.oa-page .oa-setup-section__toggle {
+  background: rgba(38, 26, 18, 0.85);
+  border-color: rgba(216, 176, 112, 0.4);
+  color: #d3bd97;
+}
+
+.oa-page .oa-setup-section__toggle:hover {
+  color: #efd8af;
+  border-color: rgba(216, 176, 112, 0.55);
+}
+
+/* Panels and cards — subtle warm borders */
+.oa-page .oa-panel,
+.oa-page .ma-card {
+  background: rgba(38, 26, 18, 0.7);
+  border-color: rgba(216, 176, 112, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.oa-page .oa-panel:hover,
+.oa-page .ma-card:hover {
+  border-color: rgba(216, 176, 112, 0.5);
+}
+
+/* Clear session button — ghost style consistent with landing */
+.oa-page .ma-clear-session-btn {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid rgba(227, 189, 128, 0.52);
+  background: rgba(43, 34, 25, 0.62);
+  color: #e8cfaa;
+  font-family: 'Spectral', Georgia, serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.oa-page .ma-clear-session-btn:hover {
+  border-color: rgba(245, 214, 167, 0.9);
+  color: #f0d8ae;
+  background: rgba(52, 42, 30, 0.75);
+}
+
+/* Session timer — warm text */
+.oa-page .ma-session-timer {
+  color: #d3bd97;
+  font-variant-numeric: tabular-nums;
+}
+
+/* MCTS tree — warm surface */
+.oa-page .mcts-tree-viz {
+  background: rgba(30, 22, 16, 0.8);
+  border-color: rgba(216, 176, 112, 0.35);
+}
+
+.oa-page .mcts-tree-viz:hover {
+  border-color: rgba(216, 176, 112, 0.5);
+}
+
+/* Section group accent */
+.oa-page .oa-section-group__label {
+  border-left-color: #b8925c;
+}
+
+/* Judge intro banner — paper feel */
+.oa-page .oa-judge-intro {
+  background: rgba(38, 26, 18, 0.7);
+  border: 1px solid rgba(216, 176, 112, 0.4);
+  border-radius: 0.5rem;
+}
+
+/* Config panel accent borders — warm gold/amber */
+.oa-page .jcp-header,
+.oa-page .jcp-body {
+  border-left-color: #b8925c;
+}
+
+.oa-page .ocp-header,
+.oa-page .ocp-body {
+  border-left-color: var(--ma-opponent);
+}
+
+.oa-page .scp-header,
+.oa-page .scp-body {
+  border-left-color: #a78b5c;
+}
+
+/* Agent colors — warm filter on dots/badges to match welcome palette */
+.oa-page .oa-feed__dot,
+.oa-page .oa-agent-toggle__dot {
+  filter: sepia(0.25) saturate(1.15) hue-rotate(-8deg);
+}
+
+/* Opponent badges use --oa-type-* variables (warm palette above) */
+
+/* Opponent type badges — use warm palette (OpponentFeed reads these) */
+.oa-page {
+  --oa-type-rebuttal: #c45c5c;
+  --oa-type-exploitation: #c99a5c;
+  --oa-type-affirmative: #7a9fd4;
+}
+
+/* Three-column layout — Judge and Opponent activity on the right */
+.oa-page .ma-main__grid {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1024px) {
+  .oa-page .ma-main__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(280px, 360px);
+    gap: 1.5rem;
+  }
+}
+
+@media (min-width: 1400px) {
+  .oa-page .ma-main__grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(320px, 400px);
+  }
+}
+
+/* ── UX enhancements ──────────────────────────────────────────────────── */
+
+/* Sticky hearing bar — turn indicator + controls stay visible while scrolling */
+.oa-hearing-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 1rem;
+  margin: 0 -0.5rem 1rem;
+  background: rgba(38, 26, 18, 0.95);
+  border: 1px solid rgba(216, 176, 112, 0.4);
+  border-radius: 8px;
+  position: sticky;
+  top: 0.5rem;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.oa-hearing-bar .oa-turn {
+  flex: 1;
+  min-width: 0;
+}
+
+.oa-hearing-bar__controls {
+  flex-shrink: 0;
+}
+
+/* Setup / Ready guidance text */
+.oa-setup-guide,
+.oa-ready-hint {
+  color: var(--ma-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0 0 1rem;
+}
+
+.oa-ready-hint {
+  color: var(--ma-success);
+}
+
+.oa-setup-guide strong,
+.oa-ready-hint strong {
+  color: var(--ma-text-secondary);
+  font-weight: 600;
+}
+
+/* Voice selector — consistent styling, readable width */
+.oa-panel__header--with-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.oa-voice-select {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--ma-bg-input);
+  color: var(--ma-text-secondary);
+  border: 1px solid var(--ma-border-default);
+  border-radius: 4px;
+  min-width: 120px;
+  max-width: 160px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.oa-voice-select:focus {
+  outline: none;
+  border-color: var(--ma-info);
+}
+
+/* Right column sticky — Judge & Opponent panels stay visible on scroll */
+.oa-page .ma-main__column--right {
+  align-self: start;
+  position: sticky;
+  top: 1rem;
+}
+
+/* Improved empty state styling */
+.oa-page .oa-feed__empty {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ma-text-muted);
+  font-style: italic;
+  padding: 1rem 0;
+  margin: 0;
+}
+
+/* Recording controls spacing in panel */
+.oa-page .ma-recording-controls {
+  margin-bottom: 1rem;
+}

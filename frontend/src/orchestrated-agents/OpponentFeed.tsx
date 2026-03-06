@@ -18,9 +18,9 @@ interface OpponentFeedProps {
 }
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  rebuttal:      { label: 'Rebuttal',      color: '#e74c3c' },
-  exploitation:  { label: 'Exploitation',   color: '#e67e22' },
-  affirmative:   { label: 'Affirmative',    color: '#2980b9' },
+  rebuttal:      { label: 'Rebuttal',      color: 'var(--oa-type-rebuttal, #e74c3c)' },
+  exploitation:  { label: 'Exploitation',   color: 'var(--oa-type-exploitation, #e67e22)' },
+  affirmative:   { label: 'Affirmative',    color: 'var(--oa-type-affirmative, #2980b9)' },
 };
 
 const RECENT_COUNT = 2;
@@ -44,8 +44,7 @@ export const OpponentFeed = memo(function OpponentFeed({ responses }: OpponentFe
   if (responses.length === 0) {
     return (
       <p className="oa-feed__empty">
-        The opposing counsel will respond here as you argue — adapting to your points
-        and exploiting weaknesses the judges identify.
+        Opposing counsel responses will appear here as you argue — adapting to your points and exploiting weaknesses the judges identify. Responses update in real time.
       </p>
     );
   }

@@ -146,14 +146,16 @@ class MultiAgentLLM:
 
             # Strategy 1: ASK: yes/no + QUESTION: ... format
             ask_match = re.search(r'ASK:\s*(yes|no|true|false)', content, re.IGNORECASE)
-            q_match = re.search(r'QUESTION:\s*(.+)', content, re.IGNORECASE)
+            q_match = re.search(r'QUESTION:\s*(.+)', content, re.IGNORECASE | re.DOTALL)
             if ask_match:
                 should_ask = ask_match.group(1).lower() in ('yes', 'true')
-                if q_match and should_ask:
+                if q_match:
                     question = q_match.group(1).strip().strip('"\'')
+                    if question and len(question) < 10:
+                        question = None  # likely parsing artifact
 
             # Strategy 2: JSON format {"should_ask": true, "question": "..."}
-            if not should_ask:
+            if not should_ask and not question:
                 json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
                 if json_match:
                     try:
@@ -192,7 +194,7 @@ class MultiAgentLLM:
             if should_ask and not question:
                 question = "Counsel, could you elaborate on that last point for the court?"
 
-            return should_ask, question if should_ask else None
+            return should_ask, question
 
         except Exception as e:
             logger.error("Error in agent analysis for %s: %s", agent.name, e)

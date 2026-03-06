@@ -108,6 +108,12 @@ EXPANSION_QUALITY_THRESHOLD = 0.5
 # Evict WS sessions that have been idle for this long (network-drop guard).
 _SESSION_TTL = 3600.0  # 1 hour
 
+# Agent evaluation early-exit: once the first agent says "yes", allow this
+# many more seconds for additional candidates before cancelling remaining evals.
+AGENT_EVAL_GRACE_SECONDS = 5.0
+# Cancel remaining agent evals immediately if this many agents already said "yes".
+AGENT_EVAL_MIN_CANDIDATES = 3
+
 # -----------------------------------------------------------------------------
 # Models
 # -----------------------------------------------------------------------------
@@ -191,6 +197,7 @@ class STTConfigRequest(BaseModel):
     provider: str = "openai"
     api_key: str = ""
     base_url: str = ""
+    model: str = ""  # whisper model for cloud (e.g. whisper-large-v3-turbo for Groq)
     whisper_model: str = "medium"
     device: str = "cuda"
     compute_type: str = "float16"
@@ -470,7 +477,7 @@ def _extract_final_draft(text: str) -> str:
     rather than inside <think> tags, so extract_content's tag-stripping won't catch it.
     This function detects that pattern and returns only the last coherent speech block.
     """
-    if not re.search(r'Thinking Process|(?m)^\d+\.\s+\*\*', text):
+    if not re.search(r'Thinking Process|^\d+\.\s+\*\*', text, re.MULTILINE):
         return text
 
     # Strategy 1: extract speech blocks that appear between a section header and
@@ -714,8 +721,11 @@ async def get_default_tts_config_endpoint():
 @app.post("/api/tts-config")
 async def save_tts_config_endpoint(req: TTSConfigRequest):
     _openai_voices = {"alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "shimmer", "verse"}
+    _groq_voices = {"autumn", "diana", "hannah", "austin", "daniel", "troy"}
     provider = os.getenv("TTS_PROVIDER", "openai").lower()
-    if provider != "cartesia" and req.voice and req.voice not in _openai_voices:
+    if provider == "groq" and req.voice and req.voice not in _groq_voices:
+        raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(_groq_voices)} for Groq")
+    elif provider != "groq" and req.voice and req.voice not in _openai_voices:
         raise HTTPException(status_code=422, detail=f"voice must be one of {sorted(_openai_voices)}")
     if not req.model.strip():
         raise HTTPException(status_code=422, detail="model must not be empty")
@@ -734,21 +744,9 @@ async def save_tts_config_endpoint(req: TTSConfigRequest):
 async def get_tts_voices():
     """Return available TTS voices for the active provider."""
     provider = os.getenv("TTS_PROVIDER", "openai").lower().strip()
-    if provider == "cartesia":
-        api_key = os.getenv("CARTESIA_API_KEY", "")
-        if not api_key:
-            return []
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://api.cartesia.ai/voices",
-                    headers={"Authorization": f"Bearer {api_key}", "Cartesia-Version": "2024-06-10"},
-                )
-                resp.raise_for_status()
-                return [{"id": v["id"], "name": v["name"]} for v in resp.json()]
-        except Exception as e:
-            logger.warning("Failed to fetch Cartesia voices: %s", e)
-            return []
+    if provider == "groq":
+        return [{"id": n, "name": n.capitalize()}
+                for n in ["autumn", "diana", "hannah", "austin", "daniel", "troy"]]
     # OpenAI / fallback
     return [{"id": n, "name": n.capitalize()}
             for n in ["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "shimmer", "verse"]]
@@ -769,8 +767,8 @@ async def get_default_stt_config_endpoint():
 
 @app.post("/api/stt-config")
 async def save_stt_config_endpoint(req: STTConfigRequest):
-    if req.provider not in ("openai", "local"):
-        raise HTTPException(status_code=422, detail="provider must be 'openai' or 'local'")
+    if req.provider not in ("openai", "local", "groq"):
+        raise HTTPException(status_code=422, detail="provider must be 'openai', 'local', or 'groq'")
     valid_local_models = {"tiny", "base", "small", "medium", "large-v3"}
     if req.provider == "local" and req.whisper_model not in valid_local_models:
         raise HTTPException(status_code=422, detail=f"whisper_model must be one of {sorted(valid_local_models)}")
@@ -779,10 +777,16 @@ async def save_stt_config_endpoint(req: STTConfigRequest):
     valid_compute = {"float16", "int8_float16", "int8"}
     if req.compute_type not in valid_compute:
         raise HTTPException(status_code=422, detail=f"compute_type must be one of {sorted(valid_compute)}")
+    model = (req.model or "").strip()
+    if req.provider == "groq" and not model:
+        model = "whisper-large-v3-turbo"
+    elif req.provider == "openai" and not model:
+        model = "gpt-4o-mini-audio-preview"
     cfg = STTConfig(
         provider=req.provider,
         api_key=req.api_key,
         base_url=req.base_url,
+        model=model or "whisper-large-v3-turbo",
         whisper_model=req.whisper_model,
         device=req.device,
         compute_type=req.compute_type,
@@ -1228,27 +1232,28 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             if isinstance(stt_provider, GladiaLiveProvider):
                                 stt_provider.send_audio(session_id, audio_bytes)
                             else:
-                                # Batch mode: accumulate PCM chunks (~256 ms each)
-                                # into a buffer and transcribe once we have ~2.5 s.
-                                from services.stt_provider import pcm_rms_energy
-                                _PCM_BUFFER_BYTES = 80000  # ~2.5 s at 16 kHz 16-bit mono
-                                _PCM_ENERGY_GATE  = 150    # RMS threshold; silence ≈ 10–50
-
-                                rms = pcm_rms_energy(audio_bytes)
-                                sess = multi_agent_manager.session_data[session_id]
-                                if rms < _PCM_ENERGY_GATE:
-                                    # Silent chunk — if buffer has content, flush it
-                                    # (speaker may have paused), otherwise skip.
-                                    if len(sess.get('_pcm_buffer', b'')) < 8000:
-                                        continue
-
-                                sess['_pcm_buffer'] = sess.get('_pcm_buffer', b'') + audio_bytes
-                                if len(sess['_pcm_buffer']) >= _PCM_BUFFER_BYTES:
-                                    pcm_chunk = sess['_pcm_buffer']
-                                    sess['_pcm_buffer'] = b''
-                                    transcript = await stt_provider.transcribe(pcm_chunk, "pcm")
+                                # Frontend sends WebM (Chrome/Firefox) or MP4 (Safari) from MediaRecorder.
+                                # Detect format; transcribe each chunk directly. Do NOT treat as PCM.
+                                _WEBM_MAGIC = b'\x1a\x45\xdf\xa3'
+                                _MP4_FTYP = b'ftyp'  # at bytes 4-7 in MP4
+                                audio_format = None
+                                if audio_bytes[:4] == _WEBM_MAGIC:
+                                    audio_format = "webm"
+                                elif len(audio_bytes) >= 8 and audio_bytes[4:8] == _MP4_FTYP:
+                                    audio_format = "mp4"
+                                if audio_format:
+                                    transcript = await stt_provider.transcribe(audio_bytes, audio_format)
                                     if transcript.strip():
+                                        logger.info("[MultiAgent] STT (%s, %d bytes) → %r", audio_format, len(audio_bytes), transcript[:80])
                                         await _process_ma_transcript(session_id, transcript.strip())
+                                    else:
+                                        logger.debug("[MultiAgent] STT returned empty (%s, %d bytes)", audio_format, len(audio_bytes))
+                                else:
+                                    logger.debug(
+                                        "[MultiAgent] Unrecognized audio format (first bytes: %r); "
+                                        "expected WebM or MP4 from MediaRecorder",
+                                        audio_bytes[:12] if len(audio_bytes) >= 12 else audio_bytes[:len(audio_bytes)],
+                                    )
 
                     elif msg_type == "phase_change":
                         new_phase = payload.get("phase")
@@ -1765,8 +1770,10 @@ async def _select_best_question(
     Returns (agent, question) — the selected winner.  Falls back to
     random.choice if the TINY model is unavailable or parsing fails.
     """
-    if len(candidates) <= 1:
-        return candidates[0] if candidates else (None, None)
+    if not candidates:
+        return (None, None)
+    if len(candidates) <= 2:
+        return random.choice(candidates)
 
     client, model = get_task_client("question_selection")
     if not client:
@@ -1864,13 +1871,11 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                      word_count, multi_agent_manager.MIN_WORDS_BEFORE_INTERRUPT)
         return
 
-    # ── Concurrency guard: anyio.Lock with a 30 s timeout ────────────────
+    # ── Concurrency guard: anyio.Lock with timeout ────────────────────────
     # Only one evaluation cycle runs at a time — prevents a silence-flush
     # and a sentence-boundary flush from firing 2×N simultaneous LLM calls.
-    # The lock covers ONLY the LLM evaluation + winner selection + time-marking;
-    # TTS synthesis and WS sends happen outside so the lock is released before
-    # the next caller starts waiting (evaluation ~13s vs TTS ~5s — dropping
-    # the hold time prevents 30 s probe timeouts on back-to-back flushes).
+    # N agents × OpenRouter latency can exceed 30s; use 60s to avoid timeouts.
+    _EVAL_LOCK_TIMEOUT = 60
     lock: anyio.Lock = session.get('_eval_lock') or anyio.Lock()
 
     # Outputs captured inside the lock, consumed after release.
@@ -1879,7 +1884,7 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
     candidates      = []
     now_iso         = None
 
-    with anyio.move_on_after(30) as lock_scope:
+    with anyio.move_on_after(_EVAL_LOCK_TIMEOUT) as lock_scope:
         async with lock:
             # ── Re-check cooldown INSIDE the lock ─────────────────────────
             # A concurrent call might have fired an agent question between our
@@ -1892,28 +1897,24 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                                  elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
                     return
 
-            logger.info("[MultiAgent] Interrupt pre-checks passed (phase=%s, words=%d, agents=%d)",
-                        phase, word_count, len(session.get('agents', [])))
-
             agents        = session.get('agents', [])
             brief_summary = session.get('brief_summary', '')
             asked_texts   = [q.get('question', '') for q in session.get('questions_asked', [])]
 
-            # Build initial trajectory context from the supplied tracker state
             trajectory_context = (
                 _build_trajectory_context(tracker_state, predicted_next or [])
                 if tracker_state else None
             )
 
-            # ── Agent evaluation — all agents concurrently, first yes wins ──
-            # anyio task groups (trio-compatible structured concurrency).
-            # Each slot is pre-filled with a "no" sentinel so ordering is
-            # preserved even if tasks complete out of order.
+            logger.info("[MultiAgent] Evaluating %d agents (phase=%s, words=%d, grace=%.0fs)",
+                        len(agents), phase, word_count, AGENT_EVAL_GRACE_SECONDS)
+
             results: list = [(a, False, None) for a in agents]
+            eval_early_exit = anyio.CancelScope()
+            _first_yes_time = [None]
 
             async def _eval_agent(idx: int, agent) -> None:
                 try:
-                    logger.info("[MultiAgent] Evaluating agent '%s' (id=%s) for interrupt…", agent.name, agent.id)
                     should_ask, question = await multi_agent_service.analyze_agent_question(
                         agent=agent,
                         transcript=transcript,
@@ -1924,19 +1925,33 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                     logger.info("[MultiAgent] Agent '%s' → should_ask=%s, question=%s",
                                 agent.name, should_ask, (question[:60] + '…') if question else None)
                     results[idx] = (agent, should_ask, question)
+                    if should_ask and question:
+                        if _first_yes_time[0] is None:
+                            _first_yes_time[0] = anyio.current_time()
+                            eval_early_exit.deadline = (
+                                _first_yes_time[0] + AGENT_EVAL_GRACE_SECONDS
+                            )
+                        if sum(1 for _, sa, q in results if sa and q) >= AGENT_EVAL_MIN_CANDIDATES:
+                            eval_early_exit.cancel()
                 except Exception as e:
                     logger.error("Error checking agent %s: %s", agent.name, e)
-                    # results[idx] stays (agent, False, None)
 
-            async with anyio.create_task_group() as eval_tg:
-                for i, agent in enumerate(agents):
-                    eval_tg.start_soon(_eval_agent, i, agent)
+            with eval_early_exit:
+                async with anyio.create_task_group() as eval_tg:
+                    for i, agent in enumerate(agents):
+                        eval_tg.start_soon(_eval_agent, i, agent)
+
+            if eval_early_exit.cancelled_caught:
+                _n = sum(1 for _, sa, q in results if sa and q)
+                logger.info("[MultiAgent] Early exit: %d candidates from %d agents", _n, len(agents))
 
             # Use TINY model to select the best question from candidates —
             # adds intelligent selection so the court hears the most relevant
             # question rather than a random pick.
             candidates = [(agent, question) for agent, should_ask, question in results
                           if should_ask and question]
+            # All agents with a question (incl. those who said "no" but provided one) — for the UI
+            all_with_question = [(agent, question) for agent, should_ask, question in results if question]
             if candidates:
                 winner_agent, winner_question = await _select_best_question(
                     candidates, transcript, brief_summary,
@@ -1965,10 +1980,9 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
         except Exception as e:
             logger.warning("[MultiAgent] TTS synthesis failed for %s: %s", winner_agent.name, e)
 
-        # Send ALL candidate questions to the frontend (for the per-agent
-        # question grid), but mark only the winner as "selected" so the
-        # Judge Activity feed shows a single voice per cycle.
-        for agent, question in candidates:
+        # Send ALL agents' questions to the frontend (per-agent cards show what each judge
+        # was thinking). Mark only the winner as "selected" for Judge Activity + TTS.
+        for agent, question in all_with_question:
             is_winner = (agent.id == winner_agent.id)
             question_data = {
                 "agent_id":     agent.id,

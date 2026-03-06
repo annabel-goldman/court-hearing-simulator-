@@ -33,7 +33,7 @@ export const ScoreLog = memo(function ScoreLog({ scores }: ScoreLogProps) {
   if (scores.length === 0) {
     return (
       <div className="sl-log">
-        <p className="sl-log__placeholder">No scores yet. Start the session to see argument scores.</p>
+        <p className="sl-log__placeholder">No scores yet. Start the hearing to see real-time argument feedback.</p>
       </div>
     );
   }

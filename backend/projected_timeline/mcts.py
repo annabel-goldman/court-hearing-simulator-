@@ -365,7 +365,7 @@ def run_generation(
     If the pool is empty or too small, returns an empty list.
     """
     if not topic_pool:
-        return []
+        return [], {}
 
     prepared = _prepare_pool(topic_pool)
 
@@ -447,10 +447,10 @@ def run_projection(
     Returns an empty list if there is nothing left to project.
     """
     if not remaining:
-        return []
+        return [], {}
 
     if len(remaining) == 1:
-        return [remaining[0]["title"]]
+        return [remaining[0]["title"]], {}
 
     prepared = _prepare_pool(remaining)
     root     = _run_mcts(prepared, n_sims, quality_map=quality_map)

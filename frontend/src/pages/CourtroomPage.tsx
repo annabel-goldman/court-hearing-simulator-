@@ -619,8 +619,9 @@ export default function CourtroomPage() {
       const data = await response.json()
       if (data.audio?.length > 0) {
         const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))
-        const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' : 
-                         data.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg'
+        const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' :
+                         data.format === 'mp3' ? 'audio/mpeg' :
+                         data.format === 'wav' ? 'audio/wav' : 'audio/ogg'
         const audioBlob = new Blob([audioBytes], { type: mimeType })
         const audioUrl = URL.createObjectURL(audioBlob)
         const audio = new Audio(audioUrl)

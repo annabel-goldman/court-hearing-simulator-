@@ -26,7 +26,7 @@ _STT_PATH = Path(__file__).parent.parent / "data" / "stt_config.json"
 @dataclass
 class TTSConfig:
     enabled: bool = True
-    provider: str = "openai"   # "openai" | "cartesia"
+    provider: str = "openai"   # "openai" | "groq"
     api_key: str = ""
     base_url: str = ""
     voice: str = "onyx"
@@ -35,7 +35,7 @@ class TTSConfig:
 
 @dataclass
 class STTConfig:
-    provider: str = "openai"          # "openai" | "local"
+    provider: str = "openai"          # "openai" | "groq" | "local"
     api_key: str = ""
     base_url: str = ""
     model: str = "gpt-4o-mini-audio-preview"  # used when provider="openai"
@@ -50,14 +50,14 @@ class STTConfig:
 
 def get_default_tts_config() -> TTSConfig:
     tts_provider = os.getenv("TTS_PROVIDER", "openai").lower().strip()
-    if tts_provider == "cartesia":
+    if tts_provider == "groq":
         return TTSConfig(
             enabled=True,
-            provider="cartesia",
-            api_key=os.getenv("CARTESIA_API_KEY", os.getenv("TTS_API_KEY", "")),
-            base_url="",
-            voice=os.getenv("CARTESIA_VOICE_ID", ""),
-            model=os.getenv("TTS_MODEL", "sonic-2"),
+            provider="groq",
+            api_key=os.getenv("GROQ_API_KEY", os.getenv("TTS_API_KEY", "")),
+            base_url=os.getenv("GROQ_BASE_URL", os.getenv("TTS_BASE_URL", "https://api.groq.com/openai/v1")),
+            voice=os.getenv("TTS_VOICE", "austin"),
+            model=os.getenv("TTS_MODEL", "canopylabs/orpheus-v1-english"),
         )
     return TTSConfig(
         enabled=True,
@@ -124,6 +124,15 @@ def load_stt_config() -> STTConfig:
         env_provider = os.getenv("STT_PROVIDER", "").lower().strip()
         if env_provider:
             cfg.provider = env_provider
+        # Groq: ensure base_url and model are correct (Groq uses /audio/transcriptions, not chat)
+        if cfg.provider == "groq":
+            if not (cfg.base_url or "").strip():
+                cfg.base_url = os.getenv("GROQ_BASE_URL", os.getenv("STT_BASE_URL", "https://api.groq.com/openai/v1"))
+            if not (cfg.api_key or "").strip():
+                cfg.api_key = os.getenv("GROQ_API_KEY", os.getenv("STT_API_KEY", ""))
+            # Groq uses whisper models, not chat-audio
+            if "audio-preview" in (cfg.model or "").lower() or "gpt-audio" in (cfg.model or "").lower():
+                cfg.model = "whisper-large-v3-turbo"
         return cfg
     except Exception as exc:
         logger.warning("Failed to load stt_config.json, using defaults: %s", exc)

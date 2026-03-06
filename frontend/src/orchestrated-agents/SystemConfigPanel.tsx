@@ -357,7 +357,7 @@ export function SystemConfigPanel() {
                   <div className="scp-field">
                     <span className="scp-label">Provider</span>
                     <div className="scp-radios">
-                      {(['openai', 'local'] as const).map(p => (
+                      {(['openai', 'groq', 'local'] as const).map(p => (
                         <label
                           key={p}
                           className={`scp-radio-option${stt.provider === p ? ' scp-radio-option--selected' : ''}`}
@@ -369,20 +369,20 @@ export function SystemConfigPanel() {
                             checked={stt.provider === p}
                             onChange={() => setSttField('provider', p)}
                           />
-                          {p === 'openai' ? 'OpenAI (cloud)' : 'Local (faster-whisper)'}
+                          {p === 'openai' ? 'OpenAI (cloud)' : p === 'groq' ? 'Groq (cloud)' : 'Local (faster-whisper)'}
                         </label>
                       ))}
                     </div>
                   </div>
 
-                  {stt.provider === 'openai' && (
+                  {(stt.provider === 'openai' || stt.provider === 'groq') && (
                     <>
                       <div className="scp-field">
                         <label className="scp-label" htmlFor="scp-stt-model">Model</label>
                         <input
                           id="scp-stt-model"
                           className="scp-input"
-                          placeholder="openai/gpt-audio-mini"
+                          placeholder={stt.provider === 'groq' ? 'whisper-large-v3-turbo' : 'openai/gpt-audio-mini'}
                           value={stt.model}
                           onChange={e => setSttField('model', e.target.value)}
                         />
@@ -393,14 +393,15 @@ export function SystemConfigPanel() {
                           id="scp-stt-url"
                           className="scp-input"
                           type="url"
-                          placeholder="https://openrouter.ai/api/v1"
+                          placeholder={stt.provider === 'groq' ? 'https://api.groq.com/openai/v1' : 'https://openrouter.ai/api/v1'}
                           value={stt.base_url}
                           onChange={e => setSttField('base_url', e.target.value)}
                         />
                       </div>
                       <p className="scp-help">
-                        Leave Base URL blank to use the default OpenAI endpoint.
-                        API keys are configured via server env vars.
+                        {stt.provider === 'groq'
+                          ? 'Groq uses whisper-large-v3-turbo. API key via GROQ_API_KEY env var.'
+                          : 'Leave Base URL blank to use the default OpenAI endpoint. API keys via server env vars.'}
                       </p>
                     </>
                   )}

@@ -1,8 +1,8 @@
 {
-  "enabled": true,
+  "enabled": false,
   "provider": "openai",
   "api_key": "",
-  "base_url": "",
-  "voice": "dbfa416f-d5c3-4006-854b-235ef6bdf4fd",
-  "model": "sonic-2"
+  "base_url": "https://api.groq.com/openai/v1",
+  "voice": "austin",
+  "model": "canopylabs/orpheus-v1-english"
 }

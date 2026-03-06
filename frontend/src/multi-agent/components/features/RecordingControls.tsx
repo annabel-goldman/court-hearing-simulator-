@@ -16,6 +16,10 @@ interface RecordingControlsProps {
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
+  /** Optional labels for orchestrated/hearing context */
+  startLabel?: string;
+  stopLabel?: string;
+  resetLabel?: string;
 }
 
 export function RecordingControls({
@@ -24,6 +28,9 @@ export function RecordingControls({
   onStart,
   onStop,
   onReset,
+  startLabel = 'Start Recording',
+  stopLabel = 'Stop Recording',
+  resetLabel = 'Start New Session',
 }: RecordingControlsProps) {
   return (
     <div className="ma-recording-controls">
@@ -34,7 +41,7 @@ export function RecordingControls({
           onClick={onStart}
           disabled={!hasAgents}
         >
-          Start Recording
+          {startLabel}
         </Button>
       )}
 
@@ -44,7 +51,7 @@ export function RecordingControls({
           size="lg"
           onClick={onStop}
         >
-          Stop Recording
+          {stopLabel}
         </Button>
       )}
 
@@ -54,7 +61,7 @@ export function RecordingControls({
           size="lg"
           onClick={onReset}
         >
-          Start New Session
+          {resetLabel}
         </Button>
       )}
     </div>

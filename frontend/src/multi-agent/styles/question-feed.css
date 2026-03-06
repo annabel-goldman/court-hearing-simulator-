@@ -1,32 +1,168 @@
 /**
  * Question Feed Styles
- * 
+ *
  * Corresponds to: components/features/QuestionFeed.tsx
+ *
+ * Current round always shown; closed rounds collapsed until "Show previous rounds" is used.
+ * Long agent responses scroll inside each card. Round container scrolls if needed.
  */
 
 .ma-question-feed {
-  background-color: var(--ma-bg-primary);
-  border-radius: var(--ma-radius-lg);
-  padding: 0.75rem;
-  min-height: 16rem;
-  max-height: 24rem;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  min-height: 0;
 }
+
 
 .ma-question-feed__placeholder {
   color: var(--ma-text-dim);
   font-style: italic;
   font-size: 0.875rem;
+  padding: 0.5rem 0;
 }
 
-/* Question item */
+/* ── Toggle button for previous rounds ── */
+
+.ma-question-feed__toggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--ma-radius-lg, 0.5rem);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--ma-text-dim, rgba(255, 255, 255, 0.5));
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: center;
+}
+
+.ma-question-feed__toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--ma-text-secondary, rgba(255, 255, 255, 0.7));
+}
+
+/* ── Round container ── */
+
+.ma-round {
+  border-radius: var(--ma-radius-lg, 0.5rem);
+  overflow: hidden;
+}
+
+.ma-round--current {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.5rem;
+}
+
+.ma-round--closed {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ma-round__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ma-text-dim, rgba(255, 255, 255, 0.4));
+  margin-bottom: 0.375rem;
+  padding: 0 0.25rem;
+}
+
+/* ── Collapsed round summary ── */
+
+.ma-round__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: none;
+  border: none;
+  border-left: 3px solid var(--ma-border-default, rgba(255, 255, 255, 0.15));
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.ma-round__summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.ma-round__summary-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ma-round__summary-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--ma-text-secondary, rgba(255, 255, 255, 0.7));
+  flex-shrink: 0;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ma-round__summary-text {
+  font-size: 0.75rem;
+  color: var(--ma-text-dim, rgba(255, 255, 255, 0.5));
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ma-round__chevron {
+  font-size: 0.625rem;
+  color: var(--ma-text-dim, rgba(255, 255, 255, 0.35));
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ── Questions inside a round ── */
+
+.ma-round__questions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 28rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.25rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.ma-round__questions::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ma-round__questions::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ma-round__questions::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.ma-round--closed .ma-round__questions {
+  padding: 0.375rem 0.5rem 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ── Question item ── */
+
 .ma-question-item {
-  border-radius: var(--ma-radius-lg);
-  padding: 0.75rem;
-  border-left: 4px solid;
+  border-radius: var(--ma-radius-lg, 0.5rem);
+  padding: 0.625rem 0.75rem;
+  border-left: 3px solid;
   animation: ma-fade-in 0.3s ease;
 }
 
@@ -41,27 +177,73 @@
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .ma-question-item__agent-name {
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.8125rem;
+  font-weight: 600;
 }
 
 .ma-question-item__timestamp {
-  color: var(--ma-text-dim);
-  font-size: 0.75rem;
+  color: var(--ma-text-dim, rgba(255, 255, 255, 0.4));
+  font-size: 0.6875rem;
+}
+
+.ma-question-item__text-wrap {
+  max-height: 6.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.ma-question-item__text-wrap::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ma-question-item__text-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ma-question-item__text-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.ma-question-item__text-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .ma-question-item__text {
-  color: var(--ma-text-primary);
-  font-size: 0.875rem;
+  color: var(--ma-text-primary, rgba(255, 255, 255, 0.9));
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.ma-question-item--spoken {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.ma-question-item--spoken .ma-question-item__text {
+  color: var(--ma-text-primary, #fff);
+}
+
+.ma-question-item__spoken {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ma-accent, #4ade80);
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 @keyframes ma-fade-in {
   from {
     opacity: 0;
-    transform: translateY(-0.5rem);
+    transform: translateY(-0.375rem);
   }
   to {
     opacity: 1;

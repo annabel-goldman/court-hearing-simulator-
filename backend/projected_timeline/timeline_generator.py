@@ -36,7 +36,7 @@ logger = logging.getLogger("court-simulator.projected_timeline")
 # Model routing — uses TINY tier for lightweight structured extraction
 # ---------------------------------------------------------------------------
 
-from model_router import get_task_client, ModelTier, local_extra_body, extract_content
+from model_router import get_task_client, task_extra_body, extract_content
 
 
 def _get_model() -> str:
@@ -179,8 +179,8 @@ async def _extract_issues(client, appellant: str, appellee: str) -> dict:
             },
         ],
         temperature=0.2,
-        max_tokens=800,
-        extra_body=local_extra_body(ModelTier.TINY),
+        max_tokens=2048,
+        extra_body=task_extra_body("issue_extraction"),
     )
     raw = extract_content(response)
     return _parse_json(raw, fallback={
@@ -274,14 +274,20 @@ async def _generate_agenda(
                 ),
             },
         ],
-        temperature=0.6,
-        max_tokens=1500,
-        extra_body=local_extra_body(ModelTier.TINY),
+        temperature=0.2,
+        max_tokens=4096,
+        extra_body=task_extra_body("agenda_generation"),
     )
 
     raw = extract_content(response)
     logger.info("Lens %s — raw response start: %r", lens_def["lens"], raw[:300])
     data = _parse_json(raw, fallback={"rationale": "Parse error.", "topics": []})
+    if data.get("rationale") == "Parse error.":
+        json_idx = raw.find("{")
+        logger.warning(
+            "Lens %s parse failed — response length=%d, first '{' at %d, last 200 chars: %r",
+            lens_def["lens"], len(raw), json_idx, raw[-200:] if len(raw) > 200 else raw,
+        )
 
     topics = [
         JudgeTopic(
@@ -417,6 +423,9 @@ async def generate_topic_sets(
     _emit("status", {"phase": "mcts", "detail": "Running sparse MCTS search on topic pool…"})
     topic_pool: list[dict] = []
     for lens_def, agenda in per_lens:
+        if agenda.rationale == "Parse error.":
+            logger.warning("Skipping lens %s — parse error", lens_def["lens"])
+            continue
         for topic in agenda.topics:
             topic_pool.append({
                 "title":       topic.title,
@@ -425,6 +434,8 @@ async def generate_topic_sets(
                 "lens":        lens_def["lens"],
                 "_rationale":  agenda.rationale,
             })
+
+    logger.info("Topic pool: %d topics from %d lenses", len(topic_pool), len(per_lens))
 
     predictions: list[TopicPrediction] = []
     mcts_tree: dict = {}
@@ -487,12 +498,20 @@ async def generate_topic_sets(
         for t in topic_pool
     ] if topic_pool else None
 
+    final_tree = mcts_tree if mcts_tree else None
+    logger.info(
+        "generate_topic_sets done: %d predictions, tree_nodes=%s, pool=%d",
+        len(predictions),
+        len(mcts_tree.get("nodes", [])) if mcts_tree else 0,
+        len(topic_pool),
+    )
+
     return PredictedTopicSets(
         case_summary=case_summary,
         key_legal_issues=key_issues,
         predictions=predictions,
         total_predictions=len(predictions),
-        mcts_tree=mcts_tree if mcts_tree else None,
+        mcts_tree=final_tree,
         full_topic_pool=serialisable_pool,
     )
 
@@ -565,11 +584,73 @@ def _extract_blob(text: str) -> str | None:
     return text[start : end + 1]
 
 
+def _repair_truncated_json(text: str) -> str | None:
+    """Try to close an incomplete JSON object so it can be parsed.
+
+    Handles the common case where a reasoning model runs out of tokens
+    mid-JSON — e.g. the response ends with ``..."title": "Foo`` or
+    ``..."topics": [{...}, {``.
+
+    Returns the repaired string or None if no ``{`` was found.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    fragment = text[start:]
+    # Close any unclosed string literal
+    in_str = False
+    esc = False
+    for ch in fragment:
+        if esc:
+            esc = False
+            continue
+        if ch == "\\" and in_str:
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+    if in_str:
+        fragment += '"'
+    # Count unclosed braces/brackets and close them
+    depth_obj = 0
+    depth_arr = 0
+    in_s = False
+    esc2 = False
+    for ch in fragment:
+        if esc2:
+            esc2 = False
+            continue
+        if ch == "\\" and in_s:
+            esc2 = True
+            continue
+        if ch == '"':
+            in_s = not in_s
+            continue
+        if in_s:
+            continue
+        if ch == '{':
+            depth_obj += 1
+        elif ch == '}':
+            depth_obj -= 1
+        elif ch == '[':
+            depth_arr += 1
+        elif ch == ']':
+            depth_arr -= 1
+    fragment += ']' * max(0, depth_arr) + '}' * max(0, depth_obj)
+    return fragment
+
+
 def _parse_json(text: str, fallback: dict) -> dict:
     # Strip <think>…</think> blocks produced by reasoning models (Qwen3, etc.)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     text = re.sub(r"```(?:json)?\s*", "", text)
     text = re.sub(r"```\s*$", "", text, flags=re.MULTILINE)
+
+    # Strip reasoning prefix: everything before the first '{' is likely
+    # chain-of-thought from a reasoning model, not part of the JSON.
+    json_start = text.find("{")
+    if json_start > 0:
+        text = text[json_start:]
 
     # Try json_repair if available (pip install json-repair)
     try:
@@ -581,23 +662,28 @@ def _parse_json(text: str, fallback: dict) -> dict:
         pass
 
     blob = _extract_blob(text)
-    if blob is None:
-        return fallback
+    if blob is not None:
+        for attempt_fn in (
+            lambda b: b,
+            _escape_string_literals,
+            lambda b: re.sub(r",\s*([}\]])", r"\1", b),
+        ):
+            try:
+                return json.loads(attempt_fn(blob))
+            except (json.JSONDecodeError, TypeError):
+                pass
 
-    try:
-        return json.loads(blob)
-    except json.JSONDecodeError:
-        pass
+    # Last resort: try to repair truncated JSON (model ran out of tokens)
+    repaired_text = _repair_truncated_json(text)
+    if repaired_text:
+        for attempt_fn in (
+            lambda b: b,
+            lambda b: re.sub(r",\s*([}\]])", r"\1", b),
+        ):
+            try:
+                return json.loads(attempt_fn(repaired_text))
+            except (json.JSONDecodeError, TypeError):
+                pass
 
-    blob = _escape_string_literals(blob)
-    try:
-        return json.loads(blob)
-    except json.JSONDecodeError:
-        pass
-
-    blob = re.sub(r",\s*([}\]])", r"\1", blob)
-    try:
-        return json.loads(blob)
-    except json.JSONDecodeError:
-        logger.warning("JSON parse failed after all recovery attempts; blob[:200]=%s", blob[:200])
-        return fallback
+    logger.warning("JSON parse failed after all recovery attempts; text[:300]=%s", text[:300])
+    return fallback

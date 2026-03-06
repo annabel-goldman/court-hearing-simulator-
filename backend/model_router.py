@@ -352,32 +352,34 @@ def is_local_endpoint(tier: ModelTier) -> bool:
     return any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0"))
 
 
-def local_extra_body(tier: ModelTier) -> dict:
+# Tasks where thinking tokens are allowed (e.g. topic/agenda creation).
+# For these, we return {} so the model can reason. All other tasks disable thinking.
+TASKS_WITH_THINKING_ENABLED: frozenset[str] = frozenset({
+    "issue_extraction",
+})
+
+
+def local_extra_body(tier: ModelTier, *, allow_thinking: bool = False) -> dict:
     """Return the extra_body dict for thinking-mode control.
 
-    LARGE tier: always returns ``{}`` — thinking is **allowed** so the
-    judge model can reason deeply before answering.  ``extract_content()``
-    strips ``<think>`` blocks from the response transparently.
-
-    SMALL / TINY on local llama-server: ``{"chat_template_kwargs": {"enable_thinking": False}}``
-    SMALL / TINY on remote endpoints (OpenRouter, OpenAI, …):
-        ``{"chat_template_kwargs": {"enable_thinking": False}}`` — OpenRouter passes
-        this through to Qwen3 natively; other remote models ignore unknown extra_body keys.
+    When allow_thinking is True: returns ``{}`` (model may use thinking).
+    Otherwise: ``{"chat_template_kwargs": {"enable_thinking": False}}``.
     """
-    if tier == ModelTier.LARGE:
-        return {}  # allow thinking for quality-critical judge work
+    if allow_thinking:
+        return {}
     return {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def task_extra_body(task: str) -> dict:
     """Return the extra_body dict for a named task.
 
-    Looks up the task's tier in ``TASK_TIER_MAP`` and delegates to
-    ``local_extra_body``.  Convenience wrapper so call sites don't
-    need to resolve the tier themselves.
+    Tasks in ``TASKS_WITH_THINKING_ENABLED`` (e.g. topic creation) get thinking
+    allowed. All others get thinking disabled.
     """
-    tier = TASK_TIER_MAP.get(task, ModelTier.LARGE)
-    return local_extra_body(tier)
+    return local_extra_body(
+        TASK_TIER_MAP.get(task, ModelTier.LARGE),
+        allow_thinking=(task in TASKS_WITH_THINKING_ENABLED),
+    )
 
 
 def extract_content(response) -> str:

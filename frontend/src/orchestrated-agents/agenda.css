@@ -1040,6 +1040,13 @@
   contain: layout style;
 }
 
+.oa-panel__hint {
+  font-size: 0.8125rem;
+  color: var(--ma-text-muted, rgba(255,255,255,0.5));
+  margin: 0 0 0.75rem 0;
+  font-style: italic;
+}
+
 /* ── Nav links in header ───────────────────────────────────────────────────── */
 
 .oa-header-nav {

@@ -34,7 +34,7 @@ export const JudgeActivityFeed = memo(function JudgeActivityFeed({ questions }: 
   if (sorted.length === 0) {
     return (
       <p className="oa-feed__empty">
-        Judge questions and counter-arguments will appear here during the hearing.
+        Judge questions and counter-arguments will appear here during the hearing. The panel will update in real time as judges interrupt and respond.
       </p>
     );
   }
