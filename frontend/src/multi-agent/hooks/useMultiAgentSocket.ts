@@ -150,7 +150,7 @@ export function useMultiAgentSocket({
   }, []);
 
   const sendConfig = useCallback((agents: Agent[], briefSummary: string, opposingBrief?: string) => {
-    const payload: Record<string, unknown> = { agents, brief_summary: briefSummary };
+    const payload: Record<string, unknown> = { agents, brief_summary: briefSummary, mode: 'playground' };
     if (opposingBrief !== undefined && opposingBrief !== '') {
       payload.opposing_brief = opposingBrief;
     }

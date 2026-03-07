@@ -2,7 +2,7 @@ import { useState, useRef, DragEvent, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { JudgeAvatarDifficulty } from '../3d-rendering/types'
+import type { JudgeAvatarDifficulty, SessionAgendaItem } from '../3d-rendering/types'
 import { getAssetUrl } from '../config/assetUrls'
 
 GlobalWorkerOptions.workerSrc = workerSrc
@@ -24,6 +24,7 @@ type JudgeQuestionTypeId =
   | 'devils_advocate'
 
 const ANALYSIS_MESSAGE = 'The judge is analyzing your briefs.'
+const PREPARING_MESSAGE = 'Preparing your session…'
 const BENCH_LOGO_SRC = getAssetUrl('bench-logo.svg')
 const LANDING_INTRO_BACKGROUND_SRC = getAssetUrl('Background.jpg')
 const LANDING_SWOOSH_MS = 840
@@ -532,18 +533,8 @@ export default function Home() {
       throw new Error('Both briefs are required')
     }
 
-    let customSummarizationPrompt: string | undefined
-    try {
-      const storedPrompts = localStorage.getItem('customJudgePrompts')
-      if (storedPrompts) {
-        const prompts = JSON.parse(storedPrompts)
-        customSummarizationPrompt = prompts.summarizationPrompt
-      }
-    } catch (promptError) {
-      console.warn('Failed to load custom prompts:', promptError)
-    }
 
-      const fallbackConfig = {
+      const baseConfig = {
         proceedingType: 'demo' as const,
         userRole: 'attorney' as const,
         materials: [
@@ -560,30 +551,98 @@ export default function Home() {
         },
       }
 
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-      const res = await fetch(`${API_URL}/api/summarize-briefs`, {
+      const agendaData = await generateOrchestratedAgenda(API_URL, fileA.text, fileB.text)
+
+      return {
+        ...baseConfig,
+        judicialSummary: agendaData?.case_summary,
+        predictedTopicSets: agendaData?.predictedTopicSets,
+        agendaItems: agendaData?.agendaItems,
+      }
+    } catch (summaryError) {
+      console.warn('Session config build failed, using fallback:', summaryError)
+      return { ...baseConfig }
+    }
+  }
+
+  async function generateOrchestratedAgenda(
+    apiUrl: string,
+    appellantBrief: string,
+    appelleeBrief: string
+  ): Promise<{
+    predictedTopicSets: unknown
+    case_summary?: string
+    agendaItems: SessionAgendaItem[]
+  } | null> {
+    try {
+      const res = await fetch(`${apiUrl}/api/projected-timeline/generate-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          appellant_brief: fileA.text,
-          appellee_brief: fileB.text,
-          system_prompt: customSummarizationPrompt,
+          appellant_brief: appellantBrief,
+          appellee_brief: appelleeBrief,
         }),
       })
+      if (!res.ok || !res.body) return null
 
-      const data = await res.json()
-      if (!res.ok) {
-        return fallbackConfig
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let rawDone: Record<string, unknown> | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data: ')) continue
+          try {
+            const event = JSON.parse(line.slice('data: '.length)) as {
+              type: string
+              data?: Record<string, unknown>
+            }
+            if (event.type === 'done' && event.data) {
+              rawDone = event.data as Record<string, unknown>
+            }
+          } catch {
+            /* skip parse errors */
+          }
+        }
       }
+
+      if (!rawDone) return null
+
+      const predictions = (rawDone.predictions as Array<{ prediction_id: number; lens: string; rationale: string; topics: Array<{ title: string; description?: string }> }> ?? []).filter(
+        (p) => (p.topics?.length ?? 0) > 0 && p.rationale !== 'Parse error.'
+      )
+
+      const agendaItems: SessionAgendaItem[] = predictions.map((p) => ({
+        id: String(p.prediction_id),
+        lens: p.lens,
+        rationale: p.rationale,
+        topics: p.topics.map((t, i) => ({
+          order: i,
+          title: t.title,
+          description: t.description ?? '',
+        })),
+        agentId: null,
+      }))
 
       return {
-        ...fallbackConfig,
-        judicialSummary: data.summary as string | undefined,
+        predictedTopicSets: rawDone,
+        case_summary: rawDone.case_summary as string | undefined,
+        agendaItems,
       }
-    } catch (summaryError) {
-      console.warn('Summary generation failed, proceeding without summary:', summaryError)
-      return fallbackConfig
+    } catch (e) {
+      console.warn('Orchestrated agenda generation failed:', e)
+      return null
     }
   }
 
@@ -886,7 +945,8 @@ export default function Home() {
   }
 
   const intakeLocked = intakePhase !== 'idle'
-  const showAnalysis = intakePhase === 'analyzing'
+  const showLoading = intakePhase === 'launching' || intakePhase === 'analyzing'
+  const loadingMessage = intakePhase === 'launching' ? PREPARING_MESSAGE : ANALYSIS_MESSAGE
   const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
 
   return (
@@ -1048,10 +1108,11 @@ export default function Home() {
             </div>
           )}
 
-          <div className={`paper-grid ${intakePhase === 'launching' ? 'is-launching' : ''}`}>
-            {showAnalysis ? (
+          <div className={`paper-grid ${showLoading ? 'is-launching' : ''}`}>
+            {showLoading ? (
               <div className="analysis-card analysis-card-full">
-                <p>{ANALYSIS_MESSAGE}</p>
+                <div className="analysis-card-spinner" role="status" aria-label="Loading" />
+                <p>{loadingMessage}</p>
               </div>
             ) : (
               <>
@@ -1166,13 +1227,6 @@ export default function Home() {
               disabled={!canEnter}
             >
               {intakePhase === 'idle' ? 'Continue' : intakePhase === 'launching' ? 'Submitting…' : 'Reviewing…'}
-            </button>
-            <button
-              type="button"
-              className="settings-playground-btn"
-              onClick={() => navigate('/orchestrated-agents')}
-            >
-              Playground Mode
             </button>
             <button
               type="button"

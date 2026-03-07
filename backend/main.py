@@ -1091,6 +1091,25 @@ async def check_and_trigger_interrupt(session_id, engine, tts):
             },
         })
 
+_STT_HALLUCINATION_RE = re.compile(
+    r"^\s*[\.\,\!\?\;\:\-\…]+\s*$"          # bare punctuation: "." "..." "," etc.
+    r"|^\s*\[.*?\]\s*$"                        # bracketed noise: "[silence]" "[Music]" "[BLANK_AUDIO]"
+    r"|^\s*\(.*?\)\s*$"                        # parenthesised noise: "(silence)" "(inaudible)"
+    r"|^\s*(?:uh+|um+|hmm+|mm+)\s*\.?\s*$",  # filler-only: "uh" "umm" "hmm."
+    re.IGNORECASE,
+)
+
+def _is_stt_hallucination(text: str) -> bool:
+    """Return True if *text* looks like a Whisper silence/noise hallucination."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    # Single token that is entirely punctuation characters
+    if len(stripped) <= 3 and all(c in '.,!?;:…-–—\'"' for c in stripped):
+        return True
+    return bool(_STT_HALLUCINATION_RE.match(stripped))
+
+
 async def _process_ma_transcript(sid: str, transcript: str) -> None:
     """Process a new STT transcript through the multi-agent pipeline.
 
@@ -1267,7 +1286,8 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                             'agents': agents,
                             'brief_summary': brief_summary,
                             'opposing_brief': opposing_brief,
-                            'phase': 'READY'
+                            'phase': 'READY',
+                            'mode': payload.get('mode', 'courtroom'),
                         })
                         # Initialise opponent engine with the opposing brief
                         if opposing_brief:
@@ -1281,6 +1301,7 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
 
                     elif msg_type == "audio":
                         audio_bytes = base64.b64decode(payload.get("audio", ""))
+                        logger.info("[MultiAgent] Audio received: %d bytes", len(audio_bytes) if audio_bytes else 0)
                         if audio_bytes and len(audio_bytes) > 10:
                             from services.stt_provider import GladiaLiveProvider
                             if isinstance(stt_provider, GladiaLiveProvider):
@@ -1297,13 +1318,13 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                     audio_format = "mp4"
                                 if audio_format:
                                     transcript = await stt_provider.transcribe(audio_bytes, audio_format)
-                                    if transcript.strip():
+                                    if _is_stt_hallucination(transcript):
+                                        logger.debug("[MultiAgent] STT hallucination dropped (%s, %d bytes): %r", audio_format, len(audio_bytes), transcript[:40])
+                                    else:
                                         logger.info("[MultiAgent] STT (%s, %d bytes) → %r", audio_format, len(audio_bytes), transcript[:80])
                                         await _process_ma_transcript(session_id, transcript.strip())
-                                    else:
-                                        logger.debug("[MultiAgent] STT returned empty (%s, %d bytes)", audio_format, len(audio_bytes))
                                 else:
-                                    logger.debug(
+                                    logger.warning(
                                         "[MultiAgent] Unrecognized audio format (first bytes: %r); "
                                         "expected WebM or MP4 from MediaRecorder",
                                         audio_bytes[:12] if len(audio_bytes) >= 12 else audio_bytes[:len(audio_bytes)],
@@ -1365,7 +1386,7 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
                                 sess['_pcm_buffer'] = b''
                                 try:
                                     tail_text = await stt_provider.transcribe(leftover_pcm, "pcm")
-                                    if tail_text.strip():
+                                    if not _is_stt_hallucination(tail_text):
                                         await _process_ma_transcript(session_id, tail_text.strip())
                                 except Exception as exc:
                                     logger.warning("[MultiAgent] PCM drain on phase change failed: %s", exc)
@@ -2048,6 +2069,16 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
     if matched:
         async def _fire_all_counters(sid, matched_topic, topic_info, agents, utt, brief_summary):
             try:
+                # Suppress counter-arguments if a judge question fired recently —
+                # playing both back-to-back sounds like two simultaneous interrupts.
+                s_pre = multi_agent_manager.session_data.get(sid, {})
+                _ca_last = s_pre.get('last_agent_interrupt_time')
+                if _ca_last is not None:
+                    _ca_elapsed = (datetime.now() - _ca_last).total_seconds()
+                    if _ca_elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
+                        logger.debug("[Counter] Suppressed — judge question fired %.1fs ago", _ca_elapsed)
+                        return
+
                 topic_desc = topic_info.get("description", "") if topic_info else ""
                 results: list = [None] * len(agents)
 
@@ -2076,6 +2107,17 @@ async def check_tracker_and_counter(session_id: str, utterance: str):
                 winner_agent, winner_text = await _select_best_question(
                     candidates, utt, brief_summary,
                 )
+
+                # Re-check: a judge question may have fired while LLMs were running.
+                # Skip TTS (and audio in the WS payload) so the counter-argument
+                # doesn't play on top of or immediately after the judge's question.
+                s_post2 = multi_agent_manager.session_data.get(sid, {})
+                _ca_last2 = s_post2.get('last_agent_interrupt_time')
+                if _ca_last2 is not None:
+                    _ca_elapsed2 = (datetime.now() - _ca_last2).total_seconds()
+                    if _ca_elapsed2 < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
+                        logger.debug("[Counter] Suppressed TTS — judge question fired %.1fs ago", _ca_elapsed2)
+                        return
 
                 audio_b64 = ""
                 audio_format = "opus"
@@ -2246,6 +2288,19 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                      word_count, multi_agent_manager.MIN_WORDS_BEFORE_INTERRUPT)
         return
 
+    # ── Pre-lock cooldown check ───────────────────────────────────────────
+    # Bail out before even touching the lock if the cooldown is still active.
+    # This prevents the silence-flush and sentence-boundary flush from both
+    # queuing up for the lock when a question just fired, causing a full
+    # N-agent LLM evaluation before the in-lock re-check can reject it.
+    _pre_last = session.get('last_agent_interrupt_time')
+    if _pre_last is not None:
+        _pre_elapsed = (datetime.now() - _pre_last).total_seconds()
+        if _pre_elapsed < multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS:
+            logger.debug("[MultiAgent] Skip interrupt — cooldown %.1fs / %ds (pre-lock check)",
+                         _pre_elapsed, multi_agent_manager.AGENT_INTERRUPT_COOLDOWN_SECONDS)
+            return
+
     # ── Concurrency guard: anyio.Lock with timeout ────────────────────────
     # Only one evaluation cycle runs at a time — prevents a silence-flush
     # and a sentence-boundary flush from firing 2×N simultaneous LLM calls.
@@ -2325,8 +2380,9 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
             # question rather than a random pick.
             candidates = [(agent, question) for agent, should_ask, question in results
                           if should_ask and question]
-            # All agents with a question (incl. those who said "no" but provided one) — for the UI
-            all_with_question = [(agent, question) for agent, should_ask, question in results if question]
+            # In playground mode, also collect non-winner questions for display.
+            if session.get('mode') == 'playground':
+                all_with_question = [(agent, question) for agent, should_ask, question in results if question]
             if candidates:
                 winner_agent, winner_question = await _select_best_question(
                     candidates, transcript, brief_summary,
@@ -2355,23 +2411,42 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
         except Exception as e:
             logger.warning("[MultiAgent] TTS synthesis failed for %s: %s", winner_agent.name, e)
 
-        # Send ALL agents' questions to the frontend (per-agent cards show what each judge
-        # was thinking). Mark only the winner as "selected" for Judge Activity + TTS.
-        for agent, question in all_with_question:
-            is_winner = (agent.id == winner_agent.id)
+        path_topic = session.get("path_so_far", [])[-1] if session.get("path_so_far") else ""
+        if session.get('mode') == 'playground':
+            # Playground: send every agent's question so the grid shows what each judge was thinking.
+            for agent, question in all_with_question:
+                is_winner = (agent.id == winner_agent.id)
+                q_data = {
+                    "agent_id":     agent.id,
+                    "agent_name":   agent.name,
+                    "color":        agent.color,
+                    "question":     question,
+                    "timestamp":    now_iso,
+                    "selected":     is_winner,
+                    "audio":        audio_b64 if is_winner else "",
+                    "audio_format": audio_format if is_winner else "",
+                    "path_topic":   path_topic,
+                }
+                if is_winner:
+                    session['questions_asked'].append(q_data)
+                await multi_agent_manager.send_json(session_id, {
+                    "type": "agent_question",
+                    "data": q_data,
+                })
+        else:
+            # Courtroom: send only the winner's question.
             question_data = {
-                "agent_id":     agent.id,
-                "agent_name":   agent.name,
-                "color":        agent.color,
-                "question":     question,
+                "agent_id":     winner_agent.id,
+                "agent_name":   winner_agent.name,
+                "color":        winner_agent.color,
+                "question":     winner_question,
                 "timestamp":    now_iso,
-                "selected":     is_winner,
-                "audio":        audio_b64 if is_winner else "",
-                "audio_format": audio_format if is_winner else "",
-                "path_topic":   session.get("path_so_far", [])[-1] if session.get("path_so_far") else "",
+                "selected":     True,
+                "audio":        audio_b64,
+                "audio_format": audio_format,
+                "path_topic":   path_topic,
             }
-            if is_winner:
-                session['questions_asked'].append(question_data)
+            session['questions_asked'].append(question_data)
             await multi_agent_manager.send_json(session_id, {
                 "type": "agent_question",
                 "data": question_data,

@@ -157,7 +157,12 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
 
     const startNewRecorder = () => {
       const audioStream = new MediaStream(mediaStreamRef.current!.getAudioTracks())
-      const recorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' })
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : 'audio/webm'
+      const recorder = new MediaRecorder(audioStream, { mimeType })
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -167,7 +172,8 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
 
       recorder.onstop = () => {
         if (audioAccumulatorRef.current.length > 0) {
-          const completeBlob = new Blob(audioAccumulatorRef.current, { type: 'audio/webm' })
+          const blobType = recorder.mimeType || mimeType
+          const completeBlob = new Blob(audioAccumulatorRef.current, { type: blobType })
           console.log('[useMediaRecording] Audio chunk ready:', completeBlob.size, 'bytes')
           onAudioChunkRef.current?.(completeBlob)
           audioAccumulatorRef.current = []

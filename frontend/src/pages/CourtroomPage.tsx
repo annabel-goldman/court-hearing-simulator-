@@ -30,14 +30,13 @@ import { AgentSentimentPanel } from '../ui-overlays/AgentSentimentPanel'
 
 // Hooks
 import {
-  useSimulationSocket,
-  useAudioPlayer,
+  useCourtroomSocket,
   type JudgeInterrupt,
   type JudgeInterruptSource,
   type AgentScoreEntry,
   type MissedQuestionEntry,
-  type MultiAgentSocketConfig,
-} from '../hooks/useSimulationSocket'
+} from '../hooks/useCourtroomSocket'
+import { useAudioPlayer } from '../hooks/useSimulationSocket'
 import { useMediaRecording } from '../hooks/useMediaRecording'
 import type { Agent } from '../multi-agent/types'
 
@@ -146,40 +145,17 @@ export default function CourtroomPage() {
   // Audio player for judge TTS
   const { playAudioChunk } = useAudioPlayer()
 
-  const loadMultiAgentConfig = useCallback(async (): Promise<MultiAgentSocketConfig | undefined> => {
-    if (!sessionConfig?.useMultiAgentJudge) return undefined
-
+  const loadAgentsForOrchestrated = useCallback(async (): Promise<Agent[]> => {
     try {
       const response = await fetch(`${API_URL}/api/multi-agent/agents`)
-      if (!response.ok) {
-        throw new Error(`Failed to load agents (${response.status})`)
-      }
-      const payload = await response.json() as { agents?: Agent[] }
-      const agents = payload.agents || []
-      if (agents.length === 0) {
-        console.warn('[CourtroomPage] No agents returned; enabling backend multi-agent defaults')
-        return {
-          enabled: true,
-          strategy: 'round_robin',
-          max_agents_per_pass: 5,
-        }
-      }
-      console.log(`[CourtroomPage] Loaded ${agents.length} agents for judge orchestration`)
-      return {
-        enabled: true,
-        strategy: 'round_robin',
-        max_agents_per_pass: 5,
-        agents,
-      }
+      if (!response.ok) throw new Error(`Failed to load agents (${response.status})`)
+      const payload = (await response.json()) as { agents?: Agent[] }
+      return payload.agents ?? []
     } catch (error) {
-      console.warn('[CourtroomPage] Failed to prefetch agents; enabling backend multi-agent defaults:', error)
-      return {
-        enabled: true,
-        strategy: 'round_robin',
-        max_agents_per_pass: 5,
-      }
+      console.warn('[CourtroomPage] Failed to load agents; using empty panel:', error)
+      return []
     }
-  }, [sessionConfig?.useMultiAgentJudge])
+  }, [])
 
   // ========== WEBSOCKET ==========
   const handleAgentScores = useCallback((scores: AgentScoreEntry[]) => {
@@ -212,50 +188,40 @@ export default function CourtroomPage() {
     }])
   }, [])
 
+  const useOrchestrated = Boolean(sessionConfig?.useMultiAgentJudge)
+
   const {
     isConnected,
     sendConfig,
+    configureOrchestrated,
     sendAudio,
     sendSilenceTimeout,
     sendQuestionCutoff,
     changePhase: sendPhaseChange,
-    disconnect: disconnectSocket
-  } = useSimulationSocket({
+    disconnect: disconnectSocket,
+  } = useCourtroomSocket({
     sessionId,
+    sessionConfig,
     onJudgeInterrupt: handleJudgeInterrupt,
     onAgentScores: handleAgentScores,
     onMissedQuestion: handleMissedQuestion,
     onPhaseChange: (phase) => {
-      console.log('[CourtroomPage] Backend phase update:', phase)
-      // Only accept PROCEEDING/ADJOURNED from backend (ritual phases controlled by frontend)
       if (phase === 'PROCEEDING' || phase === 'ADJOURNED') {
         setSimulationPhase(phase)
       }
     },
     onTranscriptReceived: (transcript: string) => {
-      console.log('[CourtroomPage] Transcript:', transcript)
       setRecentTranscript(transcript)
       const cleanTranscript = transcript.trim()
       if (cleanTranscript.length > 0) {
-        setTranscriptHistory(prev => {
-          if (prev.length > 0 && prev[prev.length - 1].text === cleanTranscript) {
-            return prev
-          }
-          return [
-            ...prev,
-            {
-              text: cleanTranscript,
-              timestamp: new Date().toISOString(),
-            },
-          ]
+        setTranscriptHistory((prev) => {
+          if (prev.length > 0 && prev[prev.length - 1].text === cleanTranscript) return prev
+          return [...prev, { text: cleanTranscript, timestamp: new Date().toISOString() }]
         })
       }
-      // Clear transcript timeout
       setTimeout(() => setRecentTranscript(''), TRANSCRIPT_DISPLAY_DURATION_MS)
     },
-    onError: (error) => {
-      console.error('[CourtroomPage] WebSocket error:', error)
-    }
+    onError: (error) => console.error('[CourtroomPage] WebSocket error:', error),
   })
 
   // ========== MEDIA RECORDING ==========
@@ -272,6 +238,8 @@ export default function CourtroomPage() {
     onAudioChunk: (blob) => {
       if (isConnected) {
         sendAudio(blob)
+      } else {
+        console.warn('[CourtroomPage] Audio chunk dropped — not connected to backend')
       }
     },
     onError: (error) => {
@@ -477,41 +445,49 @@ export default function CourtroomPage() {
       let timer: ReturnType<typeof setTimeout> | null = null
 
       const configureAndStart = async () => {
-        if (isConnected && sessionConfig) {
-          // Check for custom prompts from Judge Admin
+        if (!isConnected || !sessionConfig) return
+
+        if (useOrchestrated) {
+          const agents = await loadAgentsForOrchestrated()
+          const briefSummary =
+            sessionConfig.judicialSummary ??
+            sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
+            ''
+          const userRole = sessionConfig.userPartyRole ?? 'appellant'
+          const opposingBrief =
+            sessionConfig.materials?.find((m) =>
+              userRole === 'appellant' ? m.role === 'respondent' : m.role === 'appellant'
+            )?.text ?? ''
+          configureOrchestrated(
+            agents,
+            briefSummary,
+            opposingBrief,
+            sessionConfig.predictedTopicSets ?? {},
+            sessionConfig.agendaItems ?? []
+          )
+          sendPhaseChange('PROCEEDING')
+        } else {
           let customSynthesisPrompt: string | undefined
           try {
-            const storedPrompts = localStorage.getItem('customJudgePrompts')
-            if (storedPrompts) {
-              const prompts = JSON.parse(storedPrompts)
-              customSynthesisPrompt = prompts.synthesisPrompt
-            }
-          } catch (e) {
-            console.warn('Failed to load custom prompts:', e)
+            const stored = localStorage.getItem('customJudgePrompts')
+            if (stored) customSynthesisPrompt = JSON.parse(stored).synthesisPrompt
+          } catch {
+            /* ignore */
           }
-
-          if (customSynthesisPrompt) {
-            const preview = customSynthesisPrompt.slice(0, 200).replace(/\n/g, ' ')
-            console.log('[CourtroomPage] Judge using CUSTOM synthesis prompt (from Set Prompts):', preview + (customSynthesisPrompt.length > 200 ? '...' : ''))
-          } else {
-            console.log('[CourtroomPage] Judge using backend DEFAULT synthesis prompt (no custom prompt in localStorage)')
-          }
-
-          const multiAgentConfig = await loadMultiAgentConfig()
-          console.log('[CourtroomPage][DBG] Sending socket config with multi_agent:', multiAgentConfig)
           sendConfig({
             proceedingType: sessionConfig.proceedingType,
             userRole: sessionConfig.userRole,
             seed_questions: [],
-            brief_summary: sessionConfig.judicialSummary || sessionConfig.materials?.map(m => m.text.slice(0, 500)).join('\n') || '',
+            brief_summary:
+              sessionConfig.judicialSummary ??
+              sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
+              '',
             synthesis_prompt: customSynthesisPrompt,
-            multi_agent: multiAgentConfig,
           })
         }
 
         if (isCancelled) return
         timer = setTimeout(() => {
-          console.log('[CourtroomPage] Starting recording after sync delay')
           startRecording()
         }, RECORDING_SYNC_DELAY_MS)
       }
@@ -525,7 +501,54 @@ export default function CourtroomPage() {
     } else if (simulationPhase === 'ADJOURNED' && isRecording) {
       stopRecording()
     }
-  }, [simulationPhase, isRecording, isConnected, sessionConfig, sendConfig, startRecording, stopRecording, loadMultiAgentConfig])
+  }, [
+    simulationPhase,
+    isRecording,
+    isConnected,
+    sessionConfig,
+    useOrchestrated,
+    sendConfig,
+    configureOrchestrated,
+    sendPhaseChange,
+    startRecording,
+    stopRecording,
+    loadAgentsForOrchestrated,
+  ])
+
+  // Re-configure on reconnect (orchestrated) — connection may have dropped and recovered
+  const prevConnectedRef = useRef(false)
+  useEffect(() => {
+    const justReconnected = isConnected && !prevConnectedRef.current
+    prevConnectedRef.current = isConnected
+    if (
+      justReconnected &&
+      simulationPhase === 'PROCEEDING' &&
+      useOrchestrated &&
+      sessionConfig
+    ) {
+      const reconfigure = async () => {
+        const agents = await loadAgentsForOrchestrated()
+        const briefSummary =
+          sessionConfig.judicialSummary ??
+          sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
+          ''
+        const userRole = sessionConfig.userPartyRole ?? 'appellant'
+        const opposingBrief =
+          sessionConfig.materials?.find((m) =>
+            userRole === 'appellant' ? m.role === 'respondent' : m.role === 'appellant'
+          )?.text ?? ''
+        configureOrchestrated(
+          agents,
+          briefSummary,
+          opposingBrief,
+          sessionConfig.predictedTopicSets ?? {},
+          sessionConfig.agendaItems ?? []
+        )
+        sendPhaseChange('PROCEEDING')
+      }
+      reconfigure()
+    }
+  }, [isConnected, simulationPhase, useOrchestrated, sessionConfig, configureOrchestrated, sendPhaseChange, loadAgentsForOrchestrated])
 
   // ========== SILENCE DETECTION ==========
   useEffect(() => {
@@ -651,9 +674,10 @@ export default function CourtroomPage() {
 
   const startProceeding = useCallback(() => {
     setSimulationPhase('PROCEEDING')
-    console.log('[CourtroomPage] Transitioning to PROCEEDING')
-    sendPhaseChange('PROCEEDING')
     questionCutoffReachedRef.current = false
+    if (!useOrchestrated) {
+      sendPhaseChange('PROCEEDING')
+    }
     setTimeout(() => {
       const openingText = 'Counsel for the appellant, you may proceed when ready.'
       judgeQuestionActiveRef.current = false
@@ -665,7 +689,7 @@ export default function CourtroomPage() {
         setSpeakingRole(null)
       }, OPENING_STATEMENT_DURATION_MS)
     }, PROCEEDING_START_DELAY_MS)
-  }, [sendPhaseChange, playRitualCue])
+  }, [useOrchestrated, sendPhaseChange, playRitualCue])
 
   // ========== AUTOMATIC RITUAL PHASES ==========
   useEffect(() => {

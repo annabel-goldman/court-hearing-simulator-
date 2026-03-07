@@ -14,6 +14,15 @@ export type SimulationPhase =
   | 'PROCEEDING'      // Active court session
   | 'ADJOURNED'       // Court has ended
 
+/** Agenda item for orchestrated agents (from projected-timeline API) */
+export interface SessionAgendaItem {
+  id: string
+  lens: string
+  rationale: string
+  topics: Array<{ order?: number; title: string; description?: string; target?: string }>
+  agentId: string | null
+}
+
 export interface SessionConfig {
   proceedingType: 'demo'
   userRole: 'attorney'
@@ -22,6 +31,15 @@ export interface SessionConfig {
   useMultiAgentJudge?: boolean
   sessionDurationSeconds?: number
   judgeAvatarDifficulty?: JudgeAvatarDifficulty
+  userPartyRole?: 'appellant' | 'respondent'
+  judgeDisposition?: {
+    interruptionLevel?: string
+    questionTypes?: string[]
+  }
+  /** Orchestrated agents: raw predictions from projected-timeline generate-stream */
+  predictedTopicSets?: unknown
+  /** Orchestrated agents: agenda items derived from predictions */
+  agendaItems?: SessionAgendaItem[]
 }
 
 // Viseme mapping for Ready Player Me avatars

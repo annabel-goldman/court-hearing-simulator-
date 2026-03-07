@@ -316,10 +316,12 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     "judge_interrupt":      ModelTier.LARGE,
     "synthesize_question":  ModelTier.LARGE,
 
+    # LARGE — deep brief analysis (one-time setup)
+    "brief_summary":        ModelTier.LARGE,
+
     # SMALL — fast analysis / classification
     "agent_analysis":       ModelTier.SMALL,
     "quality_assessment":   ModelTier.SMALL,
-    "brief_summary":        ModelTier.SMALL,
     "seed_questions":       ModelTier.SMALL,
     "argument_scoring":     ModelTier.SMALL,
     "opponent_response":    ModelTier.SMALL,
@@ -354,11 +356,10 @@ def is_local_endpoint(tier: ModelTier) -> bool:
     return any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0"))
 
 
-# Tasks where thinking tokens are allowed (e.g. topic/agenda creation).
-# For these, we return {} so the model can reason. All other tasks disable thinking.
-TASKS_WITH_THINKING_ENABLED: frozenset[str] = frozenset({
-    "issue_extraction",
-})
+# Tasks where thinking tokens are allowed.
+# Currently empty — issue_extraction was here but reasoning models would spend
+# their entire token budget on thinking and never output JSON.
+TASKS_WITH_THINKING_ENABLED: frozenset[str] = frozenset()
 
 
 def local_extra_body(tier: ModelTier, *, allow_thinking: bool = False) -> dict:

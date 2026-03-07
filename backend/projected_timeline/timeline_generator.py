@@ -204,6 +204,7 @@ async def _extract_issues(appellant: str, appellee: str) -> dict:
         ],
         temperature=0.3,
         max_tokens=3000,
+        response_format={"type": "json_object"},
         extra_body=task_extra_body("issue_extraction"),
     )
     raw = extract_content(response)
