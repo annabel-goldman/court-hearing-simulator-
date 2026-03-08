@@ -1114,6 +1114,14 @@
   min-height: 320px;
 }
 
+.analysis-card-patience {
+  font-size: 0.85rem !important;
+  font-weight: 400 !important;
+  opacity: 0.55;
+  margin-top: 0.5rem;
+  letter-spacing: 0 !important;
+}
+
 .desk-controls {
   display: flex;
   flex-direction: row;

@@ -23,8 +23,14 @@ type JudgeQuestionTypeId =
   | 'statutory'
   | 'devils_advocate'
 
-const ANALYSIS_MESSAGE = 'The judge is analyzing your briefs.'
 const PREPARING_MESSAGE = 'Preparing your session…'
+
+const PHASE_LABELS: Record<string, string> = {
+  extracting:  'Phase 1 — Extracting key legal issues…',
+  agendas:     'Phase 2 — Generating judicial lenses…',
+  refinement:  'Phase 2.5 — Scoring Topics…',
+  mcts:        'Phase 3 — Simulating Potential Conversations…',
+}
 const BENCH_LOGO_SRC = getAssetUrl('bench-logo.svg')
 const LANDING_INTRO_BACKGROUND_SRC = getAssetUrl('Background.jpg')
 const LANDING_SWOOSH_MS = 840
@@ -101,6 +107,7 @@ export default function Home() {
   const [stage, setStage] = useState<HomeStage>('landing')
   const [landingPhase, setLandingPhase] = useState<LandingPhase>('intro')
   const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle')
+  const [loadingStatus, setLoadingStatus] = useState('')
   const [landingExiting, setLandingExiting] = useState(false)
   const [deskEntering, setDeskEntering] = useState(false)
   const [landingActivated, setLandingActivated] = useState(false)
@@ -554,7 +561,7 @@ export default function Home() {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
     try {
-      const agendaData = await generateOrchestratedAgenda(API_URL, fileA.text, fileB.text)
+      const agendaData = await generateOrchestratedAgenda(API_URL, fileA.text, fileB.text, setLoadingStatus)
 
       return {
         ...baseConfig,
@@ -571,7 +578,8 @@ export default function Home() {
   async function generateOrchestratedAgenda(
     apiUrl: string,
     appellantBrief: string,
-    appelleeBrief: string
+    appelleeBrief: string,
+    onStatus?: (msg: string) => void
   ): Promise<{
     predictedTopicSets: unknown
     case_summary?: string
@@ -588,10 +596,13 @@ export default function Home() {
       })
       if (!res.ok || !res.body) return null
 
+      onStatus?.('Sending briefs to the LLM…')
+
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
       let rawDone: Record<string, unknown> | null = null
+      let lensCount = 0
 
       while (true) {
         const { done, value } = await reader.read()
@@ -608,7 +619,14 @@ export default function Home() {
               type: string
               data?: Record<string, unknown>
             }
-            if (event.type === 'done' && event.data) {
+            if (event.type === 'status') {
+              const phase = event.data?.phase as string | undefined
+              onStatus?.(PHASE_LABELS[phase ?? ''] ?? '')
+            } else if (event.type === 'agenda') {
+              lensCount++
+              const lens = event.data?.lens as string | undefined
+              onStatus?.(`Phase 2 — Lens ${lensCount}: ${lens ?? ''}`)
+            } else if (event.type === 'done' && event.data) {
               rawDone = event.data as Record<string, unknown>
             }
           } catch {
@@ -653,6 +671,7 @@ export default function Home() {
     }
 
     setError('')
+    setLoadingStatus('')
     setIntakePhase('launching')
 
     try {
@@ -673,6 +692,7 @@ export default function Home() {
       navigate('/courtroom')
     } catch (err) {
       setIntakePhase('idle')
+      setLoadingStatus('')
       setError(`Unable to enter courtroom: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
   }
@@ -946,7 +966,7 @@ export default function Home() {
 
   const intakeLocked = intakePhase !== 'idle'
   const showLoading = intakePhase === 'launching' || intakePhase === 'analyzing'
-  const loadingMessage = intakePhase === 'launching' ? PREPARING_MESSAGE : ANALYSIS_MESSAGE
+  const loadingMessage = intakePhase === 'launching' ? PREPARING_MESSAGE : (loadingStatus || 'Analysing briefs…')
   const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
 
   return (
@@ -1113,6 +1133,7 @@ export default function Home() {
               <div className="analysis-card analysis-card-full">
                 <div className="analysis-card-spinner" role="status" aria-label="Loading" />
                 <p>{loadingMessage}</p>
+                <p className="analysis-card-patience">Please be patient — this process can take 2–5 minutes.</p>
               </div>
             ) : (
               <>
