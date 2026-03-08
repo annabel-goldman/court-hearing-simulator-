@@ -2,15 +2,10 @@
   min-height: 100vh;
   padding: 2rem 1.1rem 2.6rem;
   background:
-    radial-gradient(circle at 22% -16%, rgba(233, 198, 146, 0.2), transparent 44%),
-    repeating-linear-gradient(
-      90deg,
-      rgba(100, 72, 39, 0.1) 0px,
-      rgba(100, 72, 39, 0.1) 2px,
-      rgba(84, 56, 29, 0.06) 2px,
-      rgba(84, 56, 29, 0.06) 16px
-    ),
-    linear-gradient(160deg, #4d331f 0%, #3a2518 30%, #2c1c12 100%);
+    linear-gradient(12deg, rgba(216, 178, 122, 0.1), transparent 35%),
+    linear-gradient(220deg, rgba(95, 64, 33, 0.28), transparent 42%),
+    repeating-linear-gradient(132deg, rgba(243, 219, 176, 0.08) 0px, rgba(243, 219, 176, 0.08) 2px, transparent 2px, transparent 29px),
+    linear-gradient(180deg, rgba(33, 21, 13, 0.9), rgba(24, 15, 10, 0.96));
   color: #27345a;
   font-family: 'Spectral', Georgia, serif;
 }
@@ -48,8 +43,15 @@
   font-weight: 700;
 }
 
+.session-audit-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
 .session-audit-title {
-  margin: 0.38rem 0 0;
+  margin: 0;
   font-size: clamp(1.85rem, 3.1vw, 2.45rem);
   color: #27345a;
   font-weight: 700;
@@ -118,26 +120,36 @@
   font-size: 1rem;
 }
 
-.session-audit-actions {
-  display: flex;
-  justify-content: center;
-  padding: 0.35rem 0 0.15rem;
-}
-
 .session-audit-play-again-btn {
-  border: 1px solid #d1c5b1;
-  border-radius: 999px;
-  padding: 0.62rem 1.35rem;
-  background: linear-gradient(180deg, #fff7e6 0%, #f0dcc0 100%);
-  color: #3d2a1a;
+  min-width: 154px;
+  min-height: 48px;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid rgba(245, 219, 175, 0.88);
+  background: rgba(24, 15, 9, 0.74);
+  color: #f4dfb6;
   font-family: 'Spectral', Georgia, serif;
-  font-size: 0.96rem;
-  font-weight: 700;
+  font-size: 1.04rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: lowercase;
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 219, 176, 0.2),
+    0 10px 24px rgba(0, 0, 0, 0.36);
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
 .session-audit-play-again-btn:hover {
+  border-color: rgba(255, 235, 197, 0.98);
+  color: #ffeac2;
+  background: rgba(42, 28, 17, 0.82);
   transform: translateY(-1px);
-  box-shadow: 0 10px 16px rgba(0, 0, 0, 0.22);
+}
+
+@media (max-width: 640px) {
+  .session-audit-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
 }

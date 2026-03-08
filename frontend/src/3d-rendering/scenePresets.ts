@@ -413,7 +413,7 @@ const NON_NUMERIC_COLORS = {
   fabricBlue: '#1a3a5c',
   fabricLeather: '#3d2415',
   wallPaint: '#f5cea4',
-  ceiling: '#361603',
+  ceiling: '#804a00',
 } as const
 
 const NON_NUMERIC_JUDGE_AVATAR_ASSETS_BY_DIFFICULTY: Record<JudgeAvatarDifficulty, Record<string, string>> = {

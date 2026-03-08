@@ -80,8 +80,12 @@ export default function SessionAuditPage() {
     <div className="session-audit-page">
       <div className="session-audit-shell">
         <header className="session-audit-header">
-          <p className="session-audit-kicker">Session Closed</p>
-          <h1 className="session-audit-title">Court Adjourned</h1>
+          <div className="session-audit-header-row">
+            <h1 className="session-audit-title">Court Adjourned</h1>
+            <button type="button" className="session-audit-play-again-btn" onClick={handlePlayAgain}>
+              Play Again
+            </button>
+          </div>
         </header>
 
         <section className="session-audit-section">
@@ -116,11 +120,6 @@ export default function SessionAuditPage() {
           <p className="session-audit-performance">{performanceSummary}</p>
         </section>
 
-        <div className="session-audit-actions">
-          <button type="button" className="session-audit-play-again-btn" onClick={handlePlayAgain}>
-            Play Again
-          </button>
-        </div>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 {
   "id": "example_agent_devils_advocate",
-  "name": "EXAMPLE AGENT: Devil's Advocate",
+  "name": "Devil's Advocate",
   "color": "#7C3AED",
   "description": "A challenging judge who presents the opposing side's strongest arguments to test the advocate's preparation.",
   "triggers": [

@@ -73,6 +73,11 @@ const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
 const JUDGE_DIFFICULTY_STORAGE_KEY = 'judgeAvatarDifficulty'
 const DEFAULT_ANIMATION_PULSE_MS = 2200
 const ONE_SHOT_ANIMATION_STATES = new Set<AvatarAnimationStateKey>(['clap', 'cheer', 'sitTransition', 'sitToStand'])
+const MALE_VOICE_HINTS = [
+  'david', 'daniel', 'alex', 'fred', 'thomas', 'tom', 'james', 'arthur',
+  'george', 'john', 'matthew', 'ryan', 'aaron', 'guy', 'male', 'man'
+]
+const FEMALE_VOICE_HINTS = ['female', 'woman', 'girl', 'zira', 'samantha', 'victoria', 'karen', 'moira']
 
 function isJudgeAvatarDifficulty(value: unknown): value is JudgeAvatarDifficulty {
   return value === 'easy' || value === 'medium' || value === 'hard'
@@ -82,6 +87,22 @@ function readStoredJudgeAvatarDifficulty(): JudgeAvatarDifficulty {
   if (typeof window === 'undefined') return 'medium'
   const stored = window.localStorage.getItem(JUDGE_DIFFICULTY_STORAGE_KEY)
   return isJudgeAvatarDifficulty(stored) ? stored : 'medium'
+}
+
+function pickMaleEnglishVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  if (voices.length === 0) return null
+
+  const scored = voices.map((voice) => {
+    const name = voice.name.toLowerCase()
+    let score = 0
+    if (voice.lang.toLowerCase() === 'en-us') score += 2
+    if (voice.lang.toLowerCase().startsWith('en')) score += 1
+    if (MALE_VOICE_HINTS.some((hint) => name.includes(hint))) score += 5
+    if (FEMALE_VOICE_HINTS.some((hint) => name.includes(hint))) score -= 4
+    return { voice, score }
+  }).sort((a, b) => b.score - a.score)
+
+  return scored[0]?.voice ?? null
 }
 
 type AnimationDebugRole = keyof typeof COURTROOM_ANIMATION_STATE_OPTIONS
@@ -614,7 +635,6 @@ export default function CourtroomPage() {
       const timeoutId = window.setTimeout(() => {
         console.log('[CourtroomPage] Starting ritual: ALL_RISE')
         setSimulationPhase('ALL_RISE')
-        playRitualCue('All rise. The Honorable Court is now in session.')
       }, RITUAL_START_DELAY_MS)
       
       return () => clearTimeout(timeoutId)
@@ -666,8 +686,10 @@ export default function CourtroomPage() {
       utterance.onend = () => resolve()
       utterance.onerror = () => resolve()
       
-      const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'))
-      if (voices.length > 0) utterance.voice = voices[0]
+      const voices = speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('en'))
+      const maleVoice = pickMaleEnglishVoice(voices)
+      if (maleVoice) utterance.voice = maleVoice
+      else if (voices.length > 0) utterance.voice = voices[0]
       speechSynthesis.speak(utterance)
     })
   }, [])
@@ -703,7 +725,6 @@ export default function CourtroomPage() {
     if (simulationPhase === 'JUDGE_ENTERING') {
       const timeoutId = window.setTimeout(() => {
         setSimulationPhase('JUDGE_SEATED')
-        playRitualCue('You may be seated.')
       }, JUDGE_ENTERING_DURATION_MS)
       return () => clearTimeout(timeoutId)
     }

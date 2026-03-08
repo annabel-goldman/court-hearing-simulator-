@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { JudgeAvatarDifficulty, SessionAgendaItem } from '../3d-rendering/types'
+import { preloadCourtroomGlbAssets } from '../3d-rendering/preloadCourtroomGlbs'
 import { getAssetUrl } from '../config/assetUrls'
 
 GlobalWorkerOptions.workerSrc = workerSrc
@@ -33,8 +34,6 @@ const PHASE_LABELS: Record<string, string> = {
 }
 const BENCH_LOGO_SRC = getAssetUrl('bench-logo.svg')
 const LANDING_INTRO_BACKGROUND_SRC = getAssetUrl('Background.jpg')
-const LANDING_SWOOSH_MS = 840
-const DESK_ENTRY_MS = 420
 const SETTINGS_PULSE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 const SETTINGS_PULSE_LAST_SEEN_KEY = 'homeSettingsPulseLastSeenAt'
 const SETTINGS_PULSE_SESSION_KEY = 'homeSettingsPulseShownThisSession'
@@ -108,11 +107,10 @@ export default function Home() {
   const [landingPhase, setLandingPhase] = useState<LandingPhase>('intro')
   const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle')
   const [loadingStatus, setLoadingStatus] = useState('')
-  const [landingExiting, setLandingExiting] = useState(false)
-  const [deskEntering, setDeskEntering] = useState(false)
   const [landingActivated, setLandingActivated] = useState(false)
   const [showLandingButton, setShowLandingButton] = useState(false)
-  const [musicMuted, setMusicMuted] = useState(false)
+  const [volumeLevel, setVolumeLevel] = useState(0.72)
+  const [volumePopoverOpen, setVolumePopoverOpen] = useState(false)
 
   const [fileA, setFileA] = useState<UploadedFile | null>(null)
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
@@ -139,15 +137,16 @@ export default function Home() {
 
   const inputRefA = useRef<HTMLInputElement>(null)
   const inputRefB = useRef<HTMLInputElement>(null)
-  const landingExitTimerRef = useRef<number | null>(null)
-  const deskEntryTimerRef = useRef<number | null>(null)
+  const volumeControlRef = useRef<HTMLDivElement | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const outputGainRef = useRef<GainNode | null>(null)
   const audioUnlockedRef = useRef(false)
   const backgroundMusicRef = useRef<{
     oscillators: OscillatorNode[]
     gainNode: GainNode
     pulseIntervalId: number
   } | null>(null)
+  const intakeLocked = intakePhase !== 'idle'
 
   useEffect(() => {
     const state = location.state as { returnToWelcome?: boolean } | null
@@ -173,6 +172,18 @@ export default function Home() {
     return audioContextRef.current
   }
 
+  const getOutputGainNode = (ctx: AudioContext) => {
+    if (outputGainRef.current && outputGainRef.current.context === ctx) {
+      return outputGainRef.current
+    }
+
+    const gainNode = ctx.createGain()
+    gainNode.gain.setValueAtTime(volumeLevel, ctx.currentTime)
+    gainNode.connect(ctx.destination)
+    outputGainRef.current = gainNode
+    return gainNode
+  }
+
   const createTone = (
     ctx: AudioContext,
     startTime: number,
@@ -192,7 +203,7 @@ export default function Home() {
     gain.gain.setValueAtTime(Math.max(fromGain, 0.0001), startTime)
     gain.gain.exponentialRampToValueAtTime(Math.max(toGain, 0.0001), startTime + duration)
     oscillator.connect(gain)
-    gain.connect(ctx.destination)
+    gain.connect(getOutputGainNode(ctx))
     oscillator.start(startTime)
     oscillator.stop(startTime + duration)
   }
@@ -228,7 +239,7 @@ export default function Home() {
 
     source.connect(filter)
     filter.connect(gain)
-    gain.connect(ctx.destination)
+    gain.connect(getOutputGainNode(ctx))
     source.start(startTime)
     source.stop(startTime + duration)
   }
@@ -303,7 +314,7 @@ export default function Home() {
 
     source.connect(sweepFilter)
     sweepFilter.connect(gain)
-    gain.connect(ctx.destination)
+    gain.connect(getOutputGainNode(ctx))
     source.start(now)
     source.stop(now + duration + 0.02)
 
@@ -321,7 +332,7 @@ export default function Home() {
     const masterGain = ctx.createGain()
     masterGain.gain.setValueAtTime(0.0001, now)
     masterGain.gain.exponentialRampToValueAtTime(0.035, now + 1.3)
-    masterGain.connect(ctx.destination)
+    masterGain.connect(getOutputGainNode(ctx))
 
     const padFilter = ctx.createBiquadFilter()
     padFilter.type = 'lowpass'
@@ -427,30 +438,24 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
-      if (landingExitTimerRef.current !== null) {
-        window.clearTimeout(landingExitTimerRef.current)
-        landingExitTimerRef.current = null
-      }
-      if (deskEntryTimerRef.current !== null) {
-        window.clearTimeout(deskEntryTimerRef.current)
-        deskEntryTimerRef.current = null
-      }
       stopBackgroundMusic()
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         void audioContextRef.current.close()
       }
       audioContextRef.current = null
+      outputGainRef.current = null
       audioUnlockedRef.current = false
     }
   }, [])
 
   useEffect(() => {
-    if (!settingsModalOpen && !infoModalOpen) return
+    if (!settingsModalOpen && !infoModalOpen && !volumePopoverOpen) return
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setInfoModalOpen(false)
         setSettingsModalOpen(false)
+        setVolumePopoverOpen(false)
       }
     }
 
@@ -458,7 +463,32 @@ export default function Home() {
     return () => {
       window.removeEventListener('keydown', handleEscape)
     }
-  }, [infoModalOpen, settingsModalOpen])
+  }, [infoModalOpen, settingsModalOpen, volumePopoverOpen])
+
+  useEffect(() => {
+    const ctx = audioContextRef.current
+    const output = outputGainRef.current
+    if (!ctx || !output || ctx.state === 'closed') return
+
+    const now = ctx.currentTime
+    output.gain.cancelScheduledValues(now)
+    output.gain.setValueAtTime(output.gain.value, now)
+    output.gain.linearRampToValueAtTime(volumeLevel, now + 0.08)
+  }, [volumeLevel])
+
+  useEffect(() => {
+    if (!volumePopoverOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (volumeControlRef.current?.contains(event.target as Node)) return
+      setVolumePopoverOpen(false)
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [volumePopoverOpen])
 
   useEffect(() => {
     if (stage !== 'desk') return
@@ -686,6 +716,14 @@ export default function Home() {
         new Promise((resolve) => window.setTimeout(resolve, 2200)),
       ])
 
+      await preloadCourtroomGlbAssets((loaded, total) => {
+        if (loaded >= total) {
+          setLoadingStatus('Finalizing courtroom…')
+          return
+        }
+        setLoadingStatus(`Loading courtroom models (${loaded}/${total})…`)
+      })
+
       stopBackgroundMusic()
       localStorage.setItem('judgeAvatarDifficulty', judgeAvatarDifficulty)
       sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
@@ -720,6 +758,34 @@ export default function Home() {
     if (inputRefB.current) inputRefB.current.value = ''
   }
 
+  const goBackInFlow = () => {
+    if (stage === 'landing') {
+      if (landingPhase === 'welcome') {
+        setInfoModalOpen(false)
+        setVolumePopoverOpen(false)
+        setLandingPhase('intro')
+        setLandingActivated(false)
+        setShowLandingButton(false)
+        stopBackgroundMusic()
+        return
+      }
+
+      navigate(-1)
+      return
+    }
+
+    if (intakeLocked) return
+
+    setInfoModalOpen(false)
+    setSettingsModalOpen(false)
+    setVolumePopoverOpen(false)
+    setStage('landing')
+    setLandingPhase('welcome')
+    setLandingActivated(true)
+    setShowLandingButton(true)
+    startBackgroundMusic()
+  }
+
   const toggleQuestionType = (typeId: JudgeQuestionTypeId) => {
     setEnabledQuestionTypes((current) => {
       if (current.includes(typeId)) {
@@ -740,25 +806,67 @@ export default function Home() {
   }
 
   const openInfoModal = () => {
+    setVolumePopoverOpen(false)
     setSettingsModalOpen(false)
     setInfoModalOpen(true)
   }
 
-    const toggleMusicMuted = () => {
-    if (musicMuted) {
-      startBackgroundMusic()
-      setMusicMuted(false)
-    } else {
-      stopBackgroundMusic()
-      setMusicMuted(true)
-    }
-  }
-
   const openSettingsModal = () => {
+    setVolumePopoverOpen(false)
     markSettingsPulseSeen()
     setInfoModalOpen(false)
     setSettingsModalOpen(true)
   }
+
+  const handleVolumeSliderChange = (value: string) => {
+    const parsed = Number(value)
+    if (Number.isNaN(parsed)) return
+    const clamped = Math.max(0, Math.min(100, parsed))
+    setVolumeLevel(clamped / 100)
+  }
+
+  const volumePercent = Math.round(volumeLevel * 100)
+  const isVolumeMuted = volumePercent === 0
+  const volumeControl = (
+    <div className="volume-control-wrap" ref={volumeControlRef}>
+      <button
+        type="button"
+        className="landing-mute-btn"
+        onClick={() => setVolumePopoverOpen((open) => !open)}
+        aria-label="Adjust background audio volume"
+        aria-haspopup="dialog"
+        aria-expanded={volumePopoverOpen}
+        title={`Volume: ${volumePercent}%`}
+      >
+        {isVolumeMuted ? (
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
+            <path d="M3 9v6h4l5 5V4L7 9H3z" />
+            <path d="m16 9 5 6M21 9l-5 6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+          </svg>
+        )}
+      </button>
+      {volumePopoverOpen && (
+        <div className="volume-popover" role="dialog" aria-label="Volume control">
+          <label htmlFor="volume-slider" className="volume-popover-label">Volume</label>
+          <input
+            id="volume-slider"
+            className="volume-popover-slider"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={volumePercent}
+            onChange={(event) => handleVolumeSliderChange(event.target.value)}
+          />
+          <span className="volume-popover-value">{volumePercent}%</span>
+        </div>
+      )}
+    </div>
+  )
 
   const infoModal = infoModalOpen ? (
     <div
@@ -826,6 +934,29 @@ export default function Home() {
                 <p>Use concise, complete briefs to improve summary quality and courtroom question relevance.</p>
               </div>
             </div>
+
+            <div className="settings-ledger-row">
+              <p className="settings-ledger-copy">
+                <span className="settings-ledger-label">Project</span>
+                <span className="settings-ledger-note">Look inside the project flow</span>
+              </p>
+              <div className="info-ledger-detail">
+                <p>
+                  For a look inside the project, open{' '}
+                  <button
+                    type="button"
+                    className="info-ledger-link"
+                    onClick={() => {
+                      setInfoModalOpen(false)
+                      navigate('/orchestrated-agents')
+                    }}
+                  >
+                    Playground Mode
+                  </button>
+                  .
+                </p>
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -833,33 +964,16 @@ export default function Home() {
   ) : null
 
   const enterDeskStage = async () => {
-    if (landingExiting) return
     await unlockAudio()
     playBriefSendWhoosh()
-    stopBackgroundMusic()
-    setLandingExiting(true)
-
-    if (landingExitTimerRef.current !== null) {
-      window.clearTimeout(landingExitTimerRef.current)
-    }
-    landingExitTimerRef.current = window.setTimeout(() => {
-      setStage('desk')
-      setDeskEntering(true)
-      setLandingExiting(false)
-      landingExitTimerRef.current = null
-      if (deskEntryTimerRef.current !== null) {
-        window.clearTimeout(deskEntryTimerRef.current)
-      }
-      deskEntryTimerRef.current = window.setTimeout(() => {
-        setDeskEntering(false)
-        deskEntryTimerRef.current = null
-      }, DESK_ENTRY_MS)
-    }, LANDING_SWOOSH_MS)
+    setVolumePopoverOpen(false)
+    setStage('desk')
   }
 
   const enterWelcomeStage = async () => {
-    if (landingExiting || landingPhase !== 'intro') return
+    if (landingPhase !== 'intro') return
     await unlockAudio()
+    setVolumePopoverOpen(false)
     startBackgroundMusic()
     setLandingActivated(true)
     setLandingPhase('welcome')
@@ -867,113 +981,22 @@ export default function Home() {
 
   if (stage === 'landing') {
     return (
-      <div className={`landing-stage ${landingExiting ? 'is-swooshing' : ''}`}>
+      <div className="landing-stage">
         <div className="landing-backdrop-grid" />
-        <div className="top-left-action-stack">
+        {landingPhase !== 'intro' && (
           <button
             type="button"
-            className="info-action-btn"
-            onClick={openInfoModal}
-            aria-label="Open session information"
-            aria-haspopup="dialog"
-            aria-expanded={infoModalOpen}
-            disabled={landingExiting}
+            className="flow-back-btn"
+            onClick={goBackInFlow}
+            aria-label="Go back"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="info-action-icon">
-              <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
-              <text x="12" y="15.1" textAnchor="middle" fontSize="10" fontWeight="700" fontFamily="Spectral, Georgia, serif">
-                i
-              </text>
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="flow-back-icon">
+              <path d="M14.5 5.5 8 12l6.5 6.5" />
             </svg>
           </button>
-          {landingPhase === 'welcome' && (
-            <button
-              type="button"
-              className="landing-mute-btn"
-              onClick={toggleMusicMuted}
-              aria-label={musicMuted ? 'Unmute background music' : 'Mute background music'}
-              title={musicMuted ? 'Unmute music' : 'Mute music'}
-            >
-              {musicMuted ? (
-                <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
-                  <path d="M11 5L6 9H2v6h4l5 4V5zm4.54 3.46l-1.41 1.41c.81.81 1.31 1.92 1.31 3.13s-.5 2.33-1.31 3.13l1.41 1.41c1.04-1.04 1.68-2.47 1.68-4.54s-.64-3.5-1.68-4.54zm2.13 2.13l-1.41 1.41c.33.33.54.78.54 1.27s-.21.94-.54 1.27l1.41 1.41c.63-.63 1.02-1.5 1.02-2.47s-.39-1.84-1.02-2.47z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden="true" className="landing-mute-icon">
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                </svg>
-              )}
-            </button>
-          )}
-        </div>
-        <div className={`landing-content ${landingPhase === 'intro' ? 'landing-single-intro' : ''}`}>
-          {landingPhase === 'intro' ? (
-            <>
-              <div className="landing-single-background" style={landingIntroBackgroundStyle} aria-hidden="true" />
-              <div className="landing-single-photo-overlay" aria-hidden="true" />
-              <div className="landing-single-start-wrap">
-                <button
-                  type="button"
-                  className="landing-single-start-btn"
-                  onClick={enterWelcomeStage}
-                  disabled={landingExiting}
-                >
-                  start
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={`landing-back-btn ${showLandingButton ? 'is-visible' : ''}`}
-                onClick={() => { setLandingPhase('intro'); setLandingActivated(false); setShowLandingButton(false); }}
-                aria-label="Back to start"
-              >
-                ← Back
-              </button>
-              <img
-                src={BENCH_LOGO_SRC}
-                alt="The Bench"
-                className={`landing-logo landing-logo-stamp ${landingActivated ? 'is-animated' : ''}`}
-                draggable={false}
-              />
-              <div className="landing-start-slot">
-                <button
-                  className={`landing-start-text ${showLandingButton ? 'is-visible' : ''}`}
-                  type="button"
-                  onClick={enterDeskStage}
-                  disabled={!showLandingButton || landingExiting}
-                  aria-hidden={!showLandingButton}
-                >
-                  upload your briefs
-                </button>
-                <button
-                  type="button"
-                  className={`landing-playground-btn ${showLandingButton ? 'is-visible' : ''}`}
-                  onClick={() => navigate('/orchestrated-agents')}
-                >
-                  Playground Mode
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-        {infoModal}
-      </div>
-    )
-  }
-
-  const intakeLocked = intakePhase !== 'idle'
-  const showLoading = intakePhase === 'launching' || intakePhase === 'analyzing'
-  const loadingMessage = intakePhase === 'launching' ? PREPARING_MESSAGE : (loadingStatus || 'Analysing briefs…')
-  const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
-
-  return (
-    <div className={`home home-professional desk-stage ${deskEntering ? 'is-entering' : ''}`}>
-      <main className="home-main desk-main">
-        <div className={`desk-surface ${deskEntering ? 'is-entering' : ''}`}>
-          <div className="top-left-action-stack">
+        )}
+        <div className="top-left-action-stack">
+          <div className="top-left-action-row">
             <button
               type="button"
               className="info-action-btn"
@@ -989,19 +1012,105 @@ export default function Home() {
                 </text>
               </svg>
             </button>
-            <button
-              type="button"
-              className={`settings-gear-btn ${settingsPulseActive ? 'is-pulsing' : ''}`}
-              onClick={openSettingsModal}
-              aria-label="Open session settings"
-              aria-haspopup="dialog"
-              aria-expanded={settingsModalOpen}
-              disabled={intakeLocked}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" className="settings-gear-icon">
-                <path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.32 7.32 0 0 0-1.7-.98l-.38-2.65A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.49.42l-.38 2.65c-.62.25-1.19.58-1.7.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.51.4 1.08.73 1.7.98l.38 2.65A.5.5 0 0 0 10 22h4a.5.5 0 0 0 .49-.42l.38-2.65c.62-.25 1.19-.58 1.7-.98l2.49 1a.5.5 0 0 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64L19.43 12.98zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z" />
-              </svg>
-            </button>
+            {landingPhase === 'welcome' && (
+              volumeControl
+            )}
+          </div>
+        </div>
+        <div className={`landing-content ${landingPhase === 'intro' ? 'landing-single-intro' : ''}`}>
+          {landingPhase === 'intro' ? (
+            <>
+              <div className="landing-single-background" style={landingIntroBackgroundStyle} aria-hidden="true" />
+              <div className="landing-single-photo-overlay" aria-hidden="true" />
+              <div className="landing-single-start-wrap">
+                <button
+                  type="button"
+                  className="landing-single-start-btn"
+                  onClick={enterWelcomeStage}
+                >
+                  start
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <img
+                src={BENCH_LOGO_SRC}
+                alt="The Bench"
+                className={`landing-logo landing-logo-stamp ${landingActivated ? 'is-animated' : ''}`}
+                draggable={false}
+              />
+              <div className="landing-start-slot">
+                <button
+                  className={`landing-start-text ${showLandingButton ? 'is-visible' : ''}`}
+                  type="button"
+                  onClick={enterDeskStage}
+                  disabled={!showLandingButton}
+                  aria-hidden={!showLandingButton}
+                >
+                  upload your briefs
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        {infoModal}
+      </div>
+    )
+  }
+
+  const isLaunching = intakePhase === 'launching'
+  const showLoading = intakePhase === 'analyzing'
+  const loadingMessage = loadingStatus || PREPARING_MESSAGE
+  const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
+
+  return (
+    <div className="home home-professional desk-stage">
+      <main className="home-main desk-main">
+        <div className="desk-surface">
+          <button
+            type="button"
+            className="flow-back-btn"
+            onClick={goBackInFlow}
+            aria-label="Go back"
+            disabled={intakeLocked}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="flow-back-icon">
+              <path d="M14.5 5.5 8 12l6.5 6.5" />
+            </svg>
+          </button>
+          <div className="top-left-action-stack">
+            <div className="top-left-action-row">
+              <button
+                type="button"
+                className="info-action-btn"
+                onClick={openInfoModal}
+                aria-label="Open session information"
+                aria-haspopup="dialog"
+                aria-expanded={infoModalOpen}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="info-action-icon">
+                  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                  <text x="12" y="15.1" textAnchor="middle" fontSize="10" fontWeight="700" fontFamily="Spectral, Georgia, serif">
+                    i
+                  </text>
+                </svg>
+              </button>
+              {volumeControl}
+              <button
+                type="button"
+                className={`settings-gear-btn ${settingsPulseActive ? 'is-pulsing' : ''}`}
+                onClick={openSettingsModal}
+                aria-label="Open session settings"
+                aria-haspopup="dialog"
+                aria-expanded={settingsModalOpen}
+                disabled={intakeLocked}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="settings-gear-icon">
+                  <path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.32 7.32 0 0 0-1.7-.98l-.38-2.65A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.49.42l-.38 2.65c-.62.25-1.19.58-1.7.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.51.4 1.08.73 1.7.98l.38 2.65A.5.5 0 0 0 10 22h4a.5.5 0 0 0 .49-.42l.38-2.65c.62-.25 1.19-.58 1.7-.98l2.49 1a.5.5 0 0 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64L19.43 12.98zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {infoModal}
@@ -1128,10 +1237,10 @@ export default function Home() {
             </div>
           )}
 
-          <div className={`paper-grid ${showLoading ? 'is-launching' : ''}`}>
+          <div className={`paper-grid ${isLaunching ? 'is-launching' : ''}`}>
             {showLoading ? (
               <div className="analysis-card analysis-card-full">
-                <div className="analysis-card-spinner" role="status" aria-label="Loading" />
+                <div className="analysis-card-loader" role="status" aria-label="Loading" />
                 <p>{loadingMessage}</p>
                 <p className="analysis-card-patience">Please be patient — this process can take 2–5 minutes.</p>
               </div>

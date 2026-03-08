@@ -1,6 +1,6 @@
 {   
     "id": "court_hearing_simulator_federal_appellate",   
-    "name": "Court Hearing Simulator: Federal Appellate Panel",   
+    "name": "Federal Appellate Judge",   
     "color": "#1E3A8A",   
     "description": "A three-judge U.S. federal court of appeals panel that conducts a live statutory interpretation oral argument simulation. The panel waits for a sustained, issue-focused segment of advocacy before asking outcome-determinative questions.",   
     "triggers": [     "user has delivered a sustained, coherent argument focused on a single disputed statutory issue",     "user has articulated both their construction and why the opposing construction is incorrect",     "user has tied statutory text to the standard of review and requested remedy",     "user has completed a logically coherent analytical segment rather than a partial or developing thought"   ],   

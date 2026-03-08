@@ -23,15 +23,6 @@ interface StatusDashboardHUDProps {
   onTogglePause: () => void
 }
 
-const PHASE_LABELS: Record<SimulationPhase, string> = {
-  OFF_RECORD: 'Off Record',
-  ALL_RISE: 'All Rise',
-  JUDGE_ENTERING: 'Judge Entering',
-  JUDGE_SEATED: 'Judge Seated',
-  PROCEEDING: 'Proceeding',
-  ADJOURNED: 'Adjourned',
-}
-
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60)
   const secs = seconds % 60
@@ -96,7 +87,6 @@ export function StatusDashboardHUD({
 
       <div className="courtroom-command-bar">
         <div className="courtroom-command-left">
-          <span className="phase-chip">{PHASE_LABELS[phase]}</span>
           {isProceeding && (
             <div className="courtroom-timer">
               <span className="timer-label">Time Remaining</span>
