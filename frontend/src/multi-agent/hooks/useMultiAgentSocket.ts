@@ -4,9 +4,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Agent, AgentQuestion, SimulationPhase, MultiAgentSocketMessage } from '../types';
+import { getWsBase } from '../../features/socket/utils/wsBase';
 
-// Get base WS URL and remove trailing /ws if present (for consistency with main project)
-const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws').replace(/\/ws\/?$/, '');
+const WS_BASE = getWsBase();
 
 interface UseMultiAgentSocketProps {
   sessionId: string;

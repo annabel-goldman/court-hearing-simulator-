@@ -5,7 +5,6 @@ import ThreeDPage from './pages/ThreeDPage'
 import SessionAuditPage from './pages/SessionAuditPage'
 import OrchestratedAgents from './pages/OrchestratedAgents'
 import AuthGate from './components/AuthGate'
-import { AgentSimulation } from './multi-agent'
 
 function App() {
   return (
@@ -18,8 +17,6 @@ function App() {
           <Route path="/courtroom" element={<CourtroomPage />} />
           <Route path="/session-audit" element={<SessionAuditPage />} />
           <Route path="/orchestrated-agents" element={<OrchestratedAgents />} />
-          {/* Multi-Agent Simulation - separate project */}
-          <Route path="/multi-agent" element={<AgentSimulation />} />
         </Routes>
       </BrowserRouter>
     </AuthGate>

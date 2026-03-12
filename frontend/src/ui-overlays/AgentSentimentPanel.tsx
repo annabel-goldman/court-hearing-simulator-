@@ -5,7 +5,7 @@
  * Scores (1-10) come from the backend after every multi-agent evaluation pass.
  */
 
-import type { AgentScoreEntry } from '../hooks/useSimulationSocket'
+import type { AgentScoreEntry } from '../types/socket'
 
 interface AgentSentimentPanelProps {
   scores: Record<string, AgentScoreEntry>

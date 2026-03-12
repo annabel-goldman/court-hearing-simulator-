@@ -1,12 +1,10 @@
 import { useState, useRef, DragEvent, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { JudgeAvatarDifficulty, SessionAgendaItem } from '../3d-rendering/types'
 import { preloadCourtroomGlbAssets } from '../3d-rendering/preloadCourtroomGlbs'
 import { getAssetUrl } from '../config/assetUrls'
-
-GlobalWorkerOptions.workerSrc = workerSrc
+import { extractPdfText } from '../features/pdf/utils/extractPdfText'
+import { requestProjectedTimelineStream } from '../features/orchestrated/services/timelineService'
 
 interface UploadedFile {
   name: string
@@ -81,23 +79,6 @@ const JUDGE_QUESTION_OPTIONS: Array<{
     description: 'Judge pushes the strongest version of the other side.',
   },
 ]
-
-async function extractTextFromPdf(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await getDocument({ data: arrayBuffer }).promise
-
-  let fullText = ''
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i)
-    const textContent = await page.getTextContent()
-    const pageText = textContent.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ')
-    fullText += `${pageText}\n\n`
-  }
-
-  return fullText.trim()
-}
 
 export default function Home() {
   const navigate = useNavigate()
@@ -527,7 +508,7 @@ export default function Home() {
     setError('')
 
     try {
-      const text = await extractTextFromPdf(file)
+      const text = await extractPdfText(file)
       setFile({ name: file.name, text })
       playUploadSound()
     } catch (err) {
@@ -588,10 +569,8 @@ export default function Home() {
         },
       }
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
     try {
-      const agendaData = await generateOrchestratedAgenda(API_URL, fileA.text, fileB.text, setLoadingStatus)
+      const agendaData = await generateOrchestratedAgenda(fileA.text, fileB.text, setLoadingStatus)
 
       return {
         ...baseConfig,
@@ -606,7 +585,6 @@ export default function Home() {
   }
 
   async function generateOrchestratedAgenda(
-    apiUrl: string,
     appellantBrief: string,
     appelleeBrief: string,
     onStatus?: (msg: string) => void
@@ -616,13 +594,9 @@ export default function Home() {
     agendaItems: SessionAgendaItem[]
   } | null> {
     try {
-      const res = await fetch(`${apiUrl}/api/projected-timeline/generate-stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appellant_brief: appellantBrief,
-          appellee_brief: appelleeBrief,
-        }),
+      const res = await requestProjectedTimelineStream({
+        appellant_brief: appellantBrief,
+        appellee_brief: appelleeBrief,
       })
       if (!res.ok || !res.body) return null
 

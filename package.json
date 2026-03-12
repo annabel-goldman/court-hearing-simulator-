@@ -1,0 +1,10 @@
+{
+  "name": "court-simulator-tooling",
+  "private": true,
+  "scripts": {
+    "start": "bash ./start.sh",
+    "stop": "bash ./stop.sh",
+    "start.sh": "bash ./start.sh",
+    "stop.sh": "bash ./stop.sh"
+  }
+}

@@ -49,12 +49,22 @@ import { ScoreLog } from '../orchestrated-agents/ScoreLog';
 import { OpponentFeed } from '../orchestrated-agents/OpponentFeed';
 import { MCTSTreeViz } from '../orchestrated-agents/MCTSTreeViz';
 import type { AgendaItem, PredictedTopic } from '../multi-agent/types';
+import {
+  fetchTtsVoices,
+  loadMultiAgentProfiles,
+  requestJudgeIntroduction,
+} from '../features/orchestrated/services/multiAgentService';
+import {
+  getOpponentConfig,
+  getTtsConfig,
+  saveOpponentConfig,
+  saveTtsConfig,
+} from '../features/orchestrated/services/configService';
+import { requestProjectedTimelineStream } from '../features/orchestrated/services/timelineService';
 import '../multi-agent/styles/index.css';
 import '../orchestrated-agents/agenda.css';
 import '../orchestrated-agents/system-config.css';
 import '../orchestrated-agents/playground-theme.css';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function generateSessionId(): string {
   return crypto.randomUUID();
@@ -205,16 +215,13 @@ export default function OrchestratedAgents() {
   const [judgeVoiceId, setJudgeVoiceId] = useState('');
 
   useEffect(() => {
-    fetch(`${API_URL}/api/tts/voices`)
-      .then(r => r.ok ? r.json() : [])
+    fetchTtsVoices()
       .then(setVoices)
       .catch(() => {});
-    fetch(`${API_URL}/api/opponent-config`)
-      .then(r => r.ok ? r.json() : null)
+    getOpponentConfig()
       .then(cfg => { if (cfg?.voice_id !== undefined) setOpponentVoiceId(cfg.voice_id); })
       .catch(() => {});
-    fetch(`${API_URL}/api/tts-config`)
-      .then(r => r.ok ? r.json() : null)
+    getTtsConfig()
       .then(cfg => { if (cfg?.voice !== undefined) setJudgeVoiceId(cfg.voice); })
       .catch(() => {});
   }, []);
@@ -222,12 +229,8 @@ export default function OrchestratedAgents() {
   const handleOpponentVoiceChange = useCallback(async (voiceId: string) => {
     setOpponentVoiceId(voiceId);
     try {
-      const cfg = await fetch(`${API_URL}/api/opponent-config`).then(r => r.json());
-      await fetch(`${API_URL}/api/opponent-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...cfg, voice_id: voiceId }),
-      });
+      const cfg = await getOpponentConfig();
+      await saveOpponentConfig({ ...cfg, voice_id: voiceId });
     } catch (e) {
       console.error('Failed to save opponent voice:', e);
     }
@@ -236,12 +239,8 @@ export default function OrchestratedAgents() {
   const handleJudgeVoiceChange = useCallback(async (voiceId: string) => {
     setJudgeVoiceId(voiceId);
     try {
-      const cfg = await fetch(`${API_URL}/api/tts-config`).then(r => r.json());
-      await fetch(`${API_URL}/api/tts-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...cfg, voice: voiceId }),
-      });
+      const cfg = await getTtsConfig();
+      await saveTtsConfig({ ...cfg, voice: voiceId });
     } catch (e) {
       console.error('Failed to save judge voice:', e);
     }
@@ -250,10 +249,7 @@ export default function OrchestratedAgents() {
   useEffect(() => {
     async function loadAgents() {
       try {
-        const response = await fetch(`${API_URL}/api/multi-agent/agents`);
-        if (!response.ok) throw new Error('Failed to load agents');
-        const data = await response.json();
-        setAgents(data.agents);
+        setAgents(await loadMultiAgentProfiles());
       } catch (e) {
         console.error('Failed to load agents:', e);
       } finally {
@@ -430,13 +426,9 @@ export default function OrchestratedAgents() {
     }, FLUSH_MS);
 
     try {
-      const res = await fetch(`${API_URL}/api/projected-timeline/generate-stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appellant_brief: user.text,
-          appellee_brief: opposing.text,
-        }),
+      const res = await requestProjectedTimelineStream({
+        appellant_brief: user.text,
+        appellee_brief: opposing.text,
       });
       if (!res.ok || !res.body) throw new Error('Failed to start timeline generation');
 
@@ -610,17 +602,10 @@ export default function OrchestratedAgents() {
     const topicTitles = agendaItems.flatMap(item => item.topics.map(t => t.title));
 
     try {
-      const res = await fetch(`${API_URL}/api/multi-agent/judge-intro`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          case_summary: briefSummary || 'An appellate moot-court hearing.',
-          agenda_topics: topicTitles.slice(0, 8),
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
+      const data = await requestJudgeIntroduction(
+        briefSummary || 'An appellate moot-court hearing.',
+        topicTitles.slice(0, 8),
+      );
         setJudgeIntroText(data.text);
 
         // Add the judge introduction to the questions feed
@@ -656,19 +641,6 @@ export default function OrchestratedAgents() {
           // No audio — just show the text for a few seconds
           await new Promise(resolve => setTimeout(resolve, 4000));
         }
-      } else {
-        // Endpoint failed — use a quick fallback
-        const fallback = 'This court is now in session. Counsel, you may proceed.';
-        setJudgeIntroText(fallback);
-        setQuestions(prev => [{
-          agent_id: '__judge__',
-          agent_name: 'Chief Justice',
-          color: '#f0c040',
-          question: fallback,
-          timestamp: new Date().toISOString(),
-        }, ...prev]);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
     } catch (e) {
       console.error('Judge intro failed:', e);
       const fallback = 'This court is now in session. Counsel, you may proceed.';
@@ -840,12 +812,6 @@ export default function OrchestratedAgents() {
                 ← Back to The Bench
               </Link>
               <Link
-                to="/multi-agent"
-                className="oa-header-nav__link"
-              >
-                Multi-Agent Practice
-              </Link>
-              <Link
                 to="/orchestrated-agents"
                 className="oa-header-nav__link oa-header-nav__link--active"
               >
@@ -891,7 +857,6 @@ export default function OrchestratedAgents() {
         <div className="oa-setup-section__body oa-setup-section__body--horizontal">
           <BriefUpload
             onBriefsReady={handleBriefsReady}
-            skipSummary
             clearTrigger={clearTrigger}
           />
 

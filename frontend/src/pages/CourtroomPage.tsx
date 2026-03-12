@@ -31,14 +31,18 @@ import { AgentSentimentPanel } from '../ui-overlays/AgentSentimentPanel'
 // Hooks
 import {
   useCourtroomSocket,
-  type JudgeInterrupt,
-  type JudgeInterruptSource,
-  type AgentScoreEntry,
-  type MissedQuestionEntry,
 } from '../hooks/useCourtroomSocket'
+import type {
+  AgentScoreEntry,
+  JudgeInterrupt,
+  JudgeInterruptSource,
+  MissedQuestionEntry,
+} from '../types/socket'
 import { useAudioPlayer } from '../hooks/useSimulationSocket'
 import { useMediaRecording } from '../hooks/useMediaRecording'
 import type { Agent } from '../multi-agent/types'
+import { loadMultiAgentProfiles } from '../features/orchestrated/services/multiAgentService'
+import { synthesizeSpeech } from '../features/courtroom/services/ttsService'
 
 // Configuration
 import {
@@ -66,8 +70,6 @@ import type {
   SessionTranscriptRecord,
 } from '../types/sessionAudit'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const TTS_ENDPOINT = `${API_URL}/api/tts`
 const ALL_RISE_AUTO_ADVANCE_MS = 1600
 const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
 const JUDGE_DIFFICULTY_STORAGE_KEY = 'judgeAvatarDifficulty'
@@ -168,10 +170,7 @@ export default function CourtroomPage() {
 
   const loadAgentsForOrchestrated = useCallback(async (): Promise<Agent[]> => {
     try {
-      const response = await fetch(`${API_URL}/api/multi-agent/agents`)
-      if (!response.ok) throw new Error(`Failed to load agents (${response.status})`)
-      const payload = (await response.json()) as { agents?: Agent[] }
-      return payload.agents ?? []
+      return await loadMultiAgentProfiles()
     } catch (error) {
       console.warn('[CourtroomPage] Failed to load agents; using empty panel:', error)
       return []
@@ -648,18 +647,7 @@ export default function CourtroomPage() {
     console.log('[CourtroomPage] Playing TTS:', text)
     
     try {
-      const response = await fetch(TTS_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: 'onyx' })
-      })
-
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '')
-        throw new Error(`TTS request failed (${response.status}): ${detail || response.statusText}`)
-      }
-      
-      const data = await response.json()
+      const data = await synthesizeSpeech(text, 'onyx')
       if (data.audio?.length > 0) {
         const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))
         const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' :

@@ -9,8 +9,12 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Agent } from '../types';
 import { Button, Card, CardHeader, CardContent } from './ui';
 import { AgentSelector, EditorActions, JsonEditor, NewAgentForm } from './features';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import {
+  createAgent,
+  deleteAgent,
+  resetAgentToDefault,
+  writeAgent,
+} from '../../features/orchestrated/services/multiAgentService';
 const LOCAL_STORAGE_KEY = 'multi-agent-local-edits';
 
 interface AgentEditorProps {
@@ -111,11 +115,7 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/multi-agent/agents/${selectedAgentId}/reset`);
-      if (!response.ok) throw new Error('Failed to fetch original');
-      
-      const data = await response.json();
-      const originalAgent = data.agent as Agent;
+      const originalAgent = await resetAgentToDefault(selectedAgentId);
 
       const currentAgent = getEffectiveAgent(selectedAgentId);
       if (currentAgent) {
@@ -152,17 +152,7 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
     setIsLoading(true);
     try {
       const agentData = JSON.parse(editedJson) as Agent;
-      
-      const response = await fetch(`${API_URL}/api/multi-agent/agents`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(agentData),
-      });
-
-      if (!response.ok) throw new Error('Failed to save');
-      
-      const data = await response.json();
-      const savedAgent = data.agent as Agent;
+      const savedAgent = await writeAgent(agentData);
 
       setLocalEdits(prev => ({
         ...prev,
@@ -212,23 +202,14 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
   const handleCreateAgent = useCallback(async (agentData: Partial<Agent>) => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/multi-agent/agents/new`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: agentData.name || 'New Agent',
-          color: agentData.color || '#6B7280',
-          description: agentData.description || '',
-          triggers: agentData.triggers || [],
-          example_questions: agentData.example_questions || [],
-          extra_prompt: agentData.extra_prompt || '',
-        }),
+      const newAgent = await createAgent({
+        name: agentData.name || 'New Agent',
+        color: agentData.color || '#6B7280',
+        description: agentData.description || '',
+        triggers: agentData.triggers || [],
+        example_questions: agentData.example_questions || [],
+        extra_prompt: agentData.extra_prompt || '',
       });
-
-      if (!response.ok) throw new Error('Failed to create agent');
-      
-      const data = await response.json();
-      const newAgent = data.agent as Agent;
 
       onAgentsChange([...agents, newAgent]);
       setShowNewAgentForm(false);
@@ -254,14 +235,7 @@ export function AgentEditor({ agents, onAgentsChange }: AgentEditorProps) {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/multi-agent/agents/${selectedAgentId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete agent');
-      }
+      await deleteAgent(selectedAgentId);
 
       // Remove from local state
       setLocalEdits(prev => {

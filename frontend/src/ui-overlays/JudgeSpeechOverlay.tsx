@@ -4,7 +4,7 @@
  * Displays the judge's current speech in the center of the screen.
  */
 
-import type { JudgeInterruptSource } from '../hooks/useSimulationSocket'
+import type { JudgeInterruptSource } from '../types/socket'
 
 interface JudgeSpeechOverlayProps {
   question: string | null

@@ -9,59 +9,24 @@ import type { SimulationPhase } from '../3d-rendering/types'
 import type { SessionConfig } from '../3d-rendering/types'
 import type { Agent as MultiAgentProfile } from '../multi-agent/types'
 import type { SessionAgendaItem } from '../3d-rendering/types'
+import { blobToBase64 } from '../features/media/utils/audioEncoding'
+import { getWsBase } from '../features/socket/utils/wsBase'
+import type {
+  AgentScoreEntry,
+  JudgeInterrupt,
+  JudgeInterruptSource,
+  MissedQuestionEntry,
+  WebSocketSessionConfig,
+} from '../types/socket'
+export type {
+  AgentScoreEntry,
+  JudgeInterrupt,
+  JudgeInterruptSource,
+  MissedQuestionEntry,
+  WebSocketSessionConfig,
+} from '../types/socket'
 
-const WS_BASE = (import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws').replace(/\/ws\/?$/, '')
-
-export interface JudgeInterrupt {
-  question: string
-  reasoning?: string
-  audio?: string
-  audioFormat?: string
-  source?: JudgeInterruptSource
-}
-
-export interface JudgeInterruptSource {
-  type: 'judge_engine' | 'multi_agent'
-  strategy?: string
-  agent_id?: string
-  agent_name?: string
-  agent_color?: string
-}
-
-export interface AgentScoreEntry {
-  agent_id: string
-  agent_name: string
-  agent_color: string
-  relevance: number | null
-  should_ask: boolean | null
-  on_cooldown: boolean
-}
-
-export interface MissedQuestionEntry {
-  agent_id: string
-  agent_name: string
-  agent_color: string
-  question: string
-  relevance: number
-  reason: 'not_selected' | 'duplicate'
-  timestamp: string
-}
-
-export interface WebSocketSessionConfig {
-  proceedingType: 'appellate' | 'demo'
-  userRole: 'attorney' | 'self-represented'
-  judgePersonality?: string
-  interruptionFrequency?: string
-  seed_questions?: unknown[]
-  brief_summary?: string
-  synthesis_prompt?: string
-  multi_agent?: {
-    enabled: boolean
-    strategy?: string
-    max_agents_per_pass?: number
-    agents?: MultiAgentProfile[]
-  }
-}
+const WS_BASE = getWsBase()
 
 interface UseCourtroomSocketOptions {
   sessionId: string
@@ -273,15 +238,13 @@ export function useCourtroomSocket(
   )
 
   const sendAudio = useCallback(
-    (audioBlob: Blob) => {
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(',')[1]
-        if (base64) {
-          sendMessage('audio', { audio: base64 })
-        }
+    async (audioBlob: Blob) => {
+      try {
+        const base64 = await blobToBase64(audioBlob)
+        sendMessage('audio', { audio: base64 })
+      } catch (error) {
+        console.warn('[CourtroomSocket] Failed to encode audio chunk:', error)
       }
-      reader.readAsDataURL(audioBlob)
     },
     [sendMessage]
   )

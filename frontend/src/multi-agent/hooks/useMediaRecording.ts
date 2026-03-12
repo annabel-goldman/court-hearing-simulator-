@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import { blobToBase64, pickSupportedAudioMimeType } from '../../features/media/utils/audioEncoding';
 
 const AUDIO_CHUNK_DURATION_MS = 4000;
 const VAD_ENABLED = true;
@@ -69,9 +70,10 @@ export function useMediaRecording({ onAudioChunk }: UseMediaRecordingProps): Use
         chunkHadSpeechRef.current = true;
       }
 
-      const preferWebm = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find(
-        (m) => MediaRecorder.isTypeSupported(m)
-      ) || 'audio/webm';
+      const preferWebm = pickSupportedAudioMimeType(
+        ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+        'audio/webm'
+      );
       const mediaRecorder = new MediaRecorder(stream, { mimeType: preferWebm });
       mediaRecorderRef.current = mediaRecorder;
 
@@ -90,12 +92,9 @@ export function useMediaRecording({ onAudioChunk }: UseMediaRecordingProps): Use
 
         if (chunks.length > 0 && shouldSend) {
           const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = (reader.result as string).split(',')[1];
-            if (base64) onAudioChunk(base64);
-          };
-          reader.readAsDataURL(blob);
+          blobToBase64(blob)
+            .then(onAudioChunk)
+            .catch((err) => console.warn('[MultiAgentRecorder] Failed to encode chunk:', err));
         } else if (chunks.length > 0 && VAD_ENABLED) {
           console.debug('[VAD] Chunk dropped — peak RMS %.1f < threshold %d', peakRmsRef.current, VAD_RMS_THRESHOLD);
         }

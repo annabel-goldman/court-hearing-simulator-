@@ -26,7 +26,7 @@ dist/
 .run/*.log
 .run/*.pid
 
-# Accidental root lockfile (frontend uses package-lock.json/bun.lock)
+# Accidental root lockfile (frontend uses bun.lock)
 /yarn.lock
 
 # Local source archives not used by runtime app

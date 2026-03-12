@@ -11,20 +11,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '../multi-agent/components/ui/Button';
 import { Alert } from '../multi-agent/components/ui/Alert';
+import {
+  getDefaultOpponentConfig,
+  getOpponentConfig,
+  saveOpponentConfig,
+  type OpponentConfig,
+} from '../features/orchestrated/services/configService';
 import './opponent-config.css';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-// ---------------------------------------------------------------------------
-// Types (mirror backend dataclasses)
-// ---------------------------------------------------------------------------
-
-interface OpponentConfig {
-  system_prompt: string;
-  aggressiveness: number;
-  enabled_types: string[];
-  voice_id: string;
-}
 
 type Tab = 'prompt' | 'strategy';
 type SaveStatus = 'idle' | 'success' | 'error';
@@ -61,10 +54,7 @@ export function OpponentConfigPanel() {
   const loadConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/opponent-config`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: OpponentConfig = await res.json();
-      setConfig(data);
+      setConfig(await getOpponentConfig());
     } catch (err) {
       console.error('[OpponentConfigPanel] load failed:', err);
     } finally {
@@ -83,10 +73,7 @@ export function OpponentConfigPanel() {
 
   const handleReset = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/opponent-config/default`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: OpponentConfig = await res.json();
-      setConfig(data);
+      setConfig(await getDefaultOpponentConfig());
       setSaveStatus('idle');
     } catch (err) {
       console.error('[OpponentConfigPanel] reset failed:', err);
@@ -103,15 +90,7 @@ export function OpponentConfigPanel() {
     setSaveStatus('idle');
     setSaveError('');
     try {
-      const res = await fetch(`${API_URL}/api/opponent-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(detail.detail || res.statusText);
-      }
+      await saveOpponentConfig(config);
       setSaveStatus('success');
     } catch (err) {
       setSaveStatus('error');

@@ -12,33 +12,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '../multi-agent/components/ui/Button';
 import { Alert } from '../multi-agent/components/ui/Alert';
+import {
+  getDefaultJudgeConfig,
+  getJudgeConfig,
+  saveJudgeConfig,
+  type ExternalLLMConfig,
+  type JudgeConfig,
+  type RewardDimension,
+} from '../features/orchestrated/services/configService';
 import './judge-config.css';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-// ---------------------------------------------------------------------------
-// Types (mirror backend dataclasses)
-// ---------------------------------------------------------------------------
-
-interface RewardDimension {
-  name: string;
-  weight: number;
-  description: string;
-}
-
-interface ExternalLLMConfig {
-  enabled: boolean;
-  base_url: string;
-  model: string;
-  tier_override: 'LARGE' | 'SMALL' | 'BOTH';
-}
-
-interface JudgeConfig {
-  judge_prompt: string;
-  scoring_prompt_template: string;
-  reward_dimensions: RewardDimension[];
-  external_llm: ExternalLLMConfig;
-}
 
 type Tab = 'prompt' | 'reward' | 'external';
 type SaveStatus = 'idle' | 'success' | 'error';
@@ -68,10 +50,7 @@ export function JudgeConfigPanel() {
   const loadConfig = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/judge-config`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: JudgeConfig = await res.json();
-      setConfig(data);
+      setConfig(await getJudgeConfig());
     } catch (err) {
       console.error('[JudgeConfigPanel] load failed:', err);
     } finally {
@@ -91,10 +70,7 @@ export function JudgeConfigPanel() {
 
   const handleReset = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/judge-config/default`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: JudgeConfig = await res.json();
-      setConfig(data);
+      setConfig(await getDefaultJudgeConfig());
       setSaveStatus('idle');
     } catch (err) {
       console.error('[JudgeConfigPanel] reset failed:', err);
@@ -114,15 +90,7 @@ export function JudgeConfigPanel() {
     setSaveStatus('idle');
     setSaveError('');
     try {
-      const res = await fetch(`${API_URL}/api/judge-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(detail.detail || res.statusText);
-      }
+      await saveJudgeConfig(config);
       setSaveStatus('success');
     } catch (err) {
       setSaveStatus('error');

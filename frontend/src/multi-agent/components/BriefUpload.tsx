@@ -6,51 +6,23 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { BriefData } from '../types';
+import { extractPdfText } from '../../features/pdf/utils/extractPdfText';
 import { Button, Alert, Card, CardHeader, CardContent, FileUpload } from './ui';
-import { SummaryDisplay } from './features';
-
-GlobalWorkerOptions.workerSrc = workerSrc;
 
 interface BriefUploadProps {
   onBriefsReady: (userBrief: BriefData, opposingBrief: BriefData) => void;
-  onSummaryGenerated?: (summary: string) => void;
-  /** When true, Start skips the summarize API and calls onBriefsReady directly (e.g. OrchestratedAgents uses projected-timeline which generates agenda + summary) */
-  skipSummary?: boolean;
   /** Increment to reset the Start button (e.g. when Clear Session is clicked) */
   clearTrigger?: number;
-}
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-async function extractTextFromPdf(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
-  
-  let fullText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: unknown) => (item as { str: string }).str)
-      .join(' ');
-    fullText += pageText + '\n';
-  }
-  
-  return fullText.trim();
 }
 
 function countWords(text: string): number {
   return text.split(/\s+/).length;
 }
 
-export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = false, clearTrigger }: BriefUploadProps) {
+export function BriefUpload({ onBriefsReady, clearTrigger }: BriefUploadProps) {
   const [userBrief, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBrief, setOpposingBrief] = useState<BriefData | null>(null);
-  const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
-  const [summary, setSummary] = useState<string | null>(null);
   const [started, setStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +37,7 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = f
   const handleFileUpload = useCallback(async (file: File, type: 'user' | 'opposing') => {
     try {
       setError(null);
-      const text = await extractTextFromPdf(file);
+      const text = await extractPdfText(file);
       const briefData: BriefData = { name: file.name, text };
       
       if (type === 'user') {
@@ -81,43 +53,11 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = f
 
   const handleStart = useCallback(async () => {
     if (!userBrief || !opposingBrief) return;
+    setStarted(true);
+    onBriefsReady(userBrief, opposingBrief);
+  }, [userBrief, opposingBrief, onBriefsReady]);
 
-    if (skipSummary) {
-      setStarted(true);
-      onBriefsReady(userBrief, opposingBrief);
-      return;
-    }
-
-    setIsGeneratingSummary(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API_URL}/api/multi-agent/summarize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_brief: userBrief.text,
-          opposing_brief: opposingBrief.text,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate summary');
-      }
-
-      const data = await response.json();
-      setSummary(data.summary);
-      onSummaryGenerated?.(data.summary);
-      onBriefsReady(userBrief, opposingBrief);
-    } catch (err) {
-      console.error('Failed to generate summary:', err);
-      setError('Failed to generate summary. Please try again.');
-    } finally {
-      setIsGeneratingSummary(false);
-    }
-  }, [userBrief, opposingBrief, onBriefsReady, onSummaryGenerated, skipSummary]);
-
-  const canStart = userBrief && opposingBrief && !started && (skipSummary || !summary);
+  const canStart = userBrief && opposingBrief && !started;
 
   return (
     <Card>
@@ -153,13 +93,10 @@ export function BriefUpload({ onBriefsReady, onSummaryGenerated, skipSummary = f
             size="lg"
             fullWidth
             onClick={handleStart}
-            isLoading={isGeneratingSummary}
           >
             Start
           </Button>
         )}
-
-        {summary && <SummaryDisplay summary={summary} />}
       </CardContent>
     </Card>
   );

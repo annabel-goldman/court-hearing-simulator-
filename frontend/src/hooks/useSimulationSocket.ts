@@ -3,64 +3,24 @@
  * Handles connection to the backend for judge interruptions, STT, and TTS.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import type { SimulationPhase } from '../3d-rendering/types'
-import type { Agent as MultiAgentProfile } from '../multi-agent/types'
-
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws'
-
-export interface JudgeInterrupt {
-  question: string
-  reasoning?: string
-  audio?: string  // Base64-encoded audio
-  audioFormat?: string  // 'opus', 'mp3', etc.
-  source?: JudgeInterruptSource
-}
-
-export interface JudgeInterruptSource {
-  type: 'judge_engine' | 'multi_agent'
-  strategy?: string
-  agent_id?: string
-  agent_name?: string
-  agent_color?: string
-}
-
-export interface AgentScoreEntry {
-  agent_id: string
-  agent_name: string
-  agent_color: string
-  relevance: number | null
-  should_ask: boolean | null
-  on_cooldown: boolean
-}
-
-export interface MissedQuestionEntry {
-  agent_id: string
-  agent_name: string
-  agent_color: string
-  question: string
-  relevance: number
-  reason: 'not_selected' | 'duplicate'
-  timestamp: string
-}
-
-export interface MultiAgentSocketConfig {
-  enabled: boolean
-  strategy?: 'round_robin'
-  max_agents_per_pass?: number
-  agents?: MultiAgentProfile[]
-}
-
-export interface WebSocketSessionConfig {
-  proceedingType: 'appellate' | 'demo'
-  userRole: 'attorney' | 'self-represented'
-  judgePersonality?: string
-  interruptionFrequency?: string
-  seed_questions?: any[]
-  brief_summary?: string
-  synthesis_prompt?: string
-  multi_agent?: MultiAgentSocketConfig
-}
+import type { SessionConfig } from '../3d-rendering/types'
+import type {
+  AgentScoreEntry,
+  JudgeInterrupt,
+  JudgeInterruptSource,
+  MissedQuestionEntry,
+  WebSocketSessionConfig,
+} from '../types/socket'
+import { useCourtroomSocket } from './useCourtroomSocket'
+export type {
+  AgentScoreEntry,
+  JudgeInterrupt,
+  JudgeInterruptSource,
+  MissedQuestionEntry,
+  WebSocketSessionConfig,
+} from '../types/socket'
 
 interface UseSimulationSocketOptions {
   sessionId: string
@@ -83,198 +43,28 @@ interface UseSimulationSocketReturn {
   disconnect: () => void
 }
 
+const LEGACY_SIMULATION_SESSION_CONFIG: SessionConfig = {
+  proceedingType: 'demo',
+  userRole: 'attorney',
+  materials: [],
+  useMultiAgentJudge: false,
+}
+
 export function useSimulationSocket(
   options: UseSimulationSocketOptions
 ): UseSimulationSocketReturn {
-  const {
-    sessionId,
-    onPhaseChange,
-    onJudgeInterrupt,
-    onTranscriptReceived,
-    onAgentScores,
-    onMissedQuestion,
-    onError
-  } = options
+  const socket = useCourtroomSocket({
+    sessionId: options.sessionId,
+    sessionConfig: LEGACY_SIMULATION_SESSION_CONFIG,
+    onPhaseChange: options.onPhaseChange,
+    onJudgeInterrupt: options.onJudgeInterrupt,
+    onTranscriptReceived: options.onTranscriptReceived,
+    onAgentScores: options.onAgentScores,
+    onMissedQuestion: options.onMissedQuestion,
+    onError: options.onError,
+  })
 
-  const [isConnected, setIsConnected] = useState(false)
-  const [phase, setPhase] = useState<SimulationPhase>('OFF_RECORD')
-  const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<number | null>(null)
-
-  // Connect to WebSocket
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('[WS] Already connected')
-      return
-    }
-
-    const wsUrl = `${WS_URL}/${sessionId}`
-    console.log('[WS] Connecting to:', wsUrl)
-    const ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      console.log('[WS] Connected successfully')
-      setIsConnected(true)
-    }
-
-    ws.onclose = (event) => {
-      console.log('[WS] Disconnected. Code:', event.code, 'Reason:', event.reason)
-      setIsConnected(false)
-      
-      // Attempt to reconnect after 3 seconds
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        console.log('[WS] Attempting to reconnect...')
-        connect()
-      }, 3000)
-    }
-
-    ws.onerror = () => {
-      console.error('[WS] Connection error. Is the backend running at', WS_URL, '?')
-      onError?.(new Error('WebSocket connection error'))
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        console.log('[WS] Message received:', message.type, message.data)
-        handleMessage(message)
-      } catch (e) {
-        console.error('[WS] Failed to parse message:', e)
-      }
-    }
-
-    wsRef.current = ws
-  }, [sessionId])
-
-  // Handle incoming messages
-  const handleMessage = useCallback((message: { type: string; data: any }) => {
-    switch (message.type) {
-      case 'phase_update':
-        // Only accept phase updates from backend for PROCEEDING and ADJOURNED
-        // Ritual phases (ALL_RISE, JUDGE_ENTERING, JUDGE_SEATED) are controlled by frontend
-        const newPhase = message.data.phase as SimulationPhase
-        if (newPhase === 'PROCEEDING' || newPhase === 'ADJOURNED') {
-          console.log('[WS] Accepting phase update from backend:', newPhase)
-          setPhase(newPhase)
-          onPhaseChange?.(newPhase)
-        } else {
-          console.log('[WS] Ignoring ritual phase update from backend:', newPhase, '(frontend controls ritual)')
-        }
-        break
-
-      case 'judge_interrupt':
-        onJudgeInterrupt?.({
-          question: message.data.question,
-          reasoning: message.data.reasoning,
-          audio: message.data.audio,
-          audioFormat: message.data.audio_format,
-          source: message.data.source,
-        })
-        break
-
-      case 'transcript_received':
-        onTranscriptReceived?.(message.data.text || '')
-        break
-      
-      case 'transcript_update':
-        onTranscriptReceived?.(message.data.text || '')
-        break
-
-      case 'agent_scores':
-        onAgentScores?.(message.data.scores || [])
-        break
-
-      case 'missed_question':
-        onMissedQuestion?.(message.data)
-        break
-
-      case 'error':
-        onError?.(new Error(message.data.message || 'Unknown error'))
-        break
-
-      default:
-        console.log('Unknown message type:', message.type)
-    }
-  }, [onPhaseChange, onJudgeInterrupt, onTranscriptReceived, onAgentScores, onMissedQuestion, onError])
-
-  // Send message helper
-  const sendMessage = useCallback((type: string, data: any) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, data }))
-    } else {
-      console.warn('WebSocket not connected, cannot send message')
-    }
-  }, [])
-
-  // Public API
-  const sendConfig = useCallback((config: WebSocketSessionConfig) => {
-    sendMessage('config', config)
-  }, [sendMessage])
-
-  const sendAudio = useCallback(async (audioBlob: Blob) => {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) {
-      console.warn('[WS] Not connected, cannot send audio')
-      return
-    }
-    
-    console.log('[WS] Converting audio blob to base64, size:', audioBlob.size)
-    // Convert blob to base64
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const base64 = (reader.result as string).split(',')[1]
-      console.log('[WS] Sending audio, base64 length:', base64?.length || 0)
-      sendMessage('audio', { audio: base64 })
-    }
-    reader.readAsDataURL(audioBlob)
-  }, [sendMessage])
-
-  const sendSilenceTimeout = useCallback(() => {
-    sendMessage('silence_timeout', {})
-  }, [sendMessage])
-
-  const sendQuestionCutoff = useCallback(() => {
-    sendMessage('question_cutoff', {})
-  }, [sendMessage])
-
-  const changePhase = useCallback((newPhase: SimulationPhase) => {
-    sendMessage('phase_change', { phase: newPhase })
-    setPhase(newPhase)
-  }, [sendMessage])
-
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-    }
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
-    setIsConnected(false)
-  }, [])
-
-  // Connect on mount (with cleanup handling for React StrictMode double-mount)
-  useEffect(() => {
-    // Small delay to avoid React StrictMode double-mount race condition
-    const connectTimer = setTimeout(() => {
-      connect()
-    }, 50)
-    
-    return () => {
-      clearTimeout(connectTimer)
-      disconnect()
-    }
-  }, [connect, disconnect])
-
-  return {
-    isConnected,
-    phase,
-    sendConfig,
-    sendAudio,
-    sendSilenceTimeout,
-    sendQuestionCutoff,
-    changePhase,
-    disconnect
-  }
+  return socket
 }
 
 /**

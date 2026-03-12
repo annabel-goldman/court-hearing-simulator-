@@ -10,6 +10,7 @@ import {
   AUDIO_CHUNK_DURATION_MS,
   RECORDING_INTERVAL_MS,
 } from '../config/simulationConfig'
+import { pickSupportedAudioMimeType } from '../features/media/utils/audioEncoding'
 
 interface UseMediaRecordingOptions {
   onAudioChunk?: (blob: Blob) => void
@@ -157,11 +158,10 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
 
     const startNewRecorder = () => {
       const audioStream = new MediaStream(mediaStreamRef.current!.getAudioTracks())
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : 'audio/webm'
+      const mimeType = pickSupportedAudioMimeType(
+        ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+        'audio/webm'
+      )
       const recorder = new MediaRecorder(audioStream, { mimeType })
 
       recorder.ondataavailable = (event) => {

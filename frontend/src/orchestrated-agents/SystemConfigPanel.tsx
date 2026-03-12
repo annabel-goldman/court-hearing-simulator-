@@ -12,41 +12,22 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '../multi-agent/components/ui/Button';
 import { Alert } from '../multi-agent/components/ui/Alert';
+import {
+  getDefaultModelConfig,
+  getDefaultSttConfig,
+  getDefaultTtsConfig,
+  getModelConfig,
+  getSttConfig,
+  getTtsConfig,
+  saveModelConfig,
+  saveSttConfig,
+  saveTtsConfig,
+  type ModelRuntimeConfig,
+  type STTConfig,
+  type TTSConfig,
+  type TierConfig,
+} from '../features/orchestrated/services/configService';
 import './system-config.css';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface TierConfig {
-  enabled: boolean;
-  base_url: string;
-  model: string;
-}
-
-interface ModelRuntimeConfig {
-  large: TierConfig;
-  small: TierConfig;
-  tiny:  TierConfig;
-}
-
-interface TTSConfig {
-  enabled: boolean;
-  base_url: string;
-  voice: string;
-  model: string;
-}
-
-interface STTConfig {
-  provider: string;
-  base_url: string;
-  model: string;
-  whisper_model: string;
-  device: string;
-  compute_type: string;
-}
 
 type Tab = 'models' | 'tts' | 'stt';
 type SaveStatus = 'idle' | 'saving' | 'success' | 'error';
@@ -82,13 +63,11 @@ export function SystemConfigPanel() {
   const loadAll = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [mRes, tRes, sRes] = await Promise.all([
-        fetch(`${API_URL}/api/model-config`),
-        fetch(`${API_URL}/api/tts-config`),
-        fetch(`${API_URL}/api/stt-config`),
+      const [mData, tData, sData] = await Promise.all([
+        getModelConfig(),
+        getTtsConfig(),
+        getSttConfig(),
       ]);
-      if (!mRes.ok || !tRes.ok || !sRes.ok) throw new Error('Failed to load config');
-      const [mData, tData, sData] = await Promise.all([mRes.json(), tRes.json(), sRes.json()]);
       setModels(mData);
       setTts(tData);
       setStt(sData);
@@ -110,12 +89,11 @@ export function SystemConfigPanel() {
 
   const handleReset = async () => {
     try {
-      const [mRes, tRes, sRes] = await Promise.all([
-        fetch(`${API_URL}/api/model-config/default`),
-        fetch(`${API_URL}/api/tts-config/default`),
-        fetch(`${API_URL}/api/stt-config/default`),
+      const [mData, tData, sData] = await Promise.all([
+        getDefaultModelConfig(),
+        getDefaultTtsConfig(),
+        getDefaultSttConfig(),
       ]);
-      const [mData, tData, sData] = await Promise.all([mRes.json(), tRes.json(), sRes.json()]);
       setModels(mData);
       setTts(tData);
       setStt(sData);
@@ -144,26 +122,11 @@ export function SystemConfigPanel() {
     setSaveStatus('saving');
     setSaveError('');
     try {
-      const posts: Promise<Response>[] = [];
-      if (models) posts.push(fetch(`${API_URL}/api/model-config`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(models),
-      }));
-      if (tts) posts.push(fetch(`${API_URL}/api/tts-config`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tts),
-      }));
-      if (stt) posts.push(fetch(`${API_URL}/api/stt-config`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stt),
-      }));
-      const results = await Promise.all(posts);
-      for (const res of results) {
-        if (!res.ok) {
-          const detail = await res.json().catch(() => ({ detail: res.statusText }));
-          throw new Error(detail.detail || res.statusText);
-        }
-      }
+      await Promise.all([
+        models ? saveModelConfig(models) : Promise.resolve(),
+        tts ? saveTtsConfig(tts) : Promise.resolve(),
+        stt ? saveSttConfig(stt) : Promise.resolve(),
+      ]);
       setSaveStatus('success');
     } catch (err) {
       setSaveStatus('error');
