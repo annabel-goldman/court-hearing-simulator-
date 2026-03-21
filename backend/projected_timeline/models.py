@@ -68,13 +68,6 @@ class PredictedTopicSets(BaseModel):
 # Trajectory tracker models  (real-time classifier + human-in-loop feedback)
 # ---------------------------------------------------------------------------
 
-class TrackerInitRequest(BaseModel):
-    """Bootstrap the tracker from a completed PredictedTopicSets response."""
-    predicted_topic_sets: PredictedTopicSets
-    # Optional: pre-seed the tracker with the opening judge statement
-    initial_judge_utterance: Optional[str] = None
-
-
 class HearingTurn(BaseModel):
     """A single spoken turn submitted to the tracker."""
     speaker:   Literal["judge", "petitioner", "respondent"]
@@ -118,14 +111,3 @@ class TrackerStateResponse(BaseModel):
     last_human_matched_topic: Optional[str] = None   # title of matched topic, if any
 
 
-class RegenerationRequest(BaseModel):
-    """
-    Trigger an AR (adaptive regeneration) pass for the weakest-scoring agendas.
-
-    Only sent when TrackerStateResponse.regeneration_needed is True.
-    """
-    tracker_session_id: str
-    # Transcribed turns so far — used as context for the regeneration prompt
-    turns: List[HearingTurn]
-    # Which agendas to regenerate (by prediction_id); empty = regenerate all
-    target_prediction_ids: List[int] = []

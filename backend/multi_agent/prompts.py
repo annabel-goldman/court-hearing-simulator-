@@ -10,42 +10,6 @@ from .models import Agent
 
 
 # =============================================================================
-# BRIEF SUMMARY PROMPTS
-# =============================================================================
-
-SUMMARY_SYSTEM_PROMPT = """You are an expert legal summarizer preparing materials for appellate judges."""
-
-def build_summary_user_prompt(user_brief: str, opposing_brief: str, max_brief_chars: int = 5000) -> str:
-    """
-    Build the user prompt for generating a brief summary.
-    
-    Args:
-        user_brief: The user's legal brief text
-        opposing_brief: The opposing counsel's brief text
-        max_brief_chars: Maximum characters to include from each brief
-    
-    Returns:
-        Formatted prompt string
-    """
-    return f"""You are a senior law clerk preparing a summary for multiple appellate judges.
-Provide a concise summary (max 400 words) that captures:
-
-1. The core legal dispute and procedural posture
-2. The user's primary arguments and key authorities
-3. The opposing counsel's primary arguments and key authorities
-4. Critical factual issues in dispute
-5. The central legal questions to be resolved
-
-USER'S BRIEF:
-{user_brief[:max_brief_chars]}
-
-OPPOSING COUNSEL'S BRIEF:
-{opposing_brief[:max_brief_chars]}
-
-Format as a professional judicial summary that will help multiple judges formulate questions."""
-
-
-# =============================================================================
 # AGENT QUESTION PROMPTS
 # =============================================================================
 
@@ -168,9 +132,3 @@ for the advocate; include it even when ASK is no. Remember: when in doubt, ASK.
 
 /no_think"""
 
-
-# =============================================================================
-# RESPONSE FORMAT
-# =============================================================================
-
-AGENT_RESPONSE_FORMAT = """ASK: yes/no\nQUESTION: Your question here"""

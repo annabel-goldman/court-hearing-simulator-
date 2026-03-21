@@ -40,7 +40,7 @@ const counselWalkUrl = getAssetUrl('3d-rendering/glb/Opposing Council/Meshy_AI_A
 // If you want to tune scene layout/scale/pose values, edit numbers in this block.
 // Non-numeric wiring (URLs, booleans, ids, labels) is intentionally kept below.
 
-export const EDITABLE_NUMERIC_CONTROLS = {
+const EDITABLE_NUMERIC_CONTROLS = {
   scene: {
     scale: 0.55,
   },
@@ -265,7 +265,7 @@ export interface AvatarPoseConfig {
   rightElbowRotationZ: number
 }
 
-export interface AvatarConfig {
+interface AvatarConfig {
   offsetX: number
   offsetY: number
   offsetZ: number
@@ -356,14 +356,14 @@ export interface SceneConfig {
 
 export type AvatarRole = 'judge' | 'counsel'
 
-export interface GlbPlacementConfig {
+interface GlbPlacementConfig {
   url: string
   scale: number
   positionOffset: [number, number, number]
   rotation: [number, number, number]
 }
 
-export interface AvatarAnimationAssignment {
+interface AvatarAnimationAssignment {
   enabled: boolean
   assetId: string
   loop: boolean
@@ -373,14 +373,14 @@ export interface AvatarAnimationAssignment {
   overrideStationary?: boolean
 }
 
-export interface AvatarFrozenPoseAssignment {
+interface AvatarFrozenPoseAssignment {
   enabled: boolean
   assetId: string
   time: number
   clipName?: string
 }
 
-export interface AvatarRuntimeConfig {
+interface AvatarRuntimeConfig {
   defaultAssetId: string
   scaleMultiplier: number
   positionOffset: [number, number, number]
@@ -525,7 +525,7 @@ export const CHAIR_CONSTANTS = {
   },
 } as const
 
-export const LAWYER_DESK_CONSTANTS = {
+const LAWYER_DESK_CONSTANTS = {
   glb: {
     url: lawyerDeskUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.lawyerDesk.scale,
@@ -539,7 +539,7 @@ export const LAWYER_DESK_CONSTANTS = {
   },
 } as const
 
-export const JUDGE_DESK_CONSTANTS = {
+const JUDGE_DESK_CONSTANTS = {
   glb: {
     url: lawyerDeskUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.judgeDesk.scale,
@@ -552,7 +552,7 @@ export const JUDGE_DESK_CONSTANTS = {
   },
 } as const
 
-export const FLAG_CONSTANTS = {
+const FLAG_CONSTANTS = {
   glb: {
     url: flagUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.flag.scale,
@@ -561,7 +561,7 @@ export const FLAG_CONSTANTS = {
   },
 } as const
 
-export const PEW_CONSTANTS = {
+const PEW_CONSTANTS = {
   glb: {
     url: pewUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.pew.scale,
@@ -570,7 +570,7 @@ export const PEW_CONSTANTS = {
   },
 } as const
 
-export const EMBLEM_CONSTANTS = {
+const EMBLEM_CONSTANTS = {
   glb: {
     url: emblemUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.emblem.scale,
@@ -579,7 +579,7 @@ export const EMBLEM_CONSTANTS = {
   },
 } as const
 
-export const WINDOW_CONSTANTS = {
+const WINDOW_CONSTANTS = {
   glb: {
     url: windowUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.window.scale,
@@ -588,7 +588,7 @@ export const WINDOW_CONSTANTS = {
   },
 } as const
 
-export const BEAM_CONSTANTS = {
+const BEAM_CONSTANTS = {
   glb: {
     url: beamUrl,
     scale: EDITABLE_NUMERIC_CONTROLS.furniture.beam.scale,
@@ -609,7 +609,7 @@ export const WINDOW_SKY_BACKDROP_SETTINGS = {
 // DEFAULT AVATAR POSES (EDITABLE NUMERIC VALUES ARE ABOVE)
 // ============================================================================
 
-export const DEFAULT_JUDGE_POSE: AvatarPoseConfig = {
+const DEFAULT_JUDGE_POSE: AvatarPoseConfig = {
   // Tilts hips forward/backward relative to this avatar's base skeleton.
   hipTiltX: EDITABLE_NUMERIC_CONTROLS.avatars.judge.bodyPose.hipTiltX,
   // Raises/lowers hips relative to neutral seated baseline (1.3).
@@ -636,7 +636,7 @@ export const DEFAULT_JUDGE_POSE: AvatarPoseConfig = {
   rightElbowRotationZ: EDITABLE_NUMERIC_CONTROLS.avatars.judge.bodyPose.rightElbowRotationZ,
 }
 
-export const DEFAULT_LAWYER_POSE: AvatarPoseConfig = {
+const DEFAULT_LAWYER_POSE: AvatarPoseConfig = {
   // Tilts hips forward/backward relative to this avatar's base skeleton.
   hipTiltX: EDITABLE_NUMERIC_CONTROLS.avatars.counsel.bodyPose.hipTiltX,
   // Raises/lowers hips relative to neutral seated baseline (1.3).
@@ -667,7 +667,7 @@ export const DEFAULT_LAWYER_POSE: AvatarPoseConfig = {
 // SCENE PRESET DATA
 // ============================================================================
 
-export const PRESET_DEFAULT: SceneConfig = {
+const PRESET_DEFAULT: SceneConfig = {
   name: NON_NUMERIC_PRESET_METADATA.name,
   description: NON_NUMERIC_PRESET_METADATA.description,
   sceneScale: EDITABLE_NUMERIC_CONTROLS.scene.scale,
@@ -764,8 +764,6 @@ export const SCENE_PRESETS = {
   default: PRESET_DEFAULT,
 } as const
 
-export type PresetName = keyof typeof SCENE_PRESETS
-
 // ============================================================================
 // GLB/FURNITURE SETTINGS
 // ============================================================================
@@ -860,7 +858,7 @@ export function getAvatarAssetLibrary(
   return JUDGE_AVATAR_ASSETS_BY_DIFFICULTY[judgeDifficulty] ?? JUDGE_AVATAR_ASSETS_BY_DIFFICULTY.medium
 }
 
-export function getAvatarAssetUrl(
+function getAvatarAssetUrl(
   role: AvatarRole,
   assetId: string,
   judgeDifficulty: JudgeAvatarDifficulty = 'medium'
@@ -895,4 +893,3 @@ export function getAvatarRenderState(role: AvatarRole): { sitting: boolean; stat
   }
 }
 
-export default SCENE_PRESETS

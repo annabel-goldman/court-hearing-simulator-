@@ -1,6 +1,6 @@
 import { apiPostJson } from '../../../api/client'
 
-export interface TtsResponse {
+interface TtsResponse {
   audio?: string
   format?: 'opus' | 'mp3' | 'wav' | string
 }

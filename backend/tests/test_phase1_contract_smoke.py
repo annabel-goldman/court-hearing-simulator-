@@ -28,7 +28,6 @@ EXPECTED_HTTP_PATHS = {
 }
 
 EXPECTED_WS_PATHS = {
-    "/ws/{session_id}",
     "/ws/multi-agent/{session_id}",
 }
 
@@ -87,15 +86,6 @@ class Phase1ContractSmokeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         payload = response.json()
         self.assertEqual(payload.get("detail"), "appellant_brief must not be empty.")
-
-    def test_ws_phase_change_contract(self):
-        session_id = f"smoke-{uuid.uuid4()}"
-        with self.client.websocket_connect(f"/ws/{session_id}") as ws:
-            ws.send_json({"type": "phase_change", "data": {"phase": "PROCEEDING"}})
-            message = ws.receive_json()
-
-        self.assertEqual(message["type"], "phase_update")
-        self.assertEqual(message["data"]["phase"], "PROCEEDING")
 
     def test_multi_agent_ws_config_and_phase_contract(self):
         session_id = f"smoke-ma-{uuid.uuid4()}"

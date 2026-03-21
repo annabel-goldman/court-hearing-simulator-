@@ -19,8 +19,6 @@ import type { Agent, AgendaItem, AgendaUpdate, PredictedTopic } from '../multi-a
 import { Card, CardHeader, CardContent } from '../multi-agent/components/ui';
 import './agenda.css';
 
-export type { AgendaItem, PredictedTopic };
-
 interface AgendaPanelProps {
   agents: Agent[];
   items: AgendaItem[];

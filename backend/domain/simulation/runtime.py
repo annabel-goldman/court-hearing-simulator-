@@ -12,7 +12,7 @@ from datetime import datetime
 import anyio
 import anyio.to_thread
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect
 
 from services.judge_engine import JudgeEngine
 from services.opponent_engine import OpponentEngine
@@ -26,7 +26,6 @@ from projected_timeline.models import PredictedTopicSets as TrackerTopicSets, He
 from model_router import get_task_client, extract_content, task_extra_body
 
 logger = logging.getLogger("court-simulator")
-router = APIRouter()
 
 # -----------------------------------------------------------------------------
 # MCTS projection gate constants
@@ -79,54 +78,6 @@ AGENT_EVAL_MIN_CANDIDATES = 3
 # Connection Manager
 # -----------------------------------------------------------------------------
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: dict[str, WebSocket] = {}
-        self.session_data: dict[str, dict] = {}
-
-    async def connect(self, session_id: str, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections[session_id] = websocket
-        # setdefault is atomic in CPython — safe against rapid reconnects that
-        # race past the await above and both attempt to initialise the session.
-        self.session_data.setdefault(session_id, {
-            'transcript': '',
-            'questions_asked': [],
-            'phase': 'OFF_RECORD',
-            '_last_active': time.monotonic(),
-        })
-
-    def touch(self, session_id: str) -> None:
-        """Update last-active timestamp so TTL eviction doesn't expire live sessions."""
-        sess = self.session_data.get(session_id)
-        if sess is not None:
-            sess['_last_active'] = time.monotonic()
-
-    def evict_stale(self) -> None:
-        """Remove sessions idle longer than _SESSION_TTL (network-drop guard)."""
-        now = time.monotonic()
-        stale = [
-            sid for sid, s in self.session_data.items()
-            if now - s.get('_last_active', now) > _SESSION_TTL
-            and sid not in self.active_connections
-        ]
-        for sid in stale:
-            del self.session_data[sid]
-            logger.info("Evicted stale judge session %s", sid)
-
-    def disconnect(self, session_id: str):
-        if session_id in self.active_connections:
-            del self.active_connections[session_id]
-
-    async def send_json(self, session_id: str, data: dict):
-        if session_id in self.active_connections:
-            try:
-                await self.active_connections[session_id].send_json(data)
-            except Exception as e:
-                logger.debug("send_json failed for %s (client disconnected): %s", session_id, e)
-                self.disconnect(session_id)
-
-manager = ConnectionManager()
 global_judge_engine = JudgeEngine()
 global_opponent_engine = OpponentEngine()
 
@@ -225,123 +176,6 @@ class MultiAgentConnectionManager:
                 self.disconnect(session_id)
 
 multi_agent_manager = MultiAgentConnectionManager()
-
-# -----------------------------------------------------------------------------
-# WebSocket
-# -----------------------------------------------------------------------------
-
-@router.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    await manager.connect(session_id, websocket)
-    stt_provider = get_stt_provider()
-    tts_provider = get_tts_provider()
-    
-    try:
-        while True:
-            message = await websocket.receive()
-            if message.get("type") == "websocket.disconnect":
-                break
-            manager.touch(session_id)   # keep TTL alive
-            if "text" in message:
-                data = json.loads(message["text"])
-                msg_type, payload = data.get("type"), data.get("data", {})
-
-                if msg_type == "config":
-                    custom_synthesis = payload.get('synthesis_prompt')
-                    if custom_synthesis:
-                        preview = (custom_synthesis[:150] + '...') if len(custom_synthesis) > 150 else custom_synthesis
-                        logger.info(f"[Judge] Session {session_id}: using CUSTOM synthesis prompt. Preview: {preview.replace(chr(10), ' ')}")
-                    else:
-                        logger.info(f"[Judge] Session {session_id}: no custom synthesis prompt; using default system prompt")
-                    manager.session_data[session_id].update({
-                        'config': payload,
-                        'seed_questions': payload.get('seed_questions', []),
-                        'brief_summary': payload.get('brief_summary', ''),
-                        'custom_synthesis_prompt': custom_synthesis
-                    })
-                
-                elif msg_type == "audio":
-                    audio_bytes = base64.b64decode(payload.get("audio", ""))
-                    if audio_bytes and audio_bytes[:4] == b'\x1a\x45\xdf\xa3':
-                        transcript = await stt_provider.transcribe(audio_bytes, "webm")
-                        if transcript.strip():
-                            manager.session_data[session_id]['transcript'] += " " + transcript
-                            await manager.send_json(session_id, {
-                                "type": "transcript_update",
-                                "data": {"text": transcript}
-                            })
-                            await check_and_trigger_interrupt(session_id, global_judge_engine, tts_provider)
-                
-                elif msg_type == "phase_change":
-                    manager.session_data[session_id]['phase'] = payload.get("phase")
-                    await manager.send_json(session_id, {
-                        "type": "phase_update",
-                        "data": {"phase": payload.get("phase")}
-                    })
-    except WebSocketDisconnect:
-        manager.disconnect(session_id)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        manager.disconnect(session_id)
-
-async def check_and_trigger_interrupt(session_id, engine, tts):
-    session = manager.session_data.get(session_id, {})
-    if session.get('phase') != 'PROCEEDING': return
-
-    custom_prompt = session.get('custom_synthesis_prompt')
-    if custom_prompt:
-        logger.info(f"[Judge] Interrupt check: using custom synthesis prompt (len={len(custom_prompt)})")
-    else:
-        logger.info("[Judge] Interrupt check: using default system prompt")
-    brief_summary = (session.get('brief_summary') or '').strip()
-    seed_questions = session.get('seed_questions') or []
-    asked_questions = session.get('questions_asked') or []
-
-    should, question, _ = await engine.should_interrupt(
-        session_id,
-        session.get('transcript', ''),
-        session.get('config'),
-        custom_system_prompt=custom_prompt,
-        brief_summary=brief_summary if brief_summary else None,
-        seed_questions=seed_questions if seed_questions else None,
-        asked_questions=asked_questions if asked_questions else None,
-    )
-    
-    if should and question:
-        session['questions_asked'].append(question)
-        session['last_interrupt_time'] = datetime.now()
-        audio = await tts.synthesize(question, voice="onyx")
-        await manager.send_json(session_id, {
-            "type": "judge_interrupt",
-            "data": {"question": question, "audio": audio, "audio_format": tts.audio_format}
-        })
-
-    # Score the current transcript segment.  The interrupt response is already
-    # sent above, so latency here only affects the score panel — not the main UX.
-    config = session.get('config') or {}
-    speaker = config.get('user_position', 'appellant')
-    utterance = session.get('transcript', '').strip()
-    brief_summary = (session.get('brief_summary') or '').strip() or None
-    last_q = ((session.get('questions_asked') or []) + [None])[-1]
-
-    score = await engine.score_argument(
-        session_id, speaker, utterance,
-        brief_summary=brief_summary,
-        judge_question_answered=last_q,
-    )
-    if score:
-        await manager.send_json(session_id, {
-            "type": "argument_score",
-            "data": {
-                "speaker": score.speaker,
-                "clarity": round(score.clarity, 1),
-                "legal_reasoning": round(score.legal_reasoning, 1),
-                "responsiveness": round(score.responsiveness, 1),
-                "persuasiveness": round(score.persuasiveness, 1),
-                "overall": round(score.overall, 1),
-                "feedback": score.feedback,
-            },
-        })
 
 _STT_HALLUCINATION_RE = re.compile(
     r"^\s*[\.\,\!\?\;\:\-\…]+\s*$"          # bare punctuation: "." "..." "," etc.
@@ -502,7 +336,6 @@ async def _process_ma_transcript(sid: str, transcript: str) -> None:
 # Multi-Agent WebSocket
 # -----------------------------------------------------------------------------
 
-@router.websocket("/ws/multi-agent/{session_id}")
 async def multi_agent_websocket(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for multi-agent simulation."""
     await multi_agent_manager.connect(session_id, websocket)

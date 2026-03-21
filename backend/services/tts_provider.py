@@ -157,14 +157,6 @@ def _openai_fallback_provider() -> TTSProvider | None:
         response_format=response_format,
     )
 
-class _DisabledTTSProvider(TTSProvider):
-    """No-op provider used when TTS is disabled in media_config."""
-    audio_format = "mp3"
-
-    async def synthesize(self, text: str, voice: str = "default") -> str:
-        return ""
-
-
 class OpenAITTSProvider(TTSProvider):
     """OpenAI-compatible TTS provider (OpenAI, Groq, etc.).
 

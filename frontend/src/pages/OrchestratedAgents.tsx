@@ -77,7 +77,6 @@ export default function OrchestratedAgents() {
   const [agentQuestionsCollapsed, setAgentQuestionsCollapsed] = useState(false);
   const [mctsHidden, setMctsHidden] = useState(false);
 
-  const [, setUserBrief] = useState<BriefData | null>(null);
   const [opposingBriefText, setOpposingBriefText] = useState<string>('');
   const [briefSummary, setBriefSummary] = useState<string>('');
 
@@ -86,7 +85,6 @@ export default function OrchestratedAgents() {
 
   const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
   const [isGeneratingAgenda, setIsGeneratingAgenda] = useState(false);
-  const [, setAgendaError] = useState<string | null>(null);
   const [generationStatus, setGenerationStatus] = useState<string>('');
   // Raw API response kept so we can send it to the backend tracker on start
   const [predictedTopicSets, setPredictedTopicSets] = useState<unknown>(null);
@@ -383,9 +381,7 @@ export default function OrchestratedAgents() {
   });
 
   const handleBriefsReady = useCallback(async (user: BriefData, opposing: BriefData) => {
-    setUserBrief(user);
     setOpposingBriefText(opposing.text);
-    setAgendaError(null);
     setIsGeneratingAgenda(true);
     setGenerationStatus('Starting…');
     setAgendaItems([]);
@@ -561,7 +557,7 @@ export default function OrchestratedAgents() {
       }
     } catch (e) {
       console.error('Failed to generate agenda:', e);
-      setAgendaError(e instanceof Error ? e.message : 'Failed to generate agenda');
+      console.error('Agenda generation failed:', e instanceof Error ? e.message : 'Failed to generate agenda');
     } finally {
       if (mctsFlushRef.current) { clearInterval(mctsFlushRef.current); mctsFlushRef.current = null; }
       pendingNodesRef.current = [];
@@ -606,15 +602,15 @@ export default function OrchestratedAgents() {
         briefSummary || 'An appellate moot-court hearing.',
         topicTitles.slice(0, 8),
       );
-        setJudgeIntroText(data.text);
+        setJudgeIntroText(data.text ?? null);
 
-        // Add the judge introduction to the questions feed
         if (data.text) {
+          const introText = data.text;
           setQuestions(prev => [{
             agent_id: '__judge__',
             agent_name: 'Chief Justice',
             color: '#f0c040',
-            question: data.text,
+            question: introText,
             timestamp: new Date().toISOString(),
           }, ...prev]);
         }

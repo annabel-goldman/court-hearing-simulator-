@@ -26,17 +26,14 @@ import type { JudgeAvatarDifficulty, SpeakingRole, SimulationPhase, SessionConfi
 import { JudgeSpeechOverlay } from '../ui-overlays/JudgeSpeechOverlay'
 import { StatusDashboardHUD } from '../ui-overlays/StatusDashboardHUD'
 import { InterruptLogPanel } from '../ui-overlays/InterruptLogPanel'
-import { AgentSentimentPanel } from '../ui-overlays/AgentSentimentPanel'
 
 // Hooks
 import {
   useCourtroomSocket,
 } from '../hooks/useCourtroomSocket'
 import type {
-  AgentScoreEntry,
   JudgeInterrupt,
   JudgeInterruptSource,
-  MissedQuestionEntry,
 } from '../types/socket'
 import { useAudioPlayer } from '../hooks/useSimulationSocket'
 import { useMediaRecording } from '../hooks/useMediaRecording'
@@ -59,14 +56,11 @@ import {
   BROWSER_TTS_RATE,
   BROWSER_TTS_PITCH,
   TIMER_INTERVAL_MS,
-  SILENCE_AUDIO_LEVEL_THRESHOLD,
-  SILENCE_TRIGGER_MS,
   TIMER_OVERTIME_SECONDS,
 } from '../config/simulationConfig'
 import type {
   SessionAuditPayload,
   SessionQuestionRecord,
-  MissedQuestionRecord,
   SessionTranscriptRecord,
 } from '../types/sessionAudit'
 
@@ -137,9 +131,7 @@ export default function CourtroomPage() {
   const [recentTranscript, setRecentTranscript] = useState<string>('')
   const [timerSeconds, setTimerSeconds] = useState(DEMO_SESSION_DURATION_SECONDS)
   const [questionHistory, setQuestionHistory] = useState<SessionQuestionRecord[]>([])
-  const [missedQuestions, setMissedQuestions] = useState<MissedQuestionRecord[]>([])
   const [transcriptHistory, setTranscriptHistory] = useState<SessionTranscriptRecord[]>([])
-  const [agentScores, setAgentScores] = useState<Record<string, AgentScoreEntry>>({})
   const [showBenchPanels, setShowBenchPanels] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [animationStateOverrides, setAnimationStateOverrides] = useState<AnimationStateOverrideMap>({})
@@ -151,8 +143,6 @@ export default function CourtroomPage() {
   const lipsyncRef = useRef<Lipsync | null>(null)
   const orbitControlsRef = useRef<OrbitControlsImpl>(null)
   const questionTimeoutRef = useRef<number | null>(null)
-  const silenceStartAtRef = useRef<number | null>(null)
-  const silenceQuestionRequestedRef = useRef(false)
   const judgeQuestionActiveRef = useRef(false)
   const timerOvertimePendingRef = useRef(false)
   const questionCutoffReachedRef = useRef(false)
@@ -178,44 +168,10 @@ export default function CourtroomPage() {
   }, [])
 
   // ========== WEBSOCKET ==========
-  const handleAgentScores = useCallback((scores: AgentScoreEntry[]) => {
-    setAgentScores(prev => {
-      const next = { ...prev }
-      for (const score of scores) {
-        if (score.relevance !== null || !next[score.agent_id]) {
-          // Agent was evaluated this pass — full update.
-          next[score.agent_id] = score
-        } else {
-          // Agent was not evaluated this pass — keep last relevance bar visible
-          // but clear should_ask so ASKING only reflects the current pass.
-          next[score.agent_id] = { ...next[score.agent_id], on_cooldown: score.on_cooldown, should_ask: false }
-        }
-      }
-      return next
-    })
-  }, [])
-
-  const handleMissedQuestion = useCallback((entry: MissedQuestionEntry) => {
-    setMissedQuestions(prev => [...prev, {
-      id: `missed_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-      question: entry.question,
-      timestamp: entry.timestamp,
-      agentId: entry.agent_id,
-      agentName: entry.agent_name,
-      agentColor: entry.agent_color,
-      relevance: entry.relevance,
-      reason: entry.reason,
-    }])
-  }, [])
-
-  const useOrchestrated = Boolean(sessionConfig?.useMultiAgentJudge)
-
   const {
     isConnected,
-    sendConfig,
     configureOrchestrated,
     sendAudio,
-    sendSilenceTimeout,
     sendQuestionCutoff,
     changePhase: sendPhaseChange,
     disconnect: disconnectSocket,
@@ -223,8 +179,6 @@ export default function CourtroomPage() {
     sessionId,
     sessionConfig,
     onJudgeInterrupt: handleJudgeInterrupt,
-    onAgentScores: handleAgentScores,
-    onMissedQuestion: handleMissedQuestion,
     onPhaseChange: (phase) => {
       if (phase === 'PROCEEDING' || phase === 'ADJOURNED') {
         setSimulationPhase(phase)
@@ -299,8 +253,6 @@ export default function CourtroomPage() {
     []
   )
 
-  const animationSpeakingRole = useMemo<SpeakingRole>(() => speakingRole, [speakingRole])
-
   const endJudgeSpeech = useCallback(() => {
     setCurrentJudgeQuestion(null)
     setCurrentInterruptSource(null)
@@ -360,8 +312,6 @@ export default function CourtroomPage() {
       clearTimeout(questionTimeoutRef.current)
     }
 
-    silenceStartAtRef.current = null
-    silenceQuestionRequestedRef.current = false
     judgeQuestionActiveRef.current = true
 
     setCurrentJudgeQuestion(interrupt.question)
@@ -398,10 +348,9 @@ export default function CourtroomPage() {
       userRole: 'attorney',
       useMultiAgentJudge: Boolean(sessionConfig?.useMultiAgentJudge),
       questions: questionHistory,
-      missedQuestions,
       transcriptSegments: transcriptHistory,
     }
-  }, [sessionId, sessionConfig?.useMultiAgentJudge, questionHistory, missedQuestions, transcriptHistory])
+  }, [sessionId, sessionConfig?.useMultiAgentJudge, questionHistory, transcriptHistory])
 
   const finalizeSession = useCallback(() => {
     if (hasFinalizedSessionRef.current) return
@@ -467,44 +416,24 @@ export default function CourtroomPage() {
       const configureAndStart = async () => {
         if (!isConnected || !sessionConfig) return
 
-        if (useOrchestrated) {
-          const agents = await loadAgentsForOrchestrated()
-          const briefSummary =
-            sessionConfig.judicialSummary ??
-            sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
-            ''
-          const userRole = sessionConfig.userPartyRole ?? 'appellant'
-          const opposingBrief =
-            sessionConfig.materials?.find((m) =>
-              userRole === 'appellant' ? m.role === 'respondent' : m.role === 'appellant'
-            )?.text ?? ''
-          configureOrchestrated(
-            agents,
-            briefSummary,
-            opposingBrief,
-            sessionConfig.predictedTopicSets ?? {},
-            sessionConfig.agendaItems ?? []
-          )
-          sendPhaseChange('PROCEEDING')
-        } else {
-          let customSynthesisPrompt: string | undefined
-          try {
-            const stored = localStorage.getItem('customJudgePrompts')
-            if (stored) customSynthesisPrompt = JSON.parse(stored).synthesisPrompt
-          } catch {
-            /* ignore */
-          }
-          sendConfig({
-            proceedingType: sessionConfig.proceedingType,
-            userRole: sessionConfig.userRole,
-            seed_questions: [],
-            brief_summary:
-              sessionConfig.judicialSummary ??
-              sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
-              '',
-            synthesis_prompt: customSynthesisPrompt,
-          })
-        }
+        const agents = await loadAgentsForOrchestrated()
+        const briefSummary =
+          sessionConfig.judicialSummary ??
+          sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
+          ''
+        const userRole = sessionConfig.userPartyRole ?? 'appellant'
+        const opposingBrief =
+          sessionConfig.materials?.find((m) =>
+            userRole === 'appellant' ? m.role === 'respondent' : m.role === 'appellant'
+          )?.text ?? ''
+        configureOrchestrated(
+          agents,
+          briefSummary,
+          opposingBrief,
+          sessionConfig.predictedTopicSets ?? {},
+          sessionConfig.agendaItems ?? []
+        )
+        sendPhaseChange('PROCEEDING')
 
         if (isCancelled) return
         timer = setTimeout(() => {
@@ -526,8 +455,6 @@ export default function CourtroomPage() {
     isRecording,
     isConnected,
     sessionConfig,
-    useOrchestrated,
-    sendConfig,
     configureOrchestrated,
     sendPhaseChange,
     startRecording,
@@ -535,7 +462,7 @@ export default function CourtroomPage() {
     loadAgentsForOrchestrated,
   ])
 
-  // Re-configure on reconnect (orchestrated) — connection may have dropped and recovered
+  // Re-configure on reconnect — connection may have dropped and recovered
   const prevConnectedRef = useRef(false)
   useEffect(() => {
     const justReconnected = isConnected && !prevConnectedRef.current
@@ -543,7 +470,6 @@ export default function CourtroomPage() {
     if (
       justReconnected &&
       simulationPhase === 'PROCEEDING' &&
-      useOrchestrated &&
       sessionConfig
     ) {
       const reconfigure = async () => {
@@ -568,46 +494,7 @@ export default function CourtroomPage() {
       }
       reconfigure()
     }
-  }, [isConnected, simulationPhase, useOrchestrated, sessionConfig, configureOrchestrated, sendPhaseChange, loadAgentsForOrchestrated])
-
-  // ========== SILENCE DETECTION ==========
-  useEffect(() => {
-    if (simulationPhase !== 'PROCEEDING' || !isRecording || !isConnected) {
-      silenceStartAtRef.current = null
-      silenceQuestionRequestedRef.current = false
-      return
-    }
-
-    if (questionCutoffReachedRef.current) {
-      silenceStartAtRef.current = null
-      silenceQuestionRequestedRef.current = false
-      return
-    }
-
-    if (speakingRole === 'judge') {
-      silenceStartAtRef.current = null
-      return
-    }
-
-    const now = Date.now()
-    if (audioLevel <= SILENCE_AUDIO_LEVEL_THRESHOLD) {
-      if (silenceStartAtRef.current === null) {
-        silenceStartAtRef.current = now
-      }
-
-      if (
-        !silenceQuestionRequestedRef.current &&
-        now - silenceStartAtRef.current >= SILENCE_TRIGGER_MS
-      ) {
-        sendSilenceTimeout()
-        silenceQuestionRequestedRef.current = true
-      }
-      return
-    }
-
-    silenceStartAtRef.current = null
-    silenceQuestionRequestedRef.current = false
-  }, [audioLevel, isConnected, isRecording, sendSilenceTimeout, simulationPhase, speakingRole])
+  }, [isConnected, simulationPhase, sessionConfig, configureOrchestrated, sendPhaseChange, loadAgentsForOrchestrated])
 
   // ========== SESSION INITIALIZATION ==========
   useEffect(() => {
@@ -648,7 +535,7 @@ export default function CourtroomPage() {
     
     try {
       const data = await synthesizeSpeech(text, 'onyx')
-      if (data.audio?.length > 0) {
+      if (data.audio && data.audio.length > 0) {
         const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))
         const mimeType = data.format === 'opus' ? 'audio/ogg; codecs=opus' :
                          data.format === 'mp3' ? 'audio/mpeg' :
@@ -685,9 +572,6 @@ export default function CourtroomPage() {
   const startProceeding = useCallback(() => {
     setSimulationPhase('PROCEEDING')
     questionCutoffReachedRef.current = false
-    if (!useOrchestrated) {
-      sendPhaseChange('PROCEEDING')
-    }
     setTimeout(() => {
       const openingText = 'Counsel for the appellant, you may proceed when ready.'
       judgeQuestionActiveRef.current = false
@@ -699,7 +583,7 @@ export default function CourtroomPage() {
         setSpeakingRole(null)
       }, OPENING_STATEMENT_DURATION_MS)
     }, PROCEEDING_START_DELAY_MS)
-  }, [useOrchestrated, sendPhaseChange, playRitualCue])
+  }, [playRitualCue])
 
   // ========== AUTOMATIC RITUAL PHASES ==========
   useEffect(() => {
@@ -738,8 +622,6 @@ export default function CourtroomPage() {
       if (questionTimeoutRef.current) {
         clearTimeout(questionTimeoutRef.current)
       }
-      silenceStartAtRef.current = null
-      silenceQuestionRequestedRef.current = false
       judgeQuestionActiveRef.current = false
       timerOvertimePendingRef.current = false
       questionCutoffReachedRef.current = false
@@ -849,7 +731,7 @@ export default function CourtroomPage() {
       <div className={`courtroom-canvas-fullscreen ${showBenchPanels ? 'bench-panels-visible' : ''}`}>
         <CourtroomScene 
           speakingRole={speakingRole}
-          animationSpeakingRole={animationSpeakingRole}
+          animationSpeakingRole={speakingRole}
           lipsyncManager={lipsyncRef.current}
           orbitControlsRef={orbitControlsRef}
           judgeDifficulty={judgeAvatarDifficulty}
@@ -877,12 +759,6 @@ export default function CourtroomPage() {
 
         <InterruptLogPanel
           questions={questionHistory}
-          missedQuestions={missedQuestions}
-          isVisible={simulationPhase === 'PROCEEDING' && showBenchPanels}
-        />
-
-        <AgentSentimentPanel
-          scores={agentScores}
           isVisible={simulationPhase === 'PROCEEDING' && showBenchPanels}
         />
       </div>

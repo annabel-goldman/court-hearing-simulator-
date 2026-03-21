@@ -84,7 +84,6 @@ frontend/
 │   └── Home.tsx                    # Brief upload + landing
 ├── src/orchestrated-agents/
 │   ├── AgendaPanel.tsx              # Topic coverage visualization
-│   ├── CounterArgumentFeed.tsx      # Counter-argument display
 │   ├── OpponentFeed.tsx             # Opposing counsel response display
 │   ├── OpponentConfigPanel.tsx      # Collapsible opponent config panel (2 tabs)
 │   ├── MCTSTreeViz.tsx              # Live MCTS tree animation

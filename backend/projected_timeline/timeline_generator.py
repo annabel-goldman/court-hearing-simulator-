@@ -36,7 +36,7 @@ logger = logging.getLogger("court-simulator.projected_timeline")
 # Model routing
 # ---------------------------------------------------------------------------
 
-from model_router import get_task_client, task_extra_body, extract_content, ModelTier
+from model_router import get_task_client, task_extra_body, extract_content
 
 
 def _get_issue_client():

@@ -1,7 +1,6 @@
 """REST routes for runtime configuration endpoints."""
 
 import os
-import logging
 
 import anyio
 import anyio.to_thread
@@ -46,7 +45,6 @@ from schemas.requests import (
     ModelRuntimeConfigRequest,
 )
 
-logger = logging.getLogger("court-simulator")
 router = APIRouter(tags=["config"])
 
 def _redact_api_keys(d):

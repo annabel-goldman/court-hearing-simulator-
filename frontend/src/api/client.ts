@@ -4,7 +4,7 @@ function normalizePath(path: string): string {
   return path.startsWith('/') ? path : `/${path}`
 }
 
-export function buildApiUrl(path: string): string {
+function buildApiUrl(path: string): string {
   return `${API_BASE_URL}${normalizePath(path)}`
 }
 

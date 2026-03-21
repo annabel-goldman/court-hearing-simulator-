@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Agent, AgentQuestion, SimulationPhase, MultiAgentSocketMessage } from '../types';
+import type { Agent, AgentQuestion, AgendaUpdate, ArgumentScore, OpponentResponse, SimulationPhase, MultiAgentSocketMessage } from '../types';
 import { getWsBase } from '../../features/socket/utils/wsBase';
 
 const WS_BASE = getWsBase();
@@ -13,9 +13,9 @@ interface UseMultiAgentSocketProps {
   onTranscriptUpdate?: (text: string) => void;
   onAgentQuestion?: (question: AgentQuestion) => void;
   onPhaseUpdate?: (phase: SimulationPhase) => void;
-  onAgendaUpdate?: (data: unknown) => void;
-  onArgumentScore?: (data: unknown) => void;
-  onOpponentResponse?: (data: unknown) => void;
+  onAgendaUpdate?: (data: AgendaUpdate) => void;
+  onArgumentScore?: (data: ArgumentScore) => void;
+  onOpponentResponse?: (data: OpponentResponse) => void;
 }
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -108,13 +108,13 @@ export function useMultiAgentSocket({
             onPhaseUpdate?.(message.data.phase as SimulationPhase);
             break;
           case 'agenda_update':
-            onAgendaUpdate?.(message.data);
+            onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
             break;
           case 'argument_score':
-            onArgumentScore?.(message.data);
+            onArgumentScore?.(message.data as unknown as ArgumentScore);
             break;
           case 'opponent_response':
-            onOpponentResponse?.(message.data);
+            onOpponentResponse?.(message.data as unknown as OpponentResponse);
             break;
           case 'config_ack':
             console.log('[MultiAgentSocket] Config acknowledged:', message.data);

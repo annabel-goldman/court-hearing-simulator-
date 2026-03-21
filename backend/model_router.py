@@ -42,8 +42,6 @@ import time
 import logging
 from enum import Enum
 from dataclasses import dataclass
-from typing import Optional
-
 import anyio
 import httpx
 from dotenv import load_dotenv
@@ -278,20 +276,6 @@ def _get_or_create_client(endpoint: ModelEndpoint):
     return _clients[endpoint.base_url]
 
 
-def get_client(tier: ModelTier):
-    """Return a cached AsyncOpenAI client for the given tier.
-
-    Transparently falls back to LARGE if the tier's server is unreachable.
-    Returns None if no API key is configured.
-    """
-    return _get_or_create_client(_resolve_effective_endpoint(tier))
-
-
-def get_model(tier: ModelTier) -> str:
-    """Return the model name/alias for the given tier (after fallback)."""
-    return _resolve_effective_endpoint(tier).model
-
-
 def get_client_and_model(tier: ModelTier):
     """Convenience: return (client, model_name) for a tier.
 
@@ -313,16 +297,10 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     # LARGE — quality-critical generation
     "counter_argument":     ModelTier.LARGE,
     "judge_intro":          ModelTier.LARGE,
-    "judge_interrupt":      ModelTier.LARGE,
-    "synthesize_question":  ModelTier.LARGE,
-
-    # LARGE — deep brief analysis (one-time setup)
-    "brief_summary":        ModelTier.LARGE,
 
     # SMALL — fast analysis / classification
     "agent_analysis":       ModelTier.SMALL,
     "quality_assessment":   ModelTier.SMALL,
-    "seed_questions":       ModelTier.SMALL,
     "argument_scoring":     ModelTier.SMALL,
     "opponent_response":    ModelTier.SMALL,
 
@@ -344,17 +322,6 @@ def get_task_client(task: str):
 # ---------------------------------------------------------------------------
 # Helpers for thinking-model compatibility
 # ---------------------------------------------------------------------------
-
-def is_local_endpoint(tier: ModelTier) -> bool:
-    """Return True if the resolved endpoint for *tier* is a local llama-server.
-
-    Used to decide whether to pass ``chat_template_kwargs`` in extra_body —
-    that parameter is llama-server-specific and ignored (or misinterpreted)
-    by remote APIs such as OpenRouter.
-    """
-    base_url = _resolve_effective_endpoint(tier).base_url
-    return any(h in base_url for h in ("localhost", "127.0.0.1", "0.0.0.0"))
-
 
 # Tasks where thinking tokens are allowed.
 # Currently empty — issue_extraction was here but reasoning models would spend

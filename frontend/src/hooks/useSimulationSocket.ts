@@ -1,75 +1,9 @@
 /**
- * WebSocket hook for real-time courtroom simulation.
- * Handles connection to the backend for judge interruptions, STT, and TTS.
+ * Audio player hook for TTS playback in courtroom simulation.
  */
 
 import { useEffect, useRef, useCallback } from 'react'
-import type { SimulationPhase } from '../3d-rendering/types'
-import type { SessionConfig } from '../3d-rendering/types'
-import type {
-  AgentScoreEntry,
-  JudgeInterrupt,
-  JudgeInterruptSource,
-  MissedQuestionEntry,
-  WebSocketSessionConfig,
-} from '../types/socket'
-import { useCourtroomSocket } from './useCourtroomSocket'
-export type {
-  AgentScoreEntry,
-  JudgeInterrupt,
-  JudgeInterruptSource,
-  MissedQuestionEntry,
-  WebSocketSessionConfig,
-} from '../types/socket'
 
-interface UseSimulationSocketOptions {
-  sessionId: string
-  onPhaseChange?: (phase: SimulationPhase) => void
-  onJudgeInterrupt?: (interrupt: JudgeInterrupt) => void
-  onTranscriptReceived?: (transcript: string) => void
-  onAgentScores?: (scores: AgentScoreEntry[]) => void
-  onMissedQuestion?: (entry: MissedQuestionEntry) => void
-  onError?: (error: Error) => void
-}
-
-interface UseSimulationSocketReturn {
-  isConnected: boolean
-  phase: SimulationPhase
-  sendConfig: (config: WebSocketSessionConfig) => void
-  sendAudio: (audioBlob: Blob) => void
-  sendSilenceTimeout: () => void
-  sendQuestionCutoff: () => void
-  changePhase: (phase: SimulationPhase) => void
-  disconnect: () => void
-}
-
-const LEGACY_SIMULATION_SESSION_CONFIG: SessionConfig = {
-  proceedingType: 'demo',
-  userRole: 'attorney',
-  materials: [],
-  useMultiAgentJudge: false,
-}
-
-export function useSimulationSocket(
-  options: UseSimulationSocketOptions
-): UseSimulationSocketReturn {
-  const socket = useCourtroomSocket({
-    sessionId: options.sessionId,
-    sessionConfig: LEGACY_SIMULATION_SESSION_CONFIG,
-    onPhaseChange: options.onPhaseChange,
-    onJudgeInterrupt: options.onJudgeInterrupt,
-    onTranscriptReceived: options.onTranscriptReceived,
-    onAgentScores: options.onAgentScores,
-    onMissedQuestion: options.onMissedQuestion,
-    onError: options.onError,
-  })
-
-  return socket
-}
-
-/**
- * Hook for audio streaming (TTS interruptions)
- */
 export function useAudioPlayer() {
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioQueueRef = useRef<AudioBuffer[]>([])
@@ -131,7 +65,6 @@ export function useAudioPlayer() {
     source.connect(context.destination)
     
     source.onended = () => {
-      // Play next in queue or mark as not playing
       if (audioQueueRef.current.length > 0) {
         const nextBuffer = audioQueueRef.current.shift()!
         playBuffer(context, nextBuffer)

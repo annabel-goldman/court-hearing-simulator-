@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.router import router as api_router
-from domain.simulation.runtime import manager, multi_agent_manager
+from domain.simulation.runtime import multi_agent_manager
 from model_router import (
     log_config as log_model_config,
     probe_all_tiers,
@@ -49,7 +49,6 @@ async def lifespan(_app: FastAPI):
         """Periodically evict WS sessions dropped without clean disconnect."""
         while True:
             await anyio.sleep(300)
-            manager.evict_stale()
             multi_agent_manager.evict_stale()
 
     async with anyio.create_task_group() as lifespan_tg:

@@ -226,7 +226,7 @@ const PRIMARY_CAMERA_SHOT: CameraShot = {
   autoRotateSpeed: 0,
 }
 
-export interface CourtroomSceneProps {
+interface CourtroomSceneProps {
   speakingRole: SpeakingRole
   lipsyncManager: Lipsync | null
   orbitControlsRef: React.MutableRefObject<OrbitControlsImpl | null>

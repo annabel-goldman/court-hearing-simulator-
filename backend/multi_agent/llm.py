@@ -16,8 +16,6 @@ from dotenv import load_dotenv
 
 from .models import Agent
 from .prompts import (
-    SUMMARY_SYSTEM_PROMPT,
-    build_summary_user_prompt,
     build_agent_system_prompt,
     build_agent_user_prompt,
 )
@@ -34,51 +32,8 @@ class MultiAgentLLM:
     Uses centralized model_router for per-task model selection.
     """
 
-    def __init__(self, model: str = ""):
-        """
-        Initialize the LLM service.
-        
-        Args:
-            model: Unused — kept for backward compat. Routing handled by model_router.
-        """
+    def __init__(self):
         pass
-
-    async def generate_brief_summary(
-        self,
-        user_brief: str,
-        opposing_brief: str,
-    ) -> str:
-        """
-        Generate a summary of both briefs using OpenAI.
-        
-        Args:
-            user_brief: The user's legal brief text
-            opposing_brief: The opposing counsel's brief text
-        
-        Returns:
-            Generated summary string
-        """
-        client, model = get_task_client("brief_summary")
-        if not client:
-            return "Summary unavailable (API key not set)."
-
-        user_prompt = build_summary_user_prompt(user_brief, opposing_brief)
-
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=600,
-                extra_body=task_extra_body("brief_summary"),
-            )
-            return extract_content(response) or "Summary unavailable."
-        except Exception as e:
-            print(f"Error summarizing briefs: {e}")
-            return f"Error generating summary: {str(e)}"
 
     async def analyze_agent_question(
         self,

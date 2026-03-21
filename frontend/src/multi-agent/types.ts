@@ -36,11 +36,6 @@ export interface BriefData {
   text: string;
 }
 
-export interface MultiAgentSessionConfig {
-  agents: Agent[];
-  brief_summary: string;
-}
-
 export type SimulationPhase = 'SETUP' | 'READY' | 'INTRO' | 'RECORDING' | 'PAUSED' | 'FINISHED';
 
 export interface MultiAgentSocketMessage {
@@ -83,13 +78,13 @@ export interface AgendaItem {
   agentId: string | null;
 }
 
-export interface TopicCoverage {
+interface TopicCoverage {
   title: string;
   addressed: boolean;
   quality: number;
 }
 
-export interface AgendaConfidence {
+interface AgendaConfidence {
   prediction_id: number;
   lens: string;
   confidence: number;

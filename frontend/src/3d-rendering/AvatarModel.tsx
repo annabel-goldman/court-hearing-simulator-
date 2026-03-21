@@ -14,7 +14,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { AvatarPoseConfig } from './scenePresets'
 import { VISEME_MAP } from './types'
 
-export interface AvatarModelProps {
+interface AvatarModelProps {
   url: string
   position: [number, number, number]
   rotation?: [number, number, number]
@@ -356,7 +356,7 @@ export function AvatarModel({
       if (!assetId) return undefined
       const candidateNames = clipNamesByAssetId.get(assetId)
       if (!candidateNames || candidateNames.length === 0) return undefined
-      return actions[candidateNames[0]]
+      return actions[candidateNames[0]] ?? undefined
     }
 
     if (!usesActiveAnimation && !freezeAnimationPose) {
@@ -389,7 +389,7 @@ export function AvatarModel({
     if (!selectedAction) {
       const clipName = usesActiveAnimation ? animationClipName : freezeAnimationClipName
       const selectedName = clipName && actions[clipName] ? clipName : names[0]
-      selectedAction = selectedName ? actions[selectedName] : undefined
+      selectedAction = selectedName ? (actions[selectedName] ?? undefined) : undefined
     }
 
     if (!selectedAction) return

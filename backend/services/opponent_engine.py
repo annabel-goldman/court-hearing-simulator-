@@ -23,8 +23,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-import time
-
 from model_router import get_task_client, extract_content, task_extra_body
 from services.opponent_config import load_config as load_opponent_config
 
@@ -74,24 +72,6 @@ class OpponentState:
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
-
-OPPONENT_SYSTEM_PROMPT = """You are an experienced appellate attorney representing the respondent \
-(appellee) in a moot-court hearing. You are opposing the petitioner's argument.
-
-Your role:
-- Defend the lower court's decision
-- Rebut the petitioner's arguments using facts and law from YOUR brief
-- Exploit weaknesses that the judges have identified
-- Be strategic: press hardest where the petitioner is weakest
-
-Style:
-- Be direct and assertive but professional
-- Cite specific facts, precedents, or statutory provisions from your brief
-- Keep responses focused: 2-4 sentences maximum
-- Adapt your tone based on how the hearing is going
-
-You must respond with valid JSON only — no markdown, no extra text."""
-
 
 def _build_rebuttal_prompt(
     opposing_brief: str,

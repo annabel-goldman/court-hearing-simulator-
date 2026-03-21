@@ -81,17 +81,6 @@ def _is_hallucination(text: str) -> bool:
     return False
 
 
-def pcm_rms_energy(pcm: bytes) -> float:
-    """Compute RMS energy of signed-16-bit-LE PCM. Returns 0.0–32768.0."""
-    import struct
-    if len(pcm) < 2:
-        return 0.0
-    n_samples = len(pcm) // 2
-    samples = struct.unpack(f'<{n_samples}h', pcm[:n_samples * 2])
-    mean_sq = sum(s * s for s in samples) / n_samples
-    return mean_sq ** 0.5
-
-
 def _wrap_pcm_as_wav(pcm: bytes, sample_rate: int = 16000, channels: int = 1, bits: int = 16) -> bytes:
     """Wrap raw signed-16-bit-LE PCM bytes in a valid WAV header (no ffmpeg needed)."""
     import struct
@@ -341,78 +330,6 @@ class LocalWhisperProvider(STTProvider):
             return result
         except Exception as e:
             logger.error("[STT] Local whisper transcription error: %s", e)
-            return ""
-
-
-class GladiaSTTProvider(STTProvider):
-    """Gladia speech-to-text provider (pre-recorded async workflow).
-
-    Workflow: upload audio → initiate transcription → poll until done.
-    Env vars: STT_API_KEY (required), STT_BASE_URL (default: https://api.gladia.io).
-    """
-
-    _BASE = "https://api.gladia.io"
-
-    def __init__(
-        self,
-        api_key: str | None = None,
-        base_url: str | None = None,
-    ):
-        self._api_key  = (api_key  or "").strip() or os.getenv("GLADIA_API_KEY", os.getenv("STT_API_KEY", ""))
-        self._base_url = (base_url or "").strip() or os.getenv("STT_BASE_URL", self._BASE)
-        self._base_url = self._base_url.rstrip("/")
-        if not self._api_key:
-            logger.warning("[STT] GladiaSTTProvider: STT_API_KEY not set — transcription will return empty.")
-
-    async def transcribe(self, audio_data: bytes, format: str = "webm") -> str:
-        if len(audio_data) < 100 or not self._api_key:
-            return ""
-
-        import httpx
-        headers = {"x-gladia-key": self._api_key}
-
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                # Step 1: upload audio bytes
-                upload = await client.post(
-                    f"{self._base_url}/v2/upload",
-                    headers=headers,
-                    files={"audio": (f"audio.{format}", audio_data, f"audio/{format}")},
-                )
-                upload.raise_for_status()
-                audio_url = upload.json()["audio_url"]
-
-                # Step 2: initiate transcription
-                init = await client.post(
-                    f"{self._base_url}/v2/pre-recorded",
-                    headers={**headers, "Content-Type": "application/json"},
-                    json={"audio_url": audio_url, "language": "en"},
-                )
-                init.raise_for_status()
-                result_url = init.json()["result_url"]
-
-            # Step 3: poll for completion (separate client to allow longer total wait)
-            async with httpx.AsyncClient(timeout=10) as poll_client:
-                for _ in range(30):
-                    await anyio.sleep(1)
-                    resp = await poll_client.get(result_url, headers=headers)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    if data.get("status") == "done":
-                        return (
-                            data.get("result", {})
-                                .get("transcription", {})
-                                .get("full_transcript", "")
-                                .strip()
-                        )
-                    if data.get("status") == "error":
-                        logger.error("[STT] Gladia transcription error: %s", data.get("error_code"))
-                        return ""
-
-            logger.warning("[STT] Gladia transcription timed out after 30s")
-            return ""
-        except Exception as e:
-            logger.error("[STT] Gladia transcription failed: %s", e)
             return ""
 
 

@@ -41,25 +41,13 @@ class MultiAgentService:
     # Agent Management (delegated to storage)
     # =========================================================================
 
-    def get_default_agents(self) -> List[Agent]:
-        """Load all default agent configurations."""
-        return self.storage.get_default_agents()
-
     def get_all_agents(self) -> List[Agent]:
         """Load all agents: defaults (with custom overrides) + new custom agents."""
         return self.storage.get_all_agents()
 
-    def get_agent_by_id(self, agent_id: str) -> Optional[Agent]:
-        """Get a specific agent by ID."""
-        return self.storage.get_agent_by_id(agent_id)
-
     def get_original_agent(self, agent_id: str) -> Optional[Agent]:
         """Get the original default version of an agent (for reset)."""
         return self.storage.get_original_agent(agent_id)
-
-    def get_agent_versions(self, agent_id: str) -> List[Dict]:
-        """Get version history for an agent (for undo functionality)."""
-        return self.storage.get_agent_versions(agent_id)
 
     def save_agent_version(self, agent_data: Dict) -> Agent:
         """Save a new version of an agent (Write button)."""
@@ -69,29 +57,13 @@ class MultiAgentService:
         """Create a completely new agent."""
         return self.storage.create_new_agent(agent_data)
 
-    def is_custom_agent(self, agent_id: str) -> bool:
-        """Check if an agent is a custom agent (not a default)."""
-        return self.storage.is_custom_agent(agent_id)
-
     def delete_agent(self, agent_id: str) -> bool:
         """Delete a custom agent. Returns False for default agents."""
         return self.storage.delete_agent(agent_id)
 
-    def delete_custom_versions(self, agent_id: str) -> int:
-        """Delete all custom versions of an agent (reset to default)."""
-        return self.storage.delete_custom_versions(agent_id)
-
     # =========================================================================
     # LLM Operations (delegated to llm)
     # =========================================================================
-
-    async def generate_brief_summary(
-        self,
-        user_brief: str,
-        opposing_brief: str,
-    ) -> str:
-        """Generate a summary of both briefs using OpenAI."""
-        return await self.llm.generate_brief_summary(user_brief, opposing_brief)
 
     async def analyze_agent_question(
         self,

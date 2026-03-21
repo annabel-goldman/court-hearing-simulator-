@@ -51,18 +51,6 @@ class AgentStorage:
     # Loading Agents
     # =========================================================================
 
-    def get_default_agents(self) -> List[Agent]:
-        """Load all default agent configurations."""
-        agents = []
-        for file_path in self.defaults_path.glob("*.json"):
-            try:
-                with open(file_path, "r") as f:
-                    data = json.load(f)
-                    agents.append(Agent.from_dict(data))
-            except Exception as e:
-                print(f"Error loading agent {file_path}: {e}")
-        return agents
-
     def get_all_agents(self) -> List[Agent]:
         """
         Load all agents: defaults (with custom overrides) + new custom agents.
@@ -156,25 +144,6 @@ class AgentStorage:
                 print(f"Error loading custom version {file_path}: {e}")
         return versions
 
-    def get_agent_versions(self, agent_id: str) -> List[Dict]:
-        """
-        Get version history for an agent (for undo functionality).
-        
-        Returns list sorted by version (newest first), including default as version 0.
-        """
-        versions = self._get_custom_versions(agent_id)
-        
-        # Also include the original default as version 0
-        default_path = self.defaults_path / f"{agent_id}.json"
-        if default_path.exists():
-            with open(default_path, "r") as f:
-                original = json.load(f)
-                original["version"] = 0
-                original["is_default"] = True
-                versions.append(original)
-        
-        return sorted(versions, key=lambda x: x.get("version", 0), reverse=True)
-
     # =========================================================================
     # Saving Agents
     # =========================================================================
@@ -239,11 +208,6 @@ class AgentStorage:
     # Deleting Agents
     # =========================================================================
 
-    def is_custom_agent(self, agent_id: str) -> bool:
-        """Check if an agent is a custom agent (not a default)."""
-        default_path = self.defaults_path / f"{agent_id}.json"
-        return not default_path.exists()
-
     def delete_agent(self, agent_id: str) -> bool:
         """
         Delete a custom agent and all its versions.
@@ -270,22 +234,6 @@ class AgentStorage:
             raise ValueError(f"Agent '{agent_id}' not found")
         
         return True
-
-    def delete_custom_versions(self, agent_id: str) -> int:
-        """
-        Delete all custom versions of an agent (reset to default).
-        
-        Returns the number of versions deleted.
-        """
-        deleted_count = 0
-        pattern = f"{agent_id}_v*.json"
-        for file_path in self.custom_path.glob(pattern):
-            try:
-                file_path.unlink()
-                deleted_count += 1
-            except Exception as e:
-                print(f"Error deleting {file_path}: {e}")
-        return deleted_count
 
 
 # Global instance for easy import

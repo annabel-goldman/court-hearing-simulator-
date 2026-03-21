@@ -58,27 +58,12 @@ log "Rebuilding frontend..."
   bun run build
 )
 
-log "Starting backend..."
-(
-  cd "$ROOT_DIR/backend"
-  nohup uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload > "$LOG_DIR/backend.log" 2>&1 &
-  echo $! > "$LOG_DIR/backend.pid"
-)
-
-sleep 1
-
-log "Starting frontend dev server..."
+log "Starting frontend dev server (background)..."
 (
   cd "$ROOT_DIR/frontend"
   nohup bun run dev -- --host 0.0.0.0 --port 5173 > "$LOG_DIR/frontend.log" 2>&1 &
   echo $! > "$LOG_DIR/frontend.pid"
 )
-
-if wait_for_port 8000 20; then
-  log "Backend listening on http://localhost:8000"
-else
-  log "Warning: backend did not bind port 8000 within timeout."
-fi
 
 if wait_for_port 5173 20; then
   log "Frontend listening on http://localhost:5173"
@@ -86,7 +71,8 @@ else
   log "Warning: frontend did not bind port 5173 within timeout."
 fi
 
-log "Done."
-log "Logs:"
-echo "  - $LOG_DIR/backend.log"
-echo "  - $LOG_DIR/frontend.log"
+log "Frontend log: $LOG_DIR/frontend.log"
+log "Starting backend (foreground)..."
+
+cd "$ROOT_DIR/backend"
+exec uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload

@@ -515,11 +515,6 @@ def run_projection(
     # Inject path topic vectors so _score_sequence / _rollout can compute
     # cosine between the last path topic and candidates.
     if path_vecs:
-        for p in prepared:
-            pass  # already in list
-        # We don't add path topics to `prepared` (they're addressed), but
-        # _run_mcts's vec_map needs the last path topic for cosine flow.
-        # Patch vec_map after _prepare_pool by adding path_vecs entries.
         _extra_vecs = path_vecs
     else:
         _extra_vecs = {}

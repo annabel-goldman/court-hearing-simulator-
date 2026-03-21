@@ -1,5 +1,4 @@
-export type QuestionSourceType = 'judge_engine' | 'multi_agent'
-export type MissedQuestionReason = 'not_selected' | 'duplicate'
+type QuestionSourceType = 'judge_engine' | 'multi_agent'
 
 export interface SessionQuestionRecord {
   id: string
@@ -9,17 +8,6 @@ export interface SessionQuestionRecord {
   agentId?: string
   agentName: string
   agentColor?: string
-}
-
-export interface MissedQuestionRecord {
-  id: string
-  question: string
-  timestamp: string
-  agentId: string
-  agentName: string
-  agentColor?: string
-  relevance: number
-  reason: MissedQuestionReason
 }
 
 export interface SessionTranscriptRecord {
@@ -36,6 +24,5 @@ export interface SessionAuditPayload {
   userRole: 'attorney'
   useMultiAgentJudge: boolean
   questions: SessionQuestionRecord[]
-  missedQuestions: MissedQuestionRecord[]
   transcriptSegments: SessionTranscriptRecord[]
 }

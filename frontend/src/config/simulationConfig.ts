@@ -74,11 +74,5 @@ export const BROWSER_TTS_PITCH = 0.9
 /** Interval for countdown timer updates (ms) */
 export const TIMER_INTERVAL_MS = 1000
 
-/** Microphone level below this value is treated as user silence */
-export const SILENCE_AUDIO_LEVEL_THRESHOLD = 10
-
-/** Judge asks a question after this much uninterrupted user silence (ms) */
-export const SILENCE_TRIGGER_MS = 8000
-
 /** Extra response window granted when timer expires mid-question (seconds) */
 export const TIMER_OVERTIME_SECONDS = 10

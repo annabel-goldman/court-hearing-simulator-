@@ -515,7 +515,7 @@ class TrajectoryTracker:
 
 # Each entry is (tracker, last_accessed_monotonic).
 # Sessions idle for more than _SESSION_TTL seconds are evicted on the next
-# create_session or get_session call.
+# create_session call.
 _SESSIONS: Dict[str, tuple[TrajectoryTracker, float]] = {}
 _SESSION_TTL = 3600.0   # 1 hour
 
@@ -535,14 +535,3 @@ def create_session(predicted: PredictedTopicSets) -> TrajectoryTracker:
     return tracker
 
 
-def get_session(session_id: str) -> Optional[TrajectoryTracker]:
-    entry = _SESSIONS.get(session_id)
-    if entry is None:
-        return None
-    tracker, _ = entry
-    _SESSIONS[session_id] = (tracker, time.monotonic())   # touch timestamp
-    return tracker
-
-
-def delete_session(session_id: str) -> bool:
-    return _SESSIONS.pop(session_id, None) is not None
