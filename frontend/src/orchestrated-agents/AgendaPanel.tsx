@@ -14,7 +14,7 @@
  *  - The MCTS-predicted next topics ("Coming next") at the top
  */
 
-import { memo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import type { Agent, AgendaItem, AgendaUpdate, PredictedTopic } from '../multi-agent/types';
 import { Card, CardHeader, CardContent } from '../multi-agent/components/ui';
 import './agenda.css';
@@ -61,17 +61,26 @@ export const AgendaPanel = memo(function AgendaPanel({
     setDropdownValue(id);
   };
 
-  const handleAssignAgent = (itemId: string, agentId: string) => {
+  const handleAssignAgent = useCallback((itemId: string, agentId: string) => {
     onItemsChange(
       items.map((item) =>
         item.id === itemId ? { ...item, agentId: agentId || null } : item
       )
     );
-  };
+  }, [items, onItemsChange]);
 
   const activeLensId = coverage ? String(coverage.best_prediction_id) : null;
   const activeTopicTitle = coverage?.last_human_matched_topic ?? null;
   const nextTopics = coverage?.predicted_next_topics ?? [];
+
+  const coverageByPredId = useMemo(() => {
+    if (!coverage) return null;
+    const map = new Map<string, typeof coverage.agenda_confidences[number]>();
+    for (const ac of coverage.agenda_confidences) {
+      map.set(String(ac.prediction_id), ac);
+    }
+    return map;
+  }, [coverage]);
 
   return (
     <Card>
@@ -131,9 +140,7 @@ export const AgendaPanel = memo(function AgendaPanel({
                 const isActive = item.id === activeLensId;
 
                 // Per-lens coverage from tracker
-                const ac = coverage?.agenda_confidences.find(
-                  (c) => String(c.prediction_id) === item.id
-                );
+                const ac = coverageByPredId?.get(item.id);
                 const confidencePct = ac ? Math.round(ac.confidence * 100) : 0;
 
                 return (

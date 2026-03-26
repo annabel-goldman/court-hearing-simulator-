@@ -11,10 +11,11 @@ POST /api/projected-timeline/generate-stream
         data: {"type": "done",   "data": <PredictedTopicSets JSON>}
 """
 
-import asyncio
 import json
 import logging
+from collections import deque
 
+import anyio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -52,45 +53,57 @@ async def generate_projected_timeline_stream(request: TopicPredictionRequest):
     if not request.appellee_brief.strip():
         raise HTTPException(status_code=422, detail="appellee_brief must not be empty.")
 
-    event_queue: asyncio.Queue = asyncio.Queue()
+    # Thread-safe buffer: callbacks are synchronous and may fire from thread pool,
+    # so we use a deque (thread-safe append/popleft under CPython).
+    event_buffer: deque[dict] = deque()
 
     def on_expand(node_id: int, parent_id: int, depth: int) -> None:
-        """Synchronous callback — safe to call from within async context."""
-        event_queue.put_nowait({"type": "node", "data": {"id": node_id, "p": parent_id, "d": depth}})
+        """Synchronous callback — safe to call from within async or threaded context."""
+        event_buffer.append({"type": "node", "data": {"id": node_id, "p": parent_id, "d": depth}})
 
     def on_progress(event_type: str, data: dict) -> None:
         """Synchronous callback for status / agenda events."""
-        event_queue.put_nowait({"type": event_type, "data": data})
+        event_buffer.append({"type": event_type, "data": data})
 
     async def event_generator():
-        gen_task = asyncio.create_task(
-            generate_topic_sets(
-                request,
-                mcts_callback=on_expand,
-                progress_callback=on_progress,
-            )
-        )
+        gen_done = False
+        result_holder: list = []
 
-        # Interleave: yield to the event loop, drain the queue, repeat
-        while not gen_task.done():
-            await asyncio.sleep(0)
-            drained = 0
-            while not event_queue.empty() and drained < 50:
-                event = event_queue.get_nowait()
+        async def _run_generation():
+            nonlocal gen_done
+            try:
+                result = await generate_topic_sets(
+                    request,
+                    mcts_callback=on_expand,
+                    progress_callback=on_progress,
+                )
+                result_holder.append(result)
+            except Exception as exc:
+                result_holder.append(exc)
+            finally:
+                gen_done = True
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_run_generation)
+
+            # Poll: drain events while generation runs
+            while not gen_done:
+                await anyio.sleep(0.05)
+                while event_buffer:
+                    event = event_buffer.popleft()
+                    yield f"data: {json.dumps(event)}\n\n"
+
+            # Drain remaining events after generation completes
+            while event_buffer:
+                event = event_buffer.popleft()
                 yield f"data: {json.dumps(event)}\n\n"
-                drained += 1
 
-        # Drain any events queued after the task finished
-        while not event_queue.empty():
-            event = event_queue.get_nowait()
-            yield f"data: {json.dumps(event)}\n\n"
-
-        try:
-            result = gen_task.result()
-            yield f"data: {json.dumps({'type': 'done', 'data': result.model_dump()})}\n\n"
-        except Exception as exc:
-            logger.exception("Streaming generation failed")
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            # Emit final result
+            if result_holder and isinstance(result_holder[0], Exception):
+                logger.exception("Streaming generation failed", exc_info=result_holder[0])
+                yield f"data: {json.dumps({'type': 'error', 'detail': str(result_holder[0])})}\n\n"
+            elif result_holder:
+                yield f"data: {json.dumps({'type': 'done', 'data': result_holder[0].model_dump()})}\n\n"
 
     return StreamingResponse(
         event_generator(),

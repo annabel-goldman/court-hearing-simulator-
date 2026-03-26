@@ -8,7 +8,7 @@
  * Styles: score-log.css
  */
 
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import type { ArgumentScore } from '../multi-agent/types';
 import './score-log.css';
 
@@ -30,6 +30,8 @@ function overallClass(v: number): string {
 }
 
 export const ScoreLog = memo(function ScoreLog({ scores }: ScoreLogProps) {
+  const recentScores = useMemo(() => [...scores].reverse().slice(0, 20), [scores]);
+
   if (scores.length === 0) {
     return (
       <div className="sl-log">
@@ -40,13 +42,13 @@ export const ScoreLog = memo(function ScoreLog({ scores }: ScoreLogProps) {
 
   return (
     <div className="sl-log">
-      {[...scores].reverse().slice(0, 20).map((score, i) => {
+      {recentScores.map((score) => {
         const isRespondent = score.speaker === 'respondent';
         const fillClass = isRespondent ? 'sl-dim__fill sl-dim__fill--respondent' : 'sl-dim__fill';
 
         return (
           <div
-            key={i}
+            key={`${score.timestamp}-${score.speaker}`}
             className={`sl-entry sl-entry--${score.speaker}`}
           >
             <div className="sl-entry__header">

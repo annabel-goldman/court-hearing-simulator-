@@ -25,9 +25,9 @@ Every architectural decision serves latency and naturalness:
 | Backend runtime | FastAPI + Hypercorn (`--worker-class trio`) + anyio |
 | Package manager | **`uv`** — always `uv run` and `uv sync` |
 | Frontend | React + TypeScript + Vite (`frontend/`) |
-| LLM inference | Local llama-server (OpenAI-compatible, 3 ports) |
-| STT | faster-whisper (local GPU) or OpenAI Whisper API (Gladia Live optional/experimental) |
-| TTS | OpenAI TTS (opus format) or local compatible endpoint |
+| LLM inference | OpenAI-compatible API (local llama-server or cloud: OpenRouter, Groq, etc.) |
+| STT | Groq Whisper, OpenAI Whisper API, or local faster-whisper (GPU) |
+| TTS | Multi-provider: OpenAI, Groq (Orpheus), or Cartesia — with failover |
 | Embeddings | sentence-transformers `all-MiniLM-L6-v2` (fallback: TF-IDF trigrams) |
 
 **Install and run:**
@@ -48,8 +48,20 @@ uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload
 
 ```
 backend/
-├── main.py                          # FastAPI app + both WebSocket endpoints + REST API
+├── main.py                          # FastAPI app composition (lifespan + middleware + routers)
 ├── model_router.py                  # LARGE/SMALL/TINY tier routing + runtime overrides
+├── api/
+│   ├── router.py                    # Composed API router (includes all sub-routers)
+│   ├── routes/
+│   │   ├── config.py                # REST endpoints: judge/opponent/tts/stt/model config
+│   │   └── multi_agent.py           # REST endpoints: agents, scores, opponent, sessions
+│   └── ws/
+│       └── multi_agent.py           # WebSocket route registration
+├── domain/
+│   └── simulation/
+│       └── runtime.py               # Core simulation logic: session mgmt, WS handler, eval hot path
+├── schemas/
+│   └── requests.py                  # Pydantic request models for REST endpoints
 ├── multi_agent/
 │   ├── service.py                   # Agent CRUD + orchestration entry points
 │   ├── llm.py                       # analyze_agent_question + brief summary
@@ -70,27 +82,48 @@ backend/
 │   ├── judge_config.py              # Judge config dataclasses, file I/O, defaults
 │   ├── opponent_engine.py           # Adaptive respondent (opposing counsel) engine
 │   ├── opponent_config.py           # Opponent config dataclasses, file I/O, defaults
-│   ├── tts_provider.py              # TTS (OpenAI Opus, fallback empty)
-│   ├── stt_provider.py              # STT (local faster-whisper or OpenAI Whisper)
-│   └── case_ingestion.py            # PDF brief extraction (pypdf)
+│   ├── tts_provider.py              # Multi-provider TTS (OpenAI, Groq, Cartesia) + failover
+│   ├── stt_provider.py              # Multi-provider STT (Groq, OpenAI, local faster-whisper)
+│   ├── media_config.py              # TTS/STT runtime config dataclasses + file I/O
+│   └── model_config.py              # Per-tier model runtime config dataclasses + file I/O
 └── data/
     ├── judge_config.json            # Persisted judge config (auto-created on first save)
-    └── opponent_config.json         # Persisted opponent config (auto-created on first save)
+    ├── opponent_config.json         # Persisted opponent config (auto-created on first save)
+    ├── tts_config.json              # Persisted TTS config (auto-created on first save)
+    ├── stt_config.json              # Persisted STT config (auto-created on first save)
+    └── model_config.json            # Persisted per-tier model config (auto-created on first save)
 
 frontend/
 ├── src/pages/
 │   ├── OrchestratedAgents.tsx       # Multi-judge panel page (main simulation)
 │   ├── CourtroomPage.tsx            # Single-judge page
-│   └── Home.tsx                    # Brief upload + landing
+│   ├── Home.tsx                     # Brief upload + landing
+│   ├── SessionAuditPage.tsx         # Session audit/review page
+│   └── ThreeDPage.tsx               # 3D visualization page
 ├── src/orchestrated-agents/
 │   ├── AgendaPanel.tsx              # Topic coverage visualization
 │   ├── OpponentFeed.tsx             # Opposing counsel response display
 │   ├── OpponentConfigPanel.tsx      # Collapsible opponent config panel (2 tabs)
 │   ├── MCTSTreeViz.tsx              # Live MCTS tree animation
 │   ├── JudgeConfigPanel.tsx         # Collapsible judge config panel (3 tabs)
+│   ├── JudgeActivityFeed.tsx        # Judge question activity feed
+│   ├── ScoreLog.tsx                 # Argument score display
+│   ├── SystemConfigPanel.tsx        # Model/TTS/STT config panel (3 tabs)
+│   ├── AboutPanel.tsx               # About/info panel
 │   ├── judge-config.css             # Styles for JudgeConfigPanel (jcp-* prefix)
 │   ├── opponent-config.css          # Styles for OpponentConfigPanel (ocp-* prefix)
-│   └── agenda.css                  # Styles for agenda/MCTS viz + layout (oa-* prefix)
+│   ├── system-config.css            # Styles for SystemConfigPanel
+│   ├── playground-theme.css         # Theme variants
+│   ├── score-log.css                # Styles for ScoreLog
+│   └── agenda.css                   # Styles for agenda/MCTS viz + layout (oa-* prefix)
+├── src/features/
+│   ├── orchestrated/
+│   │   ├── services/                # configService, multiAgentService, timelineService
+│   │   └── utils/sseParser.ts       # SSE stream parsing
+│   ├── pdf/utils/extractPdfText.ts  # Client-side PDF text extraction
+│   ├── socket/utils/wsBase.ts       # WebSocket base utilities
+│   ├── media/utils/audioEncoding.ts # Audio encoding utilities
+│   └── courtroom/services/          # TTS service
 └── src/multi-agent/
     ├── components/
     │   ├── AgentEditor.tsx          # Edit/create judge agents
@@ -114,11 +147,30 @@ Three tiers, each cascades to the next if unreachable:
 
 Task-to-tier map lives entirely in `TASK_TIER_MAP` in `model_router.py`. Always add new tasks there.
 
-Env vars: `MODEL_LARGE`, `MODEL_LARGE_URL`, `MODEL_SMALL`, `MODEL_SMALL_URL`, `MODEL_TINY`, `MODEL_TINY_URL`. All cascade: if SMALL is unset it inherits LARGE.
+Env vars: `MODEL_LARGE`, `MODEL_LARGE_URL`, `MODEL_SMALL`, `MODEL_SMALL_URL`, `MODEL_TINY`, `MODEL_TINY_URL`. All cascade: if SMALL is unset it inherits LARGE. In cloud/deployment mode, all tiers typically point to the same OpenAI-compatible API (e.g. OpenRouter) with different model names.
 
 ### Runtime overrides
 
-`model_router._runtime_overrides` is a dict that maps `ModelTier → ModelEndpoint` and takes priority over env-var resolution and reachability fallback. Set via `apply_runtime_override(tier, base_url, model, api_key)` and cleared with `clear_runtime_override(tier)`. Used by the Judge Configuration Panel to route to external OpenAI-compatible APIs (OpenAI, Groq, OpenRouter, etc.) without restarting the server.
+`model_router._runtime_overrides` is a dict that maps `ModelTier → ModelEndpoint` and takes priority over env-var resolution and reachability fallback. Set via `apply_runtime_override(tier, base_url, model, api_key)` and cleared with `clear_runtime_override(tier)`. Used by the Judge Configuration Panel and Model Configuration Panel to route to external OpenAI-compatible APIs without restarting the server.
+
+### Model Configuration (`services/model_config.py`)
+
+Persists per-tier runtime overrides to `backend/data/model_config.json`. Wraps `model_router.apply_runtime_override()` / `clear_runtime_override()` so the UI can configure each tier independently.
+
+```python
+@dataclass
+class TierConfig:
+    enabled: bool = False
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+
+@dataclass
+class ModelRuntimeConfig:
+    large: TierConfig
+    small: TierConfig
+    tiny: TierConfig
+```
 
 ---
 
@@ -190,16 +242,27 @@ For each of 10 **JUDICIAL_LENSES** (statutory text, precedent, agency deference,
 
 MCTS runs in a thread pool via `anyio.to_thread.run_sync()` — never blocks the event loop.
 
-Gate constants (in `main.py`):
+Gate constants (in `domain/simulation/runtime.py`):
 ```python
 MCTS_MIN_WORDS = 40        # don't run until advocate has spoken 40+ words
 MCTS_DEBOUNCE_TURNS = 3    # only re-run every 3rd sentence flush
 ```
 
-Sparse MCTS constants (in `timeline_generator.py` and `main.py`):
+Sparse MCTS constants (in `timeline_generator.py` and `domain/simulation/runtime.py`):
 ```python
 SPARSE_MCTS_INITIAL_DEPTH = 2         # max topics per path in initial generation
 EXPANSION_QUALITY_THRESHOLD = 0.5     # quality score that triggers pool expansion
+```
+
+Gated frontier constants (in `domain/simulation/runtime.py`):
+```python
+FRONTIER_BATCH_SIZE = 3               # new topics released per frontier expansion
+FRONTIER_QUALITY_GATE = 0.3           # min quality on current topic before expansion
+FRONTIER_MIN_FLUSHES = 2              # min flushes on current topic before expansion
+PROJECTION_TOP_K = 6                  # max topics passed to run_projection
+PROJECTION_QUALITY_GATE = 0.85        # min quality before MCTS projection can run
+AGENT_EVAL_GRACE_SECONDS = 5.0        # grace period after first "yes" for more candidates
+AGENT_EVAL_MIN_CANDIDATES = 3         # cancel remaining evals once this many say "yes"
 ```
 
 ### Tracker (`tracker.py`)
@@ -293,7 +356,7 @@ class JudgeConfig:
 
 **File I/O**: `load_config()` / `save_config()` are synchronous. REST endpoints wrap them in `anyio.to_thread.run_sync`. `save_config` uses atomic write-then-rename (`tmp.replace(path)`). `load_config` falls back to hardcoded defaults on any error so the judge engine is never blocked by a bad config file.
 
-**REST endpoints** (all in `main.py`):
+**REST endpoints** (all in `api/routes/config.py`):
 - `GET /api/judge-config` — load from disk
 - `GET /api/judge-config/default` — hardcoded defaults (no disk I/O)
 - `POST /api/judge-config` — validate (weights must sum to 1.0 ± 0.01), save, apply/clear runtime model-tier overrides
@@ -310,13 +373,14 @@ Persists opponent system prompt, aggressiveness, and enabled response types to `
 @dataclass
 class OpponentConfig:
     system_prompt: str
-    aggressiveness: float       # 0.0–1.0; maps to LLM temperature 0.3–1.0
-    enabled_types: List[str]    # subset of ["rebuttal", "exploitation", "affirmative"]
+    aggressiveness: float = 0.7  # 0.0–1.0; maps to LLM temperature 0.3–1.0
+    enabled_types: List[str]     # subset of ["rebuttal", "exploitation", "affirmative"]
+    voice_id: str = ""           # TTS voice ID; "" = provider default
 ```
 
 **File I/O**: Same synchronous `load_config()` / `save_config()` pattern as judge config. Atomic write-then-rename. Falls back to defaults on error.
 
-**REST endpoints** (all in `main.py`):
+**REST endpoints** (all in `api/routes/config.py`):
 - `GET /api/opponent-config` — load from disk
 - `GET /api/opponent-config/default` — hardcoded defaults (no disk I/O)
 - `POST /api/opponent-config` — validate (aggressiveness 0–1, at least one enabled type), save
@@ -325,9 +389,48 @@ class OpponentConfig:
 
 ---
 
+## Media Configuration (`services/media_config.py`)
+
+Persists TTS and STT runtime settings to `backend/data/tts_config.json` and `backend/data/stt_config.json`.
+
+```python
+@dataclass
+class TTSConfig:
+    enabled: bool = True
+    provider: str = "openai"   # "openai" | "groq"
+    api_key: str = ""
+    base_url: str = ""
+    voice: str = "onyx"
+    model: str = "tts-1"
+
+@dataclass
+class STTConfig:
+    provider: str = "openai"          # "openai" | "groq" | "local"
+    api_key: str = ""
+    base_url: str = ""
+    model: str = "gpt-4o-mini-audio-preview"
+    whisper_model: str = "medium"     # local only
+    device: str = "cuda"              # local only
+    compute_type: str = "float16"     # local only
+```
+
+**TTS providers** (`services/tts_provider.py`): `OpenAITTSProvider`, `GroqTTSProvider` (rate-limit aware with cooldown), `CartesiaTTSProvider`. `FailoverTTSProvider` wraps these with Groq-specific rate-limit stickiness. Factory: `get_tts_provider(provider_name)`.
+
+**STT providers** (`services/stt_provider.py`): Groq Whisper, OpenAI Whisper API, or local faster-whisper. Provider selected via `STT_PROVIDER` env var or STT config.
+
+**REST endpoints** (all in `api/routes/config.py`):
+- `GET/POST /api/tts-config`, `GET /api/tts-config/default`
+- `GET/POST /api/stt-config`, `GET /api/stt-config/default`
+- `GET/POST /api/model-config`, `GET /api/model-config/default`
+- `GET /api/tts/voices` — available voices for the active TTS provider
+
+**Frontend**: `SystemConfigPanel.tsx` renders as a collapsible card. Three tabs: **Models** | **TTS** | **STT**. Uses `system-config.css`.
+
+---
+
 ## Multi-Agent Session State
 
-Key fields in the per-session dict (stored in `_SESSIONS` in `main.py`):
+Key fields in the per-session dict (stored in `MultiAgentConnectionManager.session_data` in `domain/simulation/runtime.py`):
 
 ```python
 {
@@ -336,13 +439,14 @@ Key fields in the per-session dict (stored in `_SESSIONS` in `main.py`):
   "transcript": str,
   "sentence_buffer": str,
   "phase": "RECORDING" | "SETUP",
-  "questions_asked": List[dict],       # {agent_id, question, audio, timestamp, ...}
-  "last_interrupt_time": float,        # for cooldown check
+  "questions_asked": List[dict],       # {agent_id, agent_name, question, color}
+  "last_agent_interrupt_time": datetime | None,  # for cooldown check
   "_silence_scope": anyio.CancelScope, # cancelled when new audio arrives
   "_tg": anyio.TaskGroup,              # connection-lifetime task group
   "_eval_lock": anyio.Lock(),          # one evaluation cycle at a time
   "_tracker_lock": anyio.Lock(),       # serialises tracker.update() + MCTS state mutations
   "_last_active": float,               # monotonic timestamp; updated on every message (TTL eviction)
+  "_pcm_buffer": bytes,                # PCM audio buffer for STT accumulation
   "tracker": TrajectoryTracker | None,
   "topic_map": Dict[str, dict],        # title → {agenda_id, agent_id, description}
   "addressed_titles": set[str],
@@ -351,10 +455,14 @@ Key fields in the per-session dict (stored in `_SESSIONS` in `main.py`):
   "last_predicted_next": List[str],    # cached MCTS result
   "full_topic_pool": List[dict],       # complete candidate pool from all lenses (sparse MCTS expansion)
   "sparse_expanded": bool,             # True once all_topics has been expanded to full pool
+  "path_so_far": List,                 # MCTS path tracking
+  "frontier_titles": set,              # topic frontier for gated expansion
+  "frontier_flush_count": int,         # frontier expansion counter
+  "case_summary": str,                 # case context for agents
 }
 ```
 
-Session constants in `main.py`:
+Session constants in `domain/simulation/runtime.py`:
 ```python
 AGENT_INTERRUPT_COOLDOWN_SECONDS = 15
 MIN_WORDS_BEFORE_INTERRUPT = 10
@@ -389,23 +497,24 @@ EXPANSION_QUALITY_THRESHOLD = 0.5  # sparse MCTS: expand topic pool when a topic
 | `agenda_set_ack` | `{tracker_ready, topics_indexed}` |
 | `agenda_update` | `{best_prediction_id, agenda_confidences, last_human_matched_topic, predicted_next_topics, mcts_tree, regeneration_needed}` |
 | `agent_question` | `{agent_id, agent_name, color, question, timestamp, audio, audio_format}` |
-| `agent_counter_argument` | `{agent_id, agent_name, color, topic, counter_argument, timestamp}` |
 | `agents_updated` | `{agent_count}` |
 | `argument_score` | `{speaker, clarity, legal_reasoning, responsiveness, persuasiveness, overall, feedback}` |
 | `opponent_response` | `{response_type, argument, strategy_note, topic, strength, timestamp}` |
+| `stt_error` | `{message}` |
+| `phase_update` | `{phase}` |
 
 ---
 
 ## Audio Pipeline
 
-1. Frontend records WebM audio chunks via `MediaRecorder`
+1. Frontend records audio chunks via `MediaRecorder`
 2. Sends as base64 over WebSocket
-3. Backend decodes → writes to temp file → faster-whisper transcribes (GPU)
+3. Backend decodes → STT provider transcribes (Groq Whisper API, OpenAI Whisper API, or local faster-whisper)
 4. Fragment appended to `sentence_buffer`
 5. On sentence boundary OR 25-word threshold → flush to transcript
 6. Silence timer (3s): auto-flush remaining buffer if no new audio
 
-STT is async — `stt_provider.transcribe(...)` runs faster-whisper in a thread pool via `anyio.to_thread.run_sync`.
+STT is async — provider-dependent: API providers use async HTTP calls, local faster-whisper runs in a thread pool via `anyio.to_thread.run_sync`.
 
 ---
 
@@ -461,26 +570,39 @@ re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
 
 ```bash
 # Required
-OPENAI_API_KEY=local           # or real key; "local" signals local llama-server
+OPENAI_API_KEY=...             # API key for LLM provider (OpenRouter, OpenAI, etc.)
+OPENAI_BASE_URL=...            # Base URL for LLM API (e.g. https://openrouter.ai/api/v1)
 
 # Optional model tier overrides (all cascade: SMALL → LARGE if unset)
-OPENAI_BASE_URL=http://localhost:8001/v1
-MODEL_LARGE=Qwen3.5-35B-A3B
-MODEL_LARGE_URL=http://localhost:8001/v1
-MODEL_SMALL=Qwen3-4B
-MODEL_SMALL_URL=http://localhost:8002/v1
-MODEL_TINY=gemma-3-1b-it
-MODEL_TINY_URL=http://localhost:8003/v1
+MODEL_LARGE=...                # model name for LARGE tier
+MODEL_LARGE_URL=...            # base URL (default: OPENAI_BASE_URL)
+MODEL_SMALL=...                # model name for SMALL tier
+MODEL_SMALL_URL=...            # base URL (default: MODEL_LARGE_URL)
+MODEL_TINY=...                 # model name for TINY tier
+MODEL_TINY_URL=...             # base URL (default: MODEL_SMALL_URL)
+
+# Groq (used for STT and/or TTS)
+GROQ_API_KEY=...
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 
 # STT
-STT_PROVIDER=local             # "local" (faster-whisper) or "openai"
-WHISPER_MODEL=medium           # tiny, base, small, medium, large-v3
-WHISPER_DEVICE=cuda            # cuda or cpu
-WHISPER_COMPUTE_TYPE=float16   # float16, int8_float16, int8
+STT_PROVIDER=groq              # "groq" | "openai" | "local" (faster-whisper)
+STT_BASE_URL=...               # custom STT endpoint (optional)
+WHISPER_MODEL=medium           # tiny, base, small, medium, large-v3 (local only)
+WHISPER_DEVICE=cuda            # cuda or cpu (local only)
+WHISPER_COMPUTE_TYPE=float16   # float16, int8_float16, int8 (local only)
 
-# TTS (optional override; falls back to OPENAI_API_KEY)
-TTS_API_KEY=...
+# TTS
+TTS_PROVIDER=openai            # "openai" | "groq" | "cartesia"
+TTS_API_KEY=...                # falls back to OPENAI_API_KEY for openai provider
 TTS_BASE_URL=...
+CARTESIA_API_KEY=...           # required when TTS_PROVIDER=cartesia
+
+# Frontend (build-time)
+VITE_USE_S3_ASSETS=true        # serve static assets from S3/CDN
+VITE_ASSET_BASE_URL=...        # CDN base URL for assets
+VITE_API_URL=...               # production backend URL
+VITE_WS_URL=...                # production WebSocket URL
 
 # CORS
 CORS_ORIGINS=http://localhost:3000,http://localhost:5173
@@ -496,7 +618,7 @@ CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 4. **Always check model router config at startup.** `log_model_config()` is called in lifespan; add new tiers there too.
 5. **Prompts are in dedicated files or config.** Don't embed multi-line prompt strings directly in service/handler code. The judge system prompt and scoring prompt are user-editable via `judge_config.json` — do not hardcode replacements in `judge_engine.py`.
 6. **Agent defaults are sacred.** Never modify `data/defaults/*.json` at runtime; always write to `data/custom/`.
-7. **Session state is in-process dicts.** For any new session field, document it in this file under "Multi-Agent Session State".
+7. **Session state is in-process dicts** (in `domain/simulation/runtime.py`). For any new session field, document it in this file under "Multi-Agent Session State".
 8. **MCTS must stay gated.** Do not remove `MCTS_MIN_WORDS` / `MCTS_DEBOUNCE_TURNS` guards — without them, MCTS runs on every audio chunk and blocks agent evaluation.
 9. **Qwen3 thinking mode is disabled.** Every LLM call to a local model must pass `extra_body={"chat_template_kwargs": {"enable_thinking": False}}` and strip `<think>` blocks from responses. Skipping this causes the model to spend its entire token budget in `<think>` blocks and return empty responses.
 10. **Quality refinement is background-only.** `schedule_quality_refinement` must never be awaited inline; always fire-and-forget.
@@ -513,17 +635,17 @@ All tracked bugs have been resolved. The table below is kept for reference.
 | `model_router.py:get_client_and_model` | Model name didn't match client on tier fallback | **Fixed** — unified via `_resolve_effective_endpoint` |
 | `model_router.py:_is_url_reachable` | Synchronous blocking I/O in async context | **Fixed** — async httpx probe at startup + 60 s TTL cache |
 | `model_router.py:_unreachable_urls` | No TTL, servers never retried | **Fixed** — `_background_reachability_refresh` re-probes every 30 s |
-| `main.py` | `asyncio.create_task()` under trio backend | **Fixed** — all fire-and-forget uses `tg.start_soon()` inside WebSocket task group |
+| `runtime.py` | `asyncio.create_task()` under trio backend | **Fixed** — all fire-and-forget uses `tg.start_soon()` inside WebSocket task group |
 | `mcts.py:_run_mcts_streaming` | `asyncio.sleep(0)` instead of `anyio.sleep(0)` | **Fixed** |
-| `main.py:_eval_lock` | Boolean with no timeout; hung LLM → permanent block | **Fixed** — `anyio.Lock()` + `anyio.move_on_after(30)` |
-| `main.py/_tracker.py:_SESSIONS` | No TTL/eviction | **Fixed** — 1 h TTL with `_last_active` timestamps; eviction runs every 5 min |
+| `runtime.py:_eval_lock` | Boolean with no timeout; hung LLM → permanent block | **Fixed** — `anyio.Lock()` + `anyio.move_on_after(30)` |
+| `runtime.py/_tracker.py:session_data` | No TTL/eviction | **Fixed** — 1 h TTL with `_last_active` timestamps; eviction runs every 5 min |
 | `mcts.py:run_generation` / `run_projection` | Wrong return type annotations | **Fixed** — `tuple[list[...], dict]` |
 | `tracker.py:_trigram_vector` | `List[float]` annotation on a `dict` return | **Fixed** — `Dict[str, float]` |
 | `stt_provider.py` | `asyncio.get_event_loop().run_in_executor` under trio | **Fixed** — `anyio.to_thread.run_sync` |
-| `main.py:connect()` | TOCTOU race: two concurrent connections could double-init session | **Fixed** — `setdefault()` for atomic init |
-| `main.py:check_tracker_and_counter` | `projection_flush_count` / `addressed_titles` / `last_mcts_flush` mutated without lock across concurrent callers | **Fixed** — `_tracker_lock` (anyio.Lock) serialises all mutations |
-| `main.py:MCTS` | Stale `last_mcts_flush` retained after MCTS exception, permanently skipping that turn | **Fixed** — reset to previous value in `except` block |
-| `main.py:tracker guard` | `if not tracker` would misfire on future tracker falsy states | **Fixed** — explicit `if tracker is None` |
-| `main.py:phase_change` | Silence-flush and phase-change flush could both process the same buffer | **Fixed** — silence scope cancelled before phase-change reads buffer |
-| `main.py:post-interrupt tracker` | Agent questions recorded as `speaker="judge"` turns, skewing confidence | **Fixed** — use `tracker.state()` (non-mutating) after agent questions |
+| `runtime.py:connect()` | TOCTOU race: two concurrent connections could double-init session | **Fixed** — `setdefault()` for atomic init |
+| `runtime.py:check_tracker_and_counter` | `projection_flush_count` / `addressed_titles` / `last_mcts_flush` mutated without lock across concurrent callers | **Fixed** — `_tracker_lock` (anyio.Lock) serialises all mutations |
+| `runtime.py:MCTS` | Stale `last_mcts_flush` retained after MCTS exception, permanently skipping that turn | **Fixed** — reset to previous value in `except` block |
+| `runtime.py:tracker guard` | `if not tracker` would misfire on future tracker falsy states | **Fixed** — explicit `if tracker is None` |
+| `runtime.py:phase_change` | Silence-flush and phase-change flush could both process the same buffer | **Fixed** — silence scope cancelled before phase-change reads buffer |
+| `runtime.py:post-interrupt tracker` | Agent questions recorded as `speaker="judge"` turns, skewing confidence | **Fixed** — use `tracker.state()` (non-mutating) after agent questions |
 | `judge_engine.py` | Missing `extra_body` on all 5 LLM calls; model spent token budget in `<think>` blocks | **Fixed** — added to all calls + `<think>` stripping |

@@ -13,7 +13,7 @@
  * Styles: agenda.css (oa-feed-*)
  */
 
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { AgentQuestion } from '../multi-agent/types';
 import './agenda.css';
 
@@ -26,10 +26,12 @@ interface JudgeActivityFeedProps {
 export const JudgeActivityFeed = memo(function JudgeActivityFeed({ questions }: JudgeActivityFeedProps) {
   const [showAll, setShowAll] = useState(false);
 
-  const selected = questions.filter(q => q.selected !== false);
-  const sorted = [...selected].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
+  const sorted = useMemo(() => {
+    const selected = questions.filter(q => q.selected !== false);
+    return [...selected].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [questions]);
 
   if (sorted.length === 0) {
     return (
@@ -44,10 +46,10 @@ export const JudgeActivityFeed = memo(function JudgeActivityFeed({ questions }: 
 
   return (
     <div className="oa-feed">
-      {visible.map((q, i) => {
+      {visible.map((q) => {
         const isCounter = q.question_type === 'counter';
         return (
-          <div key={`${q.agent_id}-${i}`} className="oa-feed__item" style={{ borderLeftColor: q.color }}>
+          <div key={`${q.agent_id}-${q.timestamp}`} className="oa-feed__item" style={{ borderLeftColor: q.color }}>
             <div className="oa-feed__header">
               <span className="oa-feed__dot" style={{ background: q.color }} />
               <span className="oa-feed__name">{q.agent_name}</span>

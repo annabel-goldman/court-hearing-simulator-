@@ -6,11 +6,14 @@ Handles both default agents and custom user-created agents.
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from .models import Agent
+
+logger = logging.getLogger("court-simulator.multi_agent.storage")
 
 
 class AgentStorage:
@@ -83,7 +86,7 @@ class AgentStorage:
                         agents.append(agent)
                         seen_ids.add(agent_id)
             except Exception as e:
-                print(f"Error loading agent {file_path}: {e}")
+                logger.error("Error loading agent %s: %s", file_path, e)
         
         # Then, load any custom agents that don't have a default version
         for file_path in self.custom_path.glob("*.json"):
@@ -101,7 +104,7 @@ class AgentStorage:
                             agents.append(latest)
                             seen_ids.add(base_id)
             except Exception as e:
-                print(f"Error loading custom agent {file_path}: {e}")
+                logger.error("Error loading custom agent %s: %s", file_path, e)
         
         return agents
 
@@ -141,7 +144,7 @@ class AgentStorage:
                 with open(file_path, "r") as f:
                     versions.append(json.load(f))
             except Exception as e:
-                print(f"Error loading custom version {file_path}: {e}")
+                logger.error("Error loading custom version %s: %s", file_path, e)
         return versions
 
     # =========================================================================
@@ -166,11 +169,12 @@ class AgentStorage:
         agent_data["version"] = new_version
         agent_data["created_at"] = datetime.now().isoformat()
         
-        # Save to custom folder
+        # Save to custom folder (atomic write-then-rename)
         file_path = self.custom_path / f"{agent_id}_v{new_version}.json"
-        with open(file_path, "w") as f:
-            json.dump(agent_data, f, indent=2)
-        
+        tmp = file_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(agent_data, indent=2), encoding="utf-8")
+        tmp.replace(file_path)
+
         return Agent.from_dict(agent_data)
 
     def create_new_agent(self, agent_data: Dict) -> Agent:
@@ -195,10 +199,11 @@ class AgentStorage:
         agent_data["created_at"] = datetime.now().isoformat()
         agent_data["is_custom"] = True  # New agents are always custom (deletable)
         
-        # Save as first custom version
+        # Save as first custom version (atomic write-then-rename)
         file_path = self.custom_path / f"{agent_id}_v1.json"
-        with open(file_path, "w") as f:
-            json.dump(agent_data, f, indent=2)
+        tmp = file_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(agent_data, indent=2), encoding="utf-8")
+        tmp.replace(file_path)
         
         agent = Agent.from_dict(agent_data)
         agent.is_custom = True
@@ -228,7 +233,7 @@ class AgentStorage:
                 file_path.unlink()
                 deleted_any = True
             except Exception as e:
-                print(f"Error deleting {file_path}: {e}")
+                logger.error("Error deleting %s: %s", file_path, e)
         
         if not deleted_any:
             raise ValueError(f"Agent '{agent_id}' not found")

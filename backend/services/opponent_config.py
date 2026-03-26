@@ -94,7 +94,7 @@ def load_config() -> OpponentConfig:
 def save_config(config: OpponentConfig) -> None:
     """Atomic write-then-rename so readers never see a partial file."""
     _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _CONFIG_PATH.with_suffix(".tmp")
+    tmp = _CONFIG_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
     tmp.replace(_CONFIG_PATH)
     logger.info("[OpponentConfig] saved to %s", _CONFIG_PATH)
