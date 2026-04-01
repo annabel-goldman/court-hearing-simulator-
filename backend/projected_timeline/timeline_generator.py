@@ -18,10 +18,11 @@ analogous to SCOPE's MCTS exploring multiple conversation paths in semantic
 space without running expensive full simulations.
 """
 
-import asyncio
 import json
 import logging
 import re
+
+import anyio
 
 from .models import (
     TopicPredictionRequest,
@@ -448,60 +449,38 @@ async def generate_topic_sets(
 
     agenda_client, agenda_model = _get_agenda_client()
 
-    tasks: dict[asyncio.Task, tuple[int, dict]] = {}
-    for i, lens_def in enumerate(selected_lenses, start=1):
-        task = asyncio.create_task(
-            _generate_agenda(
-                client=agenda_client,
-                model=agenda_model,
-                prediction_id=i,
-                lens_def=lens_def,
-                case_summary=case_summary,
-                key_issues=key_issues,
-                appellant=request.appellant_brief,
-                appellee=request.appellee_brief,
-                proceeding_type=request.proceeding_type,
-            )
+    per_lens: list[tuple[dict, TopicPrediction] | None] = [None] * num
+
+    async def _run_lens(pred_id: int, lens_def: dict) -> None:
+        """Generate one lens agenda and write directly to per_lens by index."""
+        agenda = await _generate_agenda(
+            client=agenda_client,
+            model=agenda_model,
+            prediction_id=pred_id,
+            lens_def=lens_def,
+            case_summary=case_summary,
+            key_issues=key_issues,
+            appellant=request.appellant_brief,
+            appellee=request.appellee_brief,
+            proceeding_type=request.proceeding_type,
         )
-        tasks[task] = (i, lens_def)
+        per_lens[pred_id - 1] = (lens_def, agenda)
+        _emit("agenda", {
+            "prediction_id": pred_id,
+            "lens": lens_def["lens"],
+            "rationale": agenda.rationale,
+            "topics": [t.model_dump() for t in agenda.topics],
+        })
 
-    per_lens: list[tuple[dict, TopicPrediction]] = [None] * num  # type: ignore[list-item]
-    for coro in asyncio.as_completed(tasks.keys()):
-        agenda = await coro
-        # Figure out which task just completed
-        finished_task = None
-        for t in tasks:
-            if t.done() and not getattr(t, "_streamed", False):
-                try:
-                    if t.result() is agenda:
-                        finished_task = t
-                        break
-                except Exception:
-                    pass
-        if finished_task is None:
-            # Fallback: find any unstreamed finished task
-            for t in tasks:
-                if t.done() and not getattr(t, "_streamed", False):
-                    finished_task = t
-                    break
-        if finished_task is not None:
-            setattr(finished_task, "_streamed", True)
-            pred_id, lens_def = tasks[finished_task]
-            per_lens[pred_id - 1] = (lens_def, agenda)
-            _emit("agenda", {
-                "prediction_id": pred_id,
-                "lens": lens_def["lens"],
-                "rationale": agenda.rationale,
-                "topics": [t.model_dump() for t in agenda.topics],
-            })
-        else:
-            logger.warning("Could not match agenda to task")
+    async with anyio.create_task_group() as lens_tg:
+        for i, lens_def in enumerate(selected_lenses, start=1):
+            lens_tg.start_soon(_run_lens, i, lens_def)
 
-    # Safety: fill any None slots (shouldn't happen)
-    per_lens = [(ld, ag) for ld, ag in per_lens if ld is not None]  # type: ignore[misc]
+    # Safety: filter out any None slots (shouldn't happen if all tasks succeed)
+    per_lens_clean = [(ld, ag) for ld, ag in per_lens if ld is not None]  # type: ignore[misc]
 
     if not use_mcts:
-        predictions = [ag for _, ag in per_lens]
+        predictions = [ag for _, ag in per_lens_clean]
         return PredictedTopicSets(
             case_summary=case_summary,
             key_legal_issues=key_issues,
@@ -517,7 +496,7 @@ async def generate_topic_sets(
     # expand deeper as the student progresses.
     _emit("status", {"phase": "mcts", "detail": "Running sparse MCTS search on topic pool…"})
     topic_pool: list[dict] = []
-    for lens_def, agenda in per_lens:
+    for lens_def, agenda in per_lens_clean:
         if agenda.rationale == "Parse error.":
             logger.warning("Skipping lens %s — parse error", lens_def["lens"])
             continue
@@ -530,7 +509,7 @@ async def generate_topic_sets(
                 "_rationale":  agenda.rationale,
             })
 
-    logger.info("Topic pool: %d topics from %d lenses", len(topic_pool), len(per_lens))
+    logger.info("Topic pool: %d topics from %d lenses", len(topic_pool), len(per_lens_clean))
 
     # ── Refinement: map Phase 1 priority scores → Phase 2 topics ──────────
     if priority_topics and topic_pool:
@@ -570,7 +549,7 @@ async def generate_topic_sets(
                 dominant_lens = max(lens_counts, key=lens_counts.get, default="")
 
                 rationale = next(
-                    (ag.rationale for ld, ag in per_lens if ld["lens"] == dominant_lens),
+                    (ag.rationale for ld, ag in per_lens_clean if ld["lens"] == dominant_lens),
                     "MCTS-generated trajectory",
                 )
 
@@ -596,7 +575,7 @@ async def generate_topic_sets(
 
     # Fall back to per-lens results if MCTS produced nothing
     if not predictions:
-        predictions = [ag for _, ag in per_lens]
+        predictions = [ag for _, ag in per_lens_clean]
 
     # Strip internal keys from the pool before including in the response
     serialisable_pool = [

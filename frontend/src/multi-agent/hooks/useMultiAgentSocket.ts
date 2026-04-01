@@ -43,6 +43,25 @@ export function useMultiAgentSocket({
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
+  // Store callbacks in refs so the WebSocket onmessage handler always sees
+  // the latest callbacks without needing to reconnect when they change.
+  const callbacksRef = useRef({
+    onTranscriptUpdate,
+    onAgentQuestion,
+    onPhaseUpdate,
+    onAgendaUpdate,
+    onArgumentScore,
+    onOpponentResponse,
+  });
+  callbacksRef.current = {
+    onTranscriptUpdate,
+    onAgentQuestion,
+    onPhaseUpdate,
+    onAgendaUpdate,
+    onArgumentScore,
+    onOpponentResponse,
+  };
+
   const connect = useCallback((): Promise<void> => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return Promise.resolve();
 
@@ -96,25 +115,26 @@ export function useMultiAgentSocket({
       ws.onmessage = (event) => {
       try {
         const message: MultiAgentSocketMessage = JSON.parse(event.data);
-        
+        const cbs = callbacksRef.current;
+
         switch (message.type) {
           case 'transcript_update':
-            onTranscriptUpdate?.(message.data.text as string);
+            cbs.onTranscriptUpdate?.(message.data.text as string);
             break;
           case 'agent_question':
-            onAgentQuestion?.(message.data as unknown as AgentQuestion);
+            cbs.onAgentQuestion?.(message.data as unknown as AgentQuestion);
             break;
           case 'phase_update':
-            onPhaseUpdate?.(message.data.phase as SimulationPhase);
+            cbs.onPhaseUpdate?.(message.data.phase as SimulationPhase);
             break;
           case 'agenda_update':
-            onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
+            cbs.onAgendaUpdate?.(message.data as unknown as AgendaUpdate);
             break;
           case 'argument_score':
-            onArgumentScore?.(message.data as unknown as ArgumentScore);
+            cbs.onArgumentScore?.(message.data as unknown as ArgumentScore);
             break;
           case 'opponent_response':
-            onOpponentResponse?.(message.data as unknown as OpponentResponse);
+            cbs.onOpponentResponse?.(message.data as unknown as OpponentResponse);
             break;
           case 'config_ack':
             console.log('[MultiAgentSocket] Config acknowledged:', message.data);
@@ -135,7 +155,7 @@ export function useMultiAgentSocket({
 
     wsRef.current = ws;
     });
-  }, [sessionId, onTranscriptUpdate, onAgentQuestion, onPhaseUpdate, onAgendaUpdate, onArgumentScore, onOpponentResponse]);
+  }, [sessionId]);
 
   const disconnect = useCallback(() => {
     wsRef.current?.close();

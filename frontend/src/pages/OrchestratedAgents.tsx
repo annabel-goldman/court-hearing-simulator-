@@ -70,6 +70,9 @@ function generateSessionId(): string {
   return crypto.randomUUID();
 }
 
+const AUDIO_MIME_MAP: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
+const OPPONENT_SPEAKER = { type: 'opponent' as const, name: 'Opposing Counsel', color: '#e67e22' };
+
 export default function OrchestratedAgents() {
   const [sessionId, setSessionId] = useState(() => generateSessionId());
   const [phase, setPhase] = useState<SimulationPhase>('SETUP');
@@ -288,8 +291,7 @@ export default function OrchestratedAgents() {
       enqueueAudio(
         () => new Promise<void>((resolve) => {
           const format = question.audio_format || 'mp3';
-          const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-          const mime = mimeMap[format] || 'audio/mpeg';
+          const mime = AUDIO_MIME_MAP[format] || 'audio/mpeg';
           const blob = new Blob(
             [Uint8Array.from(atob(question.audio!), c => c.charCodeAt(0))],
             { type: mime },
@@ -334,8 +336,7 @@ export default function OrchestratedAgents() {
       enqueueAudio(
         () => new Promise<void>((resolve) => {
           const format = response.audio_format || 'mp3';
-          const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-          const mime = mimeMap[format] || 'audio/mpeg';
+          const mime = AUDIO_MIME_MAP[format] || 'audio/mpeg';
           const blob = new Blob(
             [Uint8Array.from(atob(response.audio!), c => c.charCodeAt(0))],
             { type: mime },
@@ -347,7 +348,7 @@ export default function OrchestratedAgents() {
           audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
           audio.play().catch(() => resolve());
         }),
-        { type: 'opponent', name: 'Opposing Counsel', color: '#e67e22' },
+        OPPONENT_SPEAKER,
       );
     }
   }, [freezeCurrentSpeech, enqueueAudio]);
@@ -618,8 +619,7 @@ export default function OrchestratedAgents() {
         // Play TTS audio if available
         if (data.audio) {
           const audioFormat = data.format || 'opus';
-          const mimeMap: Record<string, string> = { opus: 'audio/ogg', mp3: 'audio/mpeg', wav: 'audio/wav' };
-          const mime = mimeMap[audioFormat] || 'audio/ogg';
+          const mime = AUDIO_MIME_MAP[audioFormat] || 'audio/ogg';
           const audioBlob = new Blob(
             [Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))],
             { type: mime },

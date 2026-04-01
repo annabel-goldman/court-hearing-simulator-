@@ -9,7 +9,7 @@
  * Most-recent entries appear first.
  */
 
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { OpponentResponse } from '../multi-agent/types';
 import './agenda.css';
 
@@ -49,17 +49,17 @@ export const OpponentFeed = memo(function OpponentFeed({ responses }: OpponentFe
     );
   }
 
-  const sorted = [...responses].reverse();
+  const sorted = useMemo(() => [...responses].reverse(), [responses]);
   const visible = showAll ? sorted : sorted.slice(0, RECENT_COUNT);
   const hiddenCount = sorted.length - RECENT_COUNT;
 
   return (
     <div className="oa-feed">
-      {visible.map((resp, i) => {
+      {visible.map((resp) => {
         const typeInfo = TYPE_LABELS[resp.response_type] || TYPE_LABELS.rebuttal;
         return (
           <div
-            key={i}
+            key={`${resp.timestamp}-${resp.response_type}`}
             className="oa-feed__item"
             style={{ borderLeftColor: typeInfo.color }}
           >

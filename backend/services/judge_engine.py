@@ -4,10 +4,13 @@ Scores advocate arguments using configurable reward dimensions.
 """
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+logger = logging.getLogger("court-simulator.judge_engine")
 
 _judge_cfg_cache: dict = {}
 _JUDGE_CFG_TTL = 30  # seconds
@@ -152,5 +155,5 @@ class JudgeEngine:
             return score
 
         except Exception as e:
-            print(f"[JudgeEngine] score_argument error: {e}")
+            logger.error("[JudgeEngine] score_argument error: %s", e)
             return None

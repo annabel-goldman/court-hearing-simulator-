@@ -121,9 +121,9 @@ export function QuestionFeed({
         <div className="ma-round ma-round--current">
           <div className="ma-round__label">Current evaluation</div>
           <div className="ma-round__questions">
-            {getAgentCardsForRound(currentRound, agents).map((q, i) => (
+            {getAgentCardsForRound(currentRound, agents).map((q) => (
               <QuestionItem
-                key={`${q.agent_id}-${i}`}
+                key={`${q.agent_id}-${q.timestamp}`}
                 question={q}
                 agentColor={agents?.find(a => a.id === q.agent_id)?.color}
               />
@@ -162,9 +162,9 @@ function RoundCard({ round, agents }: { round: Round; agents?: Agent[] }) {
 
       {expanded && (
         <div className="ma-round__questions">
-          {getAgentCardsForRound(round, agents).map((q, i) => (
+          {getAgentCardsForRound(round, agents).map((q) => (
             <QuestionItem
-              key={`${q.agent_id}-${i}`}
+              key={`${q.agent_id}-${q.timestamp}`}
               question={q}
               agentColor={agents?.find(a => a.id === q.agent_id)?.color}
             />

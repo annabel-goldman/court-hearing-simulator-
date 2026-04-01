@@ -46,6 +46,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 import uuid
 from typing import Dict, List, Optional, Tuple
@@ -199,6 +200,7 @@ def _assess_quality_heuristic(utterance: str, topic_title: str) -> float:
 
 _embed_model = None
 _USE_SBERT   = None   # tri-state: None = not yet checked, True/False = resolved
+_embed_lock  = threading.Lock()
 
 
 def _resolve_embed_backend() -> bool:
@@ -219,17 +221,32 @@ def _resolve_embed_backend() -> bool:
 
 
 def _get_embed_model():
-    global _embed_model
-    if _embed_model is None and _resolve_embed_backend():
-        from sentence_transformers import SentenceTransformer
-        # local_files_only avoids HuggingFace Hub network calls on every load
-        try:
-            _embed_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
-            logger.info("Loaded sentence-transformers embedding model (all-MiniLM-L6-v2) [local cache]")
-        except Exception:
-            # First run — model not cached yet, download it
-            _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-            logger.info("Downloaded & loaded sentence-transformers embedding model (all-MiniLM-L6-v2)")
+    global _embed_model, _USE_SBERT
+    if _embed_model is not None:
+        return _embed_model
+    if _USE_SBERT is False:
+        return None
+    with _embed_lock:
+        # Double-check after acquiring the lock
+        if _embed_model is not None:
+            return _embed_model
+        if _USE_SBERT is False:
+            return None
+        if _resolve_embed_backend():
+            from sentence_transformers import SentenceTransformer
+            try:
+                _embed_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+                logger.info("Loaded sentence-transformers embedding model (all-MiniLM-L6-v2) [local cache]")
+            except Exception:
+                try:
+                    _embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+                    logger.info("Downloaded & loaded sentence-transformers embedding model (all-MiniLM-L6-v2)")
+                except Exception:
+                    logger.error(
+                        "Failed to load sentence-transformers model; falling back to TF-IDF trigrams permanently"
+                    )
+                    _USE_SBERT = False
+                    return None
     return _embed_model
 
 

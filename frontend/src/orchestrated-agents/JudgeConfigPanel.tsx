@@ -9,7 +9,7 @@
  * All state is self-managed; the panel owns its own API calls.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Button } from '../multi-agent/components/ui/Button';
 import { Alert } from '../multi-agent/components/ui/Alert';
 import {
@@ -79,9 +79,10 @@ export function JudgeConfigPanel() {
 
   // ── Save ──────────────────────────────────────────────────────────────────
 
-  const weightSum = config
-    ? config.reward_dimensions.reduce((s, d) => s + d.weight, 0)
-    : 1.0;
+  const weightSum = useMemo(
+    () => config ? config.reward_dimensions.reduce((s, d) => s + d.weight, 0) : 1.0,
+    [config],
+  );
   const weightOk = Math.abs(weightSum - 1.0) <= 0.01;
 
   const handleSave = async () => {

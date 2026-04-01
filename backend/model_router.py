@@ -125,11 +125,12 @@ def _is_url_reachable(base_url: str) -> bool:
 async def _probe_url(base_url: str) -> bool:
     """Async HTTP probe of a single base URL.  Non-blocking."""
     check_url = base_url.rstrip("/").removesuffix("/v1") + "/v1/models"
+    api_key = os.getenv("OPENAI_API_KEY", "local")
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
             r = await client.get(
                 check_url,
-                headers={"Authorization": "Bearer local"},
+                headers={"Authorization": f"Bearer {api_key}"},
             )
             return r.status_code < 500
     except Exception:
@@ -329,13 +330,24 @@ def get_task_client(task: str):
 TASKS_WITH_THINKING_ENABLED: frozenset[str] = frozenset()
 
 
+def _is_local_endpoint(tier: ModelTier) -> bool:
+    """Return True if the tier resolves to a local (localhost) server."""
+    ep = _resolve_effective_endpoint(tier)
+    return "localhost" in ep.base_url or "127.0.0.1" in ep.base_url
+
+
 def local_extra_body(tier: ModelTier, *, allow_thinking: bool = False) -> dict:
     """Return the extra_body dict for thinking-mode control.
+
+    Only applies ``chat_template_kwargs`` to local llama-server endpoints
+    (Qwen3/gemma models that support thinking mode).  Cloud APIs (OpenAI,
+    Groq, OpenRouter) receive an empty dict — they don't understand this
+    parameter and some reject unknown fields.
 
     When allow_thinking is True: returns ``{}`` (model may use thinking).
     Otherwise: ``{"chat_template_kwargs": {"enable_thinking": False}}``.
     """
-    if allow_thinking:
+    if allow_thinking or not _is_local_endpoint(tier):
         return {}
     return {"chat_template_kwargs": {"enable_thinking": False}}
 
