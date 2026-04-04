@@ -30,6 +30,7 @@ export interface SessionConfig {
   judicialSummary?: string
   useMultiAgentJudge?: boolean
   sessionDurationSeconds?: number
+  enabledJudgeAgentIds?: string[]
   judgeAvatarDifficulty?: JudgeAvatarDifficulty
   userPartyRole?: 'appellant' | 'respondent'
   judgeDisposition?: {

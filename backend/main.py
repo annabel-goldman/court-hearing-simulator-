@@ -60,7 +60,12 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Court Simulator API", lifespan=lifespan)
 
-_cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+_cors_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
 if os.getenv("CORS_ORIGINS"):
     _cors_origins.extend(o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip())
 

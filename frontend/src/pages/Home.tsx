@@ -4,7 +4,9 @@ import type { JudgeAvatarDifficulty, SessionAgendaItem } from '../3d-rendering/t
 import { preloadCourtroomGlbAssets } from '../3d-rendering/preloadCourtroomGlbs'
 import { getAssetUrl } from '../config/assetUrls'
 import { extractPdfText } from '../features/pdf/utils/extractPdfText'
+import { loadMultiAgentProfiles } from '../features/orchestrated/services/multiAgentService'
 import { requestProjectedTimelineStream } from '../features/orchestrated/services/timelineService'
+import type { Agent } from '../multi-agent/types'
 
 interface UploadedFile {
   name: string
@@ -12,15 +14,7 @@ interface UploadedFile {
 }
 
 type HomeStage = 'landing' | 'desk'
-type LandingPhase = 'intro' | 'welcome'
 type IntakePhase = 'idle' | 'launching' | 'analyzing'
-type UserPartyRole = 'appellant' | 'respondent'
-type JudgeQuestionTypeId =
-  | 'clarification'
-  | 'hypothetical'
-  | 'precedent'
-  | 'statutory'
-  | 'devils_advocate'
 
 const PREPARING_MESSAGE = 'Preparing your session…'
 
@@ -35,63 +29,31 @@ const LANDING_INTRO_BACKGROUND_SRC = getAssetUrl('Background.jpg')
 const SETTINGS_PULSE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000
 const SETTINGS_PULSE_LAST_SEEN_KEY = 'homeSettingsPulseLastSeenAt'
 const SETTINGS_PULSE_SESSION_KEY = 'homeSettingsPulseShownThisSession'
+const DEFAULT_USER_PARTY_ROLE = 'appellant'
+const DEFAULT_JUDGE_AVATAR_DIFFICULTY: JudgeAvatarDifficulty = 'medium'
+const LANDING_TO_DESK_TRANSITION_MS = 760
+const DESK_ENTER_TRANSITION_MS = 420
 
 const SESSION_LENGTH_OPTIONS = [60, 120, 180, 300, 600, 900] as const
-const JUDGE_DIFFICULTY_OPTIONS: JudgeAvatarDifficulty[] = ['easy', 'medium', 'hard']
-const JUDGE_DIFFICULTY_LABELS: Record<JudgeAvatarDifficulty, string> = {
-  easy: 'Easy',
-  medium: 'Medium',
-  hard: 'Hard',
-}
-const INTERRUPTION_LEVEL_BY_DIFFICULTY: Record<JudgeAvatarDifficulty, 'easy' | 'difficult' | 'hard'> = {
-  easy: 'easy',
-  medium: 'difficult',
-  hard: 'hard',
-}
-const JUDGE_QUESTION_OPTIONS: Array<{
-  id: JudgeQuestionTypeId
-  label: string
-  description: string
-}> = [
-  {
-    id: 'clarification',
-    label: 'Clarification',
-    description: 'Judge asks focused follow-ups to tighten your argument.',
-  },
-  {
-    id: 'hypothetical',
-    label: 'Hypotheticals',
-    description: 'Judge tests your rule with edge-case fact patterns.',
-  },
-  {
-    id: 'precedent',
-    label: 'Precedent',
-    description: 'Judge probes how prior cases control this dispute.',
-  },
-  {
-    id: 'statutory',
-    label: 'Statutory Interpretation',
-    description: 'Judge asks text, structure, and purpose-based questions.',
-  },
-  {
-    id: 'devils_advocate',
-    label: "Devil's Advocate",
-    description: 'Judge pushes the strongest version of the other side.',
-  },
-]
+const TEAM_MEMBERS = [
+  'Annabel Goldman',
+  'Sophia Pi',
+  'Fernanda Carvalho',
+  'Teni Aina',
+  'Johnalbert Garnica',
+] as const
 
 export default function Home() {
   const navigate = useNavigate()
   const location = useLocation()
 
   const [stage, setStage] = useState<HomeStage>('landing')
-  const [landingPhase, setLandingPhase] = useState<LandingPhase>('intro')
   const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle')
   const [loadingStatus, setLoadingStatus] = useState('')
-  const [landingActivated, setLandingActivated] = useState(false)
-  const [showLandingButton, setShowLandingButton] = useState(false)
   const [volumeLevel, setVolumeLevel] = useState(0.72)
   const [volumePopoverOpen, setVolumePopoverOpen] = useState(false)
+  const [landingExitActive, setLandingExitActive] = useState(false)
+  const [deskEnterActive, setDeskEnterActive] = useState(false)
 
   const [fileA, setFileA] = useState<UploadedFile | null>(null)
   const [fileB, setFileB] = useState<UploadedFile | null>(null)
@@ -104,13 +66,10 @@ export default function Home() {
   const [settingsPulseActive, setSettingsPulseActive] = useState(false)
   const [error, setError] = useState('')
   const [sessionDuration, setSessionDuration] = useState(180)
-  const [userPartyRole, setUserPartyRole] = useState<UserPartyRole>('appellant')
-  const [judgeAvatarDifficulty, setJudgeAvatarDifficulty] = useState<JudgeAvatarDifficulty>('medium')
-  const [enabledQuestionTypes, setEnabledQuestionTypes] = useState<JudgeQuestionTypeId[]>([
-    'clarification',
-    'hypothetical',
-    'precedent',
-  ])
+  const [judgeAgents, setJudgeAgents] = useState<Agent[]>([])
+  const [judgeAgentsLoading, setJudgeAgentsLoading] = useState(false)
+  const [judgeAgentsLoadError, setJudgeAgentsLoadError] = useState('')
+  const [enabledJudgeAgentIds, setEnabledJudgeAgentIds] = useState<string[]>([])
 
   const landingIntroBackgroundStyle = {
     backgroundImage: `url(${LANDING_INTRO_BACKGROUND_SRC})`,
@@ -127,15 +86,16 @@ export default function Home() {
     gainNode: GainNode
     pulseIntervalId: number
   } | null>(null)
+  const landingExitTimerRef = useRef<number | null>(null)
+  const deskEnterTimerRef = useRef<number | null>(null)
   const intakeLocked = intakePhase !== 'idle'
 
   useEffect(() => {
     const state = location.state as { returnToWelcome?: boolean } | null
     if (state?.returnToWelcome) {
-      setStage('landing')
-      setLandingPhase('welcome')
-      setLandingActivated(true)
-      setShowLandingButton(true)
+      setLandingExitActive(false)
+      setDeskEnterActive(false)
+      setStage('desk')
     }
   }, [location.state])
 
@@ -189,42 +149,6 @@ export default function Home() {
     oscillator.stop(startTime + duration)
   }
 
-  const createNoiseBurst = (
-    ctx: AudioContext,
-    startTime: number,
-    duration: number,
-    gainValue: number,
-    centerFrequency = 200,
-    qValue = 1
-  ) => {
-    if (ctx.state === 'closed') return
-    const frameCount = Math.floor(ctx.sampleRate * duration)
-    const buffer = ctx.createBuffer(1, frameCount, ctx.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let i = 0; i < frameCount; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / frameCount)
-    }
-
-    const source = ctx.createBufferSource()
-    source.buffer = buffer
-
-    const filter = ctx.createBiquadFilter()
-    filter.type = 'bandpass'
-    filter.frequency.setValueAtTime(centerFrequency, startTime)
-    filter.Q.setValueAtTime(qValue, startTime)
-
-    const gain = ctx.createGain()
-    gain.gain.setValueAtTime(0.0001, startTime)
-    gain.gain.exponentialRampToValueAtTime(gainValue, startTime + 0.01)
-    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration)
-
-    source.connect(filter)
-    filter.connect(gain)
-    gain.connect(getOutputGainNode(ctx))
-    source.start(startTime)
-    source.stop(startTime + duration)
-  }
-
   const unlockAudio = async () => {
     const ctx = getAudioContext()
     if (!ctx) return null
@@ -237,21 +161,6 @@ export default function Home() {
     } catch {
       return null
     }
-  }
-
-  const playStampSlamSound = (weight: 'heavy' | 'light') => {
-    if (!audioUnlockedRef.current) return
-    const ctx = getAudioContext()
-    if (!ctx || ctx.state === 'closed') return
-
-    const now = ctx.currentTime + 0.004
-    const lowGain = weight === 'heavy' ? 0.45 : 0.28
-    const crackGain = weight === 'heavy' ? 0.24 : 0.15
-
-    createTone(ctx, now, 0.2, 208, 60, 'square', lowGain, 0.0001)
-    createTone(ctx, now + 0.01, 0.14, 128, 52, 'triangle', lowGain * 0.68, 0.0001)
-    createNoiseBurst(ctx, now, 0.11, crackGain, 220, 1.2)
-    createNoiseBurst(ctx, now + 0.003, 0.08, crackGain * 0.9, 1500, 2.1)
   }
 
   const playUploadSound = () => {
@@ -302,61 +211,6 @@ export default function Home() {
     createTone(ctx, now + 0.03, 0.42, 350, 130, 'triangle', 0.06, 0.0001)
   }
 
-  const startBackgroundMusic = () => {
-    if (!audioUnlockedRef.current) return
-    if (backgroundMusicRef.current) return
-
-    const ctx = getAudioContext()
-    if (!ctx || ctx.state === 'closed') return
-
-    const now = ctx.currentTime
-    const masterGain = ctx.createGain()
-    masterGain.gain.setValueAtTime(0.0001, now)
-    masterGain.gain.exponentialRampToValueAtTime(0.035, now + 1.3)
-    masterGain.connect(getOutputGainNode(ctx))
-
-    const padFilter = ctx.createBiquadFilter()
-    padFilter.type = 'lowpass'
-    padFilter.frequency.setValueAtTime(680, now)
-    padFilter.Q.setValueAtTime(0.5, now)
-    padFilter.connect(masterGain)
-
-    const padOne = ctx.createOscillator()
-    padOne.type = 'triangle'
-    padOne.frequency.setValueAtTime(82.41, now)
-
-    const padTwo = ctx.createOscillator()
-    padTwo.type = 'sine'
-    padTwo.frequency.setValueAtTime(123.47, now)
-
-    const padThree = ctx.createOscillator()
-    padThree.type = 'triangle'
-    padThree.frequency.setValueAtTime(164.81, now)
-
-    padOne.connect(padFilter)
-    padTwo.connect(padFilter)
-    padThree.connect(padFilter)
-    padOne.start(now)
-    padTwo.start(now)
-    padThree.start(now)
-
-    let pulseIndex = 0
-    const pulseNotes = [220, 246.94, 261.63, 293.66]
-    const pulseIntervalId = window.setInterval(() => {
-      if (!audioUnlockedRef.current || !audioContextRef.current || audioContextRef.current.state === 'closed') return
-      const t = audioContextRef.current.currentTime + 0.02
-      const frequency = pulseNotes[pulseIndex % pulseNotes.length]
-      createTone(audioContextRef.current, t, 0.42, frequency, frequency * 0.985, 'sine', 0.03, 0.0001)
-      pulseIndex += 1
-    }, 1200)
-
-    backgroundMusicRef.current = {
-      oscillators: [padOne, padTwo, padThree],
-      gainNode: masterGain,
-      pulseIntervalId,
-    }
-  }
-
   const stopBackgroundMusic = () => {
     const music = backgroundMusicRef.current
     const ctx = audioContextRef.current
@@ -383,25 +237,6 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (stage !== 'landing' || landingPhase !== 'welcome' || !landingActivated) return
-
-    const buttonRevealDelayMs = 1600
-    setShowLandingButton(false)
-    const timer = window.setTimeout(() => {
-      setShowLandingButton(true)
-      playStampSlamSound('light')
-    }, buttonRevealDelayMs)
-    const stampOneTimer = window.setTimeout(() => {
-      playStampSlamSound('heavy')
-    }, 520)
-
-    return () => {
-      window.clearTimeout(timer)
-      window.clearTimeout(stampOneTimer)
-    }
-  }, [stage, landingPhase, landingActivated])
-
-  useEffect(() => {
     const unlockFromInteraction = () => {
       void unlockAudio()
     }
@@ -419,6 +254,12 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
+      if (landingExitTimerRef.current !== null) {
+        window.clearTimeout(landingExitTimerRef.current)
+      }
+      if (deskEnterTimerRef.current !== null) {
+        window.clearTimeout(deskEnterTimerRef.current)
+      }
       stopBackgroundMusic()
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         void audioContextRef.current.close()
@@ -494,6 +335,43 @@ export default function Home() {
     }
   }, [stage])
 
+  useEffect(() => {
+    if (stage !== 'desk') return
+    if (judgeAgents.length > 0 || judgeAgentsLoadError) return
+
+    let isCancelled = false
+    setJudgeAgentsLoading(true)
+    setJudgeAgentsLoadError('')
+
+    loadMultiAgentProfiles()
+      .then((agents) => {
+        if (isCancelled) return
+        setJudgeAgents(agents)
+        setEnabledJudgeAgentIds((current) => {
+          if (current.length === 0) {
+            return agents.map((agent) => agent.id)
+          }
+          const availableIds = new Set(agents.map((agent) => agent.id))
+          return current.filter((id) => availableIds.has(id))
+        })
+      })
+      .catch((loadError) => {
+        if (isCancelled) return
+        console.error('[Home] Failed to load judge agents:', loadError)
+        setJudgeAgents([])
+        setJudgeAgentsLoadError('Unable to load judge question types right now.')
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setJudgeAgentsLoading(false)
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [stage, judgeAgents.length, judgeAgentsLoadError])
+
   const handleFileUpload = async (
     file: File,
     setFile: (f: UploadedFile | null) => void,
@@ -561,12 +439,9 @@ export default function Home() {
         ],
         useMultiAgentJudge: true,
         sessionDurationSeconds: sessionDuration,
-        judgeAvatarDifficulty,
-        userPartyRole,
-        judgeDisposition: {
-          interruptionLevel: INTERRUPTION_LEVEL_BY_DIFFICULTY[judgeAvatarDifficulty],
-          questionTypes: enabledQuestionTypes,
-        },
+        enabledJudgeAgentIds,
+        judgeAvatarDifficulty: DEFAULT_JUDGE_AVATAR_DIFFICULTY,
+        userPartyRole: DEFAULT_USER_PARTY_ROLE,
       }
 
     try {
@@ -699,7 +574,7 @@ export default function Home() {
       })
 
       stopBackgroundMusic()
-      localStorage.setItem('judgeAvatarDifficulty', judgeAvatarDifficulty)
+      localStorage.setItem('judgeAvatarDifficulty', DEFAULT_JUDGE_AVATAR_DIFFICULTY)
       sessionStorage.setItem('courtSession', JSON.stringify(sessionConfig))
       navigate('/courtroom')
     } catch (err) {
@@ -734,16 +609,6 @@ export default function Home() {
 
   const goBackInFlow = () => {
     if (stage === 'landing') {
-      if (landingPhase === 'welcome') {
-        setInfoModalOpen(false)
-        setVolumePopoverOpen(false)
-        setLandingPhase('intro')
-        setLandingActivated(false)
-        setShowLandingButton(false)
-        stopBackgroundMusic()
-        return
-      }
-
       navigate(-1)
       return
     }
@@ -754,19 +619,15 @@ export default function Home() {
     setSettingsModalOpen(false)
     setVolumePopoverOpen(false)
     setStage('landing')
-    setLandingPhase('welcome')
-    setLandingActivated(true)
-    setShowLandingButton(true)
-    startBackgroundMusic()
+    stopBackgroundMusic()
   }
 
-  const toggleQuestionType = (typeId: JudgeQuestionTypeId) => {
-    setEnabledQuestionTypes((current) => {
-      if (current.includes(typeId)) {
-        return current.filter((id) => id !== typeId)
-      }
-      return [...current, typeId]
-    })
+  const toggleJudgeAgent = (agentId: string) => {
+    setEnabledJudgeAgentIds((current) => (
+      current.includes(agentId)
+        ? current.filter((id) => id !== agentId)
+        : [...current, agentId]
+    ))
   }
 
   const markSettingsPulseSeen = () => {
@@ -849,7 +710,7 @@ export default function Home() {
       onClick={() => setInfoModalOpen(false)}
     >
       <div
-        className="settings-modal-shell"
+        className="settings-modal-shell info-modal-shell"
         role="dialog"
         aria-modal="true"
         aria-label="Information"
@@ -869,57 +730,69 @@ export default function Home() {
           </div>
 
           <div className="settings-file-body info-file-body">
-            <div className="settings-ledger-row">
-              <p className="settings-ledger-copy">
-                <span className="settings-ledger-label">Flow</span>
-                <span className="settings-ledger-note">How this experience is organized</span>
-              </p>
-              <div className="info-ledger-detail">
-                <p>Step 1 is the courtroom intro, step 2 is the brief prompt, and step 3 is brief upload.</p>
-              </div>
-            </div>
+            <div className="info-sheet">
+              <section className="info-sheet__hero">
+                <p className="info-sheet__eyebrow">About The Bench</p>
+                <h2 className="info-sheet__title">
+                  Built to make moot court preparation more effective and more accessible.
+                </h2>
+                <p className="info-sheet__lede">
+                  The Bench was created by a team of engineers and law students to help law
+                  students prepare more effectively for moot court.
+                </p>
+              </section>
 
-            <div className="settings-ledger-row">
-              <p className="settings-ledger-copy">
-                <span className="settings-ledger-label">Click Through</span>
-                <span className="settings-ledger-note">How to move forward</span>
-              </p>
-              <div className="info-ledger-detail">
-                <p>Click through the intro flow to reach moot and start your session.</p>
-              </div>
-            </div>
+              <section className="info-sheet__section">
+                <p className="info-sheet__paragraph">
+                  Law school is designed to prepare students for litigation, but opportunities
+                  for meaningful courtroom practice are often limited. Moot court helps fill
+                  that gap by giving students a chance to develop oral advocacy skills in a
+                  simulated setting. However, traditional moot court preparation can be
+                  time-intensive and expensive, which can make regular practice difficult to
+                  access. We believe that more efficient simulation tools can expand
+                  opportunities for experiential learning.
+                </p>
+                <p className="info-sheet__paragraph">
+                  Our goal was to identify the most important learning outcomes students gain
+                  from moot court participation. To do this, we analyzed the types of
+                  questions judges most commonly ask, identified the core advocacy skills those
+                  questions are intended to assess, and translated them into specialized
+                  agents. By modeling these high-priority lines of questioning, The Bench is
+                  designed to target the skills that matter most in moot court preparation.
+                </p>
+              </section>
 
-            <div className="settings-ledger-row">
-              <p className="settings-ledger-copy">
-                <span className="settings-ledger-label">Settings</span>
-                <span className="settings-ledger-note">Customize your argument experience</span>
-              </p>
-              <div className="info-ledger-detail">
-                <p>On the brief upload page, use the settings button to choose different session settings.</p>
-              </div>
-            </div>
+              <section className="info-sheet__callout" aria-label="Settings information">
+                <span className="info-sheet__callout-label">Customize your session</span>
+                <p className="info-sheet__callout-copy">
+                  You can customize your experience in the Settings panel. There, you can
+                  choose which types of agents you want asking questions and adjust the length
+                  of your session.
+                </p>
+              </section>
 
-            <div className="settings-ledger-row">
-              <p className="settings-ledger-copy">
-                <span className="settings-ledger-label">Tip</span>
-                <span className="settings-ledger-note">For a smoother session</span>
-              </p>
-              <div className="info-ledger-detail">
-                <p>Use concise, complete briefs to improve summary quality and courtroom question relevance.</p>
-              </div>
-            </div>
+              <section className="info-sheet__team-section" aria-label="Team members">
+                <div className="info-sheet__team-heading">
+                  <p className="info-sheet__eyebrow info-sheet__eyebrow--compact">Our Team</p>
+                  <h3 className="info-sheet__team-title">
+                    The people behind the project
+                  </h3>
+                </div>
+                <div className="info-sheet__team-list" role="list">
+                  {TEAM_MEMBERS.map((member) => (
+                    <span key={member} className="info-sheet__team-pill" role="listitem">
+                      {member}
+                    </span>
+                  ))}
+                </div>
+              </section>
 
-            <div className="settings-ledger-row">
-              <p className="settings-ledger-copy">
-                <span className="settings-ledger-label">Project</span>
-                <span className="settings-ledger-note">Look inside the project flow</span>
-              </p>
-              <div className="info-ledger-detail">
-                <p>
-                  For a look inside the project, open{' '}
+              <section className="info-sheet__footer" aria-label="Project details">
+                <p className="info-sheet__footer-copy">
+                  For a look inside the project flow, open{' '}
                   <button
                     type="button"
-                    className="info-ledger-link"
+                    className="info-ledger-link info-sheet__footer-link"
                     onClick={() => {
                       setInfoModalOpen(false)
                       navigate('/orchestrated-agents')
@@ -929,7 +802,7 @@ export default function Home() {
                   </button>
                   .
                 </p>
-              </div>
+              </section>
             </div>
           </div>
         </section>
@@ -938,37 +811,38 @@ export default function Home() {
   ) : null
 
   const enterDeskStage = async () => {
+    if (stage === 'desk' || landingExitActive) return
     await unlockAudio()
     playBriefSendWhoosh()
     setVolumePopoverOpen(false)
-    setStage('desk')
+    setDeskEnterActive(true)
+    setLandingExitActive(true)
+
+    if (landingExitTimerRef.current !== null) {
+      window.clearTimeout(landingExitTimerRef.current)
+    }
+    landingExitTimerRef.current = window.setTimeout(() => {
+      stopBackgroundMusic()
+      setStage('desk')
+      setLandingExitActive(false)
+      landingExitTimerRef.current = null
+    }, LANDING_TO_DESK_TRANSITION_MS)
+
+    if (deskEnterTimerRef.current !== null) {
+      window.clearTimeout(deskEnterTimerRef.current)
+    }
+    deskEnterTimerRef.current = window.setTimeout(() => {
+      setDeskEnterActive(false)
+      deskEnterTimerRef.current = null
+    }, LANDING_TO_DESK_TRANSITION_MS + DESK_ENTER_TRANSITION_MS)
   }
 
-  const enterWelcomeStage = async () => {
-    if (landingPhase !== 'intro') return
-    await unlockAudio()
-    setVolumePopoverOpen(false)
-    startBackgroundMusic()
-    setLandingActivated(true)
-    setLandingPhase('welcome')
-  }
+  const shouldRenderLanding = stage === 'landing'
+  const shouldRenderDesk = stage === 'desk' || landingExitActive
 
-  if (stage === 'landing') {
-    return (
-      <div className="landing-stage">
+  const landingStage = shouldRenderLanding ? (
+    <div className={`landing-stage ${landingExitActive ? 'is-transitioning-to-desk transition-overlay' : ''}`}>
         <div className="landing-backdrop-grid" />
-        {landingPhase !== 'intro' && (
-          <button
-            type="button"
-            className="flow-back-btn"
-            onClick={goBackInFlow}
-            aria-label="Go back"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="flow-back-icon">
-              <path d="M14.5 5.5 8 12l6.5 6.5" />
-            </svg>
-          </button>
-        )}
         <div className="top-left-action-stack">
           <div className="top-left-action-row">
             <button
@@ -986,62 +860,40 @@ export default function Home() {
                 </text>
               </svg>
             </button>
-            {landingPhase === 'welcome' && (
-              volumeControl
-            )}
           </div>
         </div>
-        <div className={`landing-content ${landingPhase === 'intro' ? 'landing-single-intro' : ''}`}>
-          {landingPhase === 'intro' ? (
-            <>
-              <div className="landing-single-background" style={landingIntroBackgroundStyle} aria-hidden="true" />
-              <div className="landing-single-photo-overlay" aria-hidden="true" />
-              <div className="landing-single-start-wrap">
-                <button
-                  type="button"
-                  className="landing-single-start-btn"
-                  onClick={enterWelcomeStage}
-                >
-                  start
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <img
-                src={BENCH_LOGO_SRC}
-                alt="The Bench"
-                className={`landing-logo landing-logo-stamp ${landingActivated ? 'is-animated' : ''}`}
-                draggable={false}
-              />
-              <div className="landing-start-slot">
-                <button
-                  className={`landing-start-text ${showLandingButton ? 'is-visible' : ''}`}
-                  type="button"
-                  onClick={enterDeskStage}
-                  disabled={!showLandingButton}
-                  aria-hidden={!showLandingButton}
-                >
-                  upload your briefs
-                </button>
-              </div>
-            </>
-          )}
+        <div className="landing-content landing-single-intro">
+          <div className="landing-single-background" style={landingIntroBackgroundStyle} aria-hidden="true" />
+          <div className="landing-single-photo-overlay" aria-hidden="true" />
+          <div className="landing-intro-copy-stack">
+            <img
+              src={BENCH_LOGO_SRC}
+              alt="The Bench"
+              className="landing-intro-logo"
+              draggable={false}
+            />
+            <button
+              type="button"
+              className="landing-single-start-btn landing-intro-start-btn"
+              onClick={enterDeskStage}
+            >
+              prepare for moot court
+            </button>
+          </div>
         </div>
         {infoModal}
       </div>
-    )
-  }
+  ) : null
 
   const isLaunching = intakePhase === 'launching'
   const showLoading = intakePhase === 'analyzing'
   const loadingMessage = loadingStatus || PREPARING_MESSAGE
   const canEnter = Boolean(fileA && fileB) && !loadingA && !loadingB && !intakeLocked
 
-  return (
+  const deskStage = shouldRenderDesk ? (
     <div className="home home-professional desk-stage">
       <main className="home-main desk-main">
-        <div className="desk-surface">
+        <div className={`desk-surface ${deskEnterActive ? 'is-entering' : ''}`}>
           <button
             type="button"
             className="flow-back-btn"
@@ -1118,29 +970,6 @@ export default function Home() {
                   <div className="settings-file-body">
                     <div className="settings-ledger-row">
                       <p className="settings-ledger-copy">
-                        <span className="settings-ledger-label">Side</span>
-                        <span className="settings-ledger-note">Who you will argue for</span>
-                      </p>
-                      <div className="settings-ledger-options">
-                        <button
-                          type="button"
-                          className={`settings-ledger-option ${userPartyRole === 'appellant' ? 'is-selected' : ''}`}
-                          onClick={() => setUserPartyRole('appellant')}
-                        >
-                          Appellant
-                        </button>
-                        <button
-                          type="button"
-                          className={`settings-ledger-option ${userPartyRole === 'respondent' ? 'is-selected' : ''}`}
-                          onClick={() => setUserPartyRole('respondent')}
-                        >
-                          Respondent
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="settings-ledger-row">
-                      <p className="settings-ledger-copy">
                         <span className="settings-ledger-label">Session length</span>
                         <span className="settings-ledger-note">How long your oral argument runs</span>
                       </p>
@@ -1160,49 +989,46 @@ export default function Home() {
 
                     <div className="settings-ledger-row">
                       <p className="settings-ledger-copy">
-                        <span className="settings-ledger-label">Question style</span>
-                        <span className="settings-ledger-note">Pick any judicial question types</span>
+                        <span className="settings-ledger-label">Question types</span>
+                        <span className="settings-ledger-note">Choose which judges are allowed to question you</span>
                       </p>
                       <div className="settings-ledger-control-stack">
                         <div className="settings-ledger-options settings-ledger-options-question-style">
-                          {JUDGE_QUESTION_OPTIONS.map((option) => {
-                            const isSelected = enabledQuestionTypes.includes(option.id)
+                          {judgeAgents.map((agent) => {
+                            const isSelected = enabledJudgeAgentIds.includes(agent.id)
                             return (
                               <button
-                                key={option.id}
+                                key={agent.id}
                                 type="button"
                                 className={`settings-ledger-option settings-ledger-option-question-style ${isSelected ? 'is-selected' : ''}`}
-                                onClick={() => toggleQuestionType(option.id)}
+                                onClick={() => toggleJudgeAgent(agent.id)}
+                                title={agent.description}
                               >
-                                {option.label}
+                                {agent.name}
                               </button>
                             )
                           })}
                         </div>
-                        {enabledQuestionTypes.length === 0 && (
+                        {judgeAgentsLoading && (
+                          <p className="settings-ledger-note" role="status" aria-live="polite">
+                            Loading available judges…
+                          </p>
+                        )}
+                        {!judgeAgentsLoading && judgeAgentsLoadError && (
+                          <p className="settings-ledger-warning" role="status" aria-live="polite">
+                            {judgeAgentsLoadError}
+                          </p>
+                        )}
+                        {!judgeAgentsLoading && !judgeAgentsLoadError && judgeAgents.length === 0 && (
+                          <p className="settings-ledger-warning" role="status" aria-live="polite">
+                            No judge agents are currently available.
+                          </p>
+                        )}
+                        {!judgeAgentsLoading && judgeAgents.length > 0 && enabledJudgeAgentIds.length === 0 && (
                           <p className="settings-ledger-warning" role="status" aria-live="polite">
                             You've selected no judges; this means no questions will be asked during your session.
                           </p>
                         )}
-                      </div>
-                    </div>
-
-                    <div className="settings-ledger-row">
-                      <p className="settings-ledger-copy">
-                        <span className="settings-ledger-label">Judge difficulty</span>
-                        <span className="settings-ledger-note">Select the judge avatar used in 3D court</span>
-                      </p>
-                      <div className="settings-ledger-options">
-                        {JUDGE_DIFFICULTY_OPTIONS.map((level) => (
-                          <button
-                            key={level}
-                            type="button"
-                            className={`settings-ledger-option ${judgeAvatarDifficulty === level ? 'is-selected' : ''}`}
-                            onClick={() => setJudgeAvatarDifficulty(level)}
-                          >
-                            {JUDGE_DIFFICULTY_LABELS[level]}
-                          </button>
-                        ))}
                       </div>
                     </div>
                   </div>
@@ -1346,5 +1172,26 @@ export default function Home() {
         </div>
       </main>
     </div>
+  ) : null
+
+  if (landingExitActive) {
+    return (
+      <div className="home-transition-shell">
+        <div className="transition-underlay">
+          {deskStage}
+        </div>
+        {landingStage}
+      </div>
+    )
+  }
+
+  if (shouldRenderLanding) {
+    return landingStage
+  }
+
+  return (
+    <>
+      {deskStage}
+    </>
   )
 }

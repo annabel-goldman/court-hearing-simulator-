@@ -69,6 +69,8 @@ const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
 const JUDGE_DIFFICULTY_STORAGE_KEY = 'judgeAvatarDifficulty'
 const DEFAULT_ANIMATION_PULSE_MS = 2200
 const ONE_SHOT_ANIMATION_STATES = new Set<AvatarAnimationStateKey>(['clap', 'cheer', 'sitTransition', 'sitToStand'])
+const JUDGE_REACTION_CADENCE = [3, 4] as const
+const JUDGE_REACTION_SEQUENCE: Array<Extract<AvatarAnimationStateKey, 'clap' | 'cheer'>> = ['clap', 'cheer']
 const MALE_VOICE_HINTS = [
   'david', 'daniel', 'alex', 'fred', 'thomas', 'tom', 'james', 'arthur',
   'george', 'john', 'matthew', 'ryan', 'aaron', 'guy', 'male', 'man'
@@ -151,6 +153,10 @@ export default function CourtroomPage() {
   const hasFinalizedSessionRef = useRef(false)
   const animationOverrideRef = useRef<AnimationStateOverrideMap>({})
   const animationDebugTimersRef = useRef<number[]>([])
+  const judgeQuestionCountRef = useRef(0)
+  const nextJudgeReactionAtRef = useRef(JUDGE_REACTION_CADENCE[0])
+  const judgeReactionCadenceIndexRef = useRef(0)
+  const judgeReactionSequenceIndexRef = useRef(0)
 
   // Session ID
   const sessionId = useMemo(() => `session_${Date.now()}`, [])
@@ -166,6 +172,18 @@ export default function CourtroomPage() {
       return []
     }
   }, [])
+
+  const getConfiguredJudgeAgents = useCallback(
+    (agents: Agent[]): Agent[] => {
+      const enabledIds = sessionConfig?.enabledJudgeAgentIds
+      if (!enabledIds) {
+        return agents
+      }
+      const allowedIds = new Set(enabledIds)
+      return agents.filter((agent) => allowedIds.has(agent.id))
+    },
+    [sessionConfig?.enabledJudgeAgentIds]
+  )
 
   // ========== WEBSOCKET ==========
   const {
@@ -242,6 +260,13 @@ export default function CourtroomPage() {
     setAnimationStateOverrides({})
   }, [])
 
+  const resetJudgeReactionCadence = useCallback(() => {
+    judgeQuestionCountRef.current = 0
+    judgeReactionCadenceIndexRef.current = 0
+    judgeReactionSequenceIndexRef.current = 0
+    nextJudgeReactionAtRef.current = JUDGE_REACTION_CADENCE[0]
+  }, [])
+
   const handleAnimationStateFinished = useCallback(
     (role: AnimationDebugRole, state: AvatarAnimationStateKey) => {
       if (!ONE_SHOT_ANIMATION_STATES.has(state)) return
@@ -272,6 +297,20 @@ export default function CourtroomPage() {
     if (questionCutoffReachedRef.current) {
       console.log('[CourtroomPage] Ignoring judge interrupt after timer cutoff:', interrupt.question)
       return
+    }
+
+    judgeQuestionCountRef.current += 1
+    const shouldPlayReaction = judgeQuestionCountRef.current >= nextJudgeReactionAtRef.current
+    const reactionState = shouldPlayReaction
+      ? JUDGE_REACTION_SEQUENCE[judgeReactionSequenceIndexRef.current % JUDGE_REACTION_SEQUENCE.length]
+      : null
+
+    if (shouldPlayReaction && reactionState) {
+      setAnimationOverride('judge', reactionState)
+      judgeReactionSequenceIndexRef.current += 1
+      judgeReactionCadenceIndexRef.current =
+        (judgeReactionCadenceIndexRef.current + 1) % JUDGE_REACTION_CADENCE.length
+      nextJudgeReactionAtRef.current += JUDGE_REACTION_CADENCE[judgeReactionCadenceIndexRef.current]
     }
 
     const source = interrupt.source
@@ -416,7 +455,7 @@ export default function CourtroomPage() {
       const configureAndStart = async () => {
         if (!isConnected || !sessionConfig) return
 
-        const agents = await loadAgentsForOrchestrated()
+        const agents = getConfiguredJudgeAgents(await loadAgentsForOrchestrated())
         const briefSummary =
           sessionConfig.judicialSummary ??
           sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
@@ -460,6 +499,7 @@ export default function CourtroomPage() {
     startRecording,
     stopRecording,
     loadAgentsForOrchestrated,
+    getConfiguredJudgeAgents,
   ])
 
   // Re-configure on reconnect — connection may have dropped and recovered
@@ -473,7 +513,7 @@ export default function CourtroomPage() {
       sessionConfig
     ) {
       const reconfigure = async () => {
-        const agents = await loadAgentsForOrchestrated()
+        const agents = getConfiguredJudgeAgents(await loadAgentsForOrchestrated())
         const briefSummary =
           sessionConfig.judicialSummary ??
           sessionConfig.materials?.map((m) => m.text.slice(0, 500)).join('\n') ??
@@ -494,7 +534,7 @@ export default function CourtroomPage() {
       }
       reconfigure()
     }
-  }, [isConnected, simulationPhase, sessionConfig, configureOrchestrated, sendPhaseChange, loadAgentsForOrchestrated])
+  }, [isConnected, simulationPhase, sessionConfig, configureOrchestrated, sendPhaseChange, loadAgentsForOrchestrated, getConfiguredJudgeAgents])
 
   // ========== SESSION INITIALIZATION ==========
   useEffect(() => {
@@ -517,6 +557,7 @@ export default function CourtroomPage() {
       localStorage.setItem(JUDGE_DIFFICULTY_STORAGE_KEY, configuredDifficulty)
       setTimerSeconds(config.sessionDurationSeconds ?? DEMO_SESSION_DURATION_SECONDS)
       questionCutoffReachedRef.current = false
+      resetJudgeReactionCadence()
       
       const timeoutId = window.setTimeout(() => {
         console.log('[CourtroomPage] Starting ritual: ALL_RISE')
@@ -527,7 +568,7 @@ export default function CourtroomPage() {
     } catch (e) {
       console.error('[CourtroomPage] Failed to parse session:', e)
     }
-  }, [navigate])
+  }, [navigate, resetJudgeReactionCadence])
 
   // ========== TTS ==========
   const playRitualCue = useCallback(async (text: string): Promise<void> => {
@@ -572,6 +613,7 @@ export default function CourtroomPage() {
   const startProceeding = useCallback(() => {
     setSimulationPhase('PROCEEDING')
     questionCutoffReachedRef.current = false
+    resetJudgeReactionCadence()
     setTimeout(() => {
       const openingText = 'Counsel for the appellant, you may proceed when ready.'
       judgeQuestionActiveRef.current = false
@@ -583,7 +625,7 @@ export default function CourtroomPage() {
         setSpeakingRole(null)
       }, OPENING_STATEMENT_DURATION_MS)
     }, PROCEEDING_START_DELAY_MS)
-  }, [playRitualCue])
+  }, [playRitualCue, resetJudgeReactionCadence])
 
   // ========== AUTOMATIC RITUAL PHASES ==========
   useEffect(() => {

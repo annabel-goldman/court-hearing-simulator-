@@ -1,4 +1,4 @@
-import { apiDelete, apiFetch, apiGetJson, apiPostJson } from '../../../api/client'
+import { apiDelete, apiGetJson, apiPostJson } from '../../../api/client'
 import type { Agent } from '../../../multi-agent/types'
 
 interface AgentListResponse {
