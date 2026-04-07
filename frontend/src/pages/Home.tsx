@@ -37,6 +37,7 @@ const DESK_ENTER_TRANSITION_MS = 420
 const SESSION_LENGTH_OPTIONS = [60, 120, 180, 300, 600, 900] as const
 const TEAM_MEMBERS = [
   'Annabel Goldman',
+  'Aurora Shi',
   'Sophia Pi',
   'Fernanda Carvalho',
   'Teni Aina',
