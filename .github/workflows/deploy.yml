@@ -91,8 +91,14 @@ jobs:
             exit 1
           fi
 
+          if [[ "$RENDER_DEPLOY_HOOK_URL" == *\?* ]]; then
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK_URL}&ref=${TARGET_SHA}"
+          else
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK_URL}?ref=${TARGET_SHA}"
+          fi
+
           echo "Triggering Render backend deploy for commit $TARGET_SHA..."
-          curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}?ref=${TARGET_SHA}"
+          curl -fsS -X POST "$DEPLOY_URL"
           echo
           echo "Backend deploy triggered."
 
