@@ -17,13 +17,18 @@ from fastapi import WebSocket, WebSocketDisconnect
 from services.judge_engine import JudgeEngine
 from services.opponent_engine import OpponentEngine
 from services.tts_provider import get_tts_provider
-from services.stt_provider import get_stt_provider
+from services.stt_provider import get_stt_provider, get_stt_config_validation_error
 from services.opponent_config import load_config as load_opponent_config
 from multi_agent import multi_agent_service, Agent
 from projected_timeline.tracker import create_session
 from projected_timeline.mcts import run_projection, MCTSWeights
 from projected_timeline.models import PredictedTopicSets as TrackerTopicSets, HearingTurn as TrackerTurn
-from model_router import get_task_client, extract_content, task_extra_body
+from model_router import (
+    get_task_client,
+    extract_content,
+    task_extra_body,
+    get_llm_config_validation_error,
+)
 
 logger = logging.getLogger("court-simulator")
 
@@ -342,6 +347,20 @@ async def multi_agent_websocket(websocket: WebSocket, session_id: str):
     stt_provider = get_stt_provider()
     # Store provider in session so evict_stale can clean up Gladia sessions
     multi_agent_manager.session_data[session_id]['_stt_provider'] = stt_provider
+    stt_config_error = get_stt_config_validation_error()
+    if stt_config_error:
+        logger.error("[MultiAgent] STT config error for %s: %s", session_id, stt_config_error)
+        await multi_agent_manager.send_json(session_id, {
+            "type": "stt_error",
+            "data": {"message": stt_config_error},
+        })
+    llm_config_error = get_llm_config_validation_error()
+    if llm_config_error:
+        logger.error("[MultiAgent] LLM config error for %s: %s", session_id, llm_config_error)
+        await multi_agent_manager.send_json(session_id, {
+            "type": "error",
+            "data": {"message": llm_config_error},
+        })
 
     try:
         # Open a task group for the lifetime of this WebSocket connection.
@@ -628,6 +647,47 @@ async def generate_counter_argument(
     client, model = get_task_client("counter_argument")
     if not client:
         return ""
+
+    def _extract_spoken_counter(text: str) -> str:
+        """Strip visible chain-of-thought / draft scaffolding from counter text."""
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return ""
+
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            cleaned = "\n".join(lines[1:-1]).strip() if len(lines) > 2 else cleaned
+
+        # Prefer the last substantive question line when the model drafted options.
+        question_lines = []
+        prose_lines = []
+        for raw_line in cleaned.splitlines():
+            line = raw_line.strip().strip('"')
+            if not line:
+                continue
+            if line.startswith(("*", "-", "#")):
+                continue
+            if re.match(r"^\d+\.\s+", line):
+                continue
+            prose_lines.append(line)
+            if "?" in line and len(line) >= 20:
+                question_lines.append(line)
+
+        if question_lines:
+            return question_lines[-1]
+
+        if prose_lines:
+            merged = " ".join(prose_lines).strip()
+            # If the model produced multiple draft labels followed by prose,
+            # keep the last sentence-like span.
+            sentences = re.split(r"(?<=[.!?])\s+", merged)
+            substantive = [s.strip() for s in sentences if len(s.strip()) >= 20]
+            if substantive:
+                return substantive[-1]
+            return merged
+
+        return cleaned
+
     prompt = (
         f"You are {agent.name}. {agent.description}\n"
         f"The speaker just addressed the topic: \"{topic_title}\"\n"
@@ -635,7 +695,10 @@ async def generate_counter_argument(
         f"Their argument: \"{recent_utterance}\"\n\n"
         f"Case summary: {brief_summary}\n\n"
         "Provide a sharp 1-2 sentence counter-argument or probing follow-up "
-        "from your perspective. Be direct and specific to the topic."
+        "from your perspective. Be direct and specific to the topic.\n"
+        "Return ONLY the spoken counter-argument or question itself.\n"
+        "Do not include analysis, bullet points, numbered lists, draft options, "
+        "or reasoning notes."
     )
     resp = await client.chat.completions.create(
         model=model,
@@ -644,7 +707,7 @@ async def generate_counter_argument(
         max_tokens=500,
         extra_body=task_extra_body("counter_argument"),
     )
-    return extract_content(resp)
+    return _extract_spoken_counter(extract_content(resp))
 
 
 def _format_agenda_confidences(state) -> list:
@@ -1508,6 +1571,7 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                     "question":     question,
                     "timestamp":    now_iso,
                     "selected":     is_winner,
+                    "question_type": "question",
                     "audio":        audio_b64 if is_winner else "",
                     "audio_format": audio_format if is_winner else "",
                     "path_topic":   path_topic,
@@ -1527,6 +1591,7 @@ async def check_multi_agent_questions(session_id: str, tracker_state=None, predi
                 "question":     winner_question,
                 "timestamp":    now_iso,
                 "selected":     True,
+                "question_type": "question",
                 "audio":        audio_b64,
                 "audio_format": audio_format,
                 "path_topic":   path_topic,

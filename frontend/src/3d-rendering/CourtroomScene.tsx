@@ -350,10 +350,24 @@ export function CourtroomScene({
   const judgeEntranceSeatedIdleUrl = judgeAvatarLibrary.seatedAnswering ?? judgeAvatarUrl
   const roleForAnimation = animationSpeakingRole ?? speakingRole
 
-  const judgeAnimationState =
-    animationStateOverrides?.judge ?? (roleForAnimation === 'judge' ? 'seatedTalk' : 'seatedIdle')
-  const counselAnimationState =
-    animationStateOverrides?.counsel ?? (roleForAnimation === 'counsel' ? 'seatedTalk' : 'seatedIdle')
+  const normalizeInHearingAnimationState = (
+    role: AvatarRole,
+    requested: AvatarAnimationStateKey | null | undefined
+  ): AvatarAnimationStateKey => {
+    // Once the avatars are seated in the hearing, keep animation simple and stable:
+    // always use the seated talking clip rather than swapping to reaction/idle clips.
+    if (!requested) return 'seatedTalk'
+    if (role === 'judge' && (requested === 'walk' || requested === 'run' || requested === 'sitTransition')) {
+      return requested
+    }
+    if (role === 'counsel' && (requested === 'walk' || requested === 'run' || requested === 'sitToStand')) {
+      return requested
+    }
+    return 'seatedTalk'
+  }
+
+  const judgeAnimationState = normalizeInHearingAnimationState('judge', animationStateOverrides?.judge)
+  const counselAnimationState = normalizeInHearingAnimationState('counsel', animationStateOverrides?.counsel)
 
   const judgeAnimationConfig =
     JUDGE_ANIMATION_STATES[judgeAnimationState as keyof typeof JUDGE_ANIMATION_STATES] ?? JUDGE_ANIMATION_STATES.seatedIdle
@@ -461,11 +475,11 @@ export function CourtroomScene({
               animationLoop={judgeAnimationLoop}
               animationSpeed={judgeAnimationSpeed}
               animationBlendDuration={animationBlendDuration}
-              clipPulseEnabled={judgeAnimationState === 'seatedIdle'}
+              clipPulseEnabled={false}
               clipPulseMovementSpeedScale={0.4}
               clipPulseMoveDurationRange={[1.0, 1.9]}
               clipPulseRestDurationRange={[1.2, 2.8]}
-              idleMotionEnabled={judgeAnimationState === 'seatedIdle'}
+              idleMotionEnabled={false}
               idleMotionAmplitude={0.022}
               idleMotionArmAmplitude={0.034}
               idleMotionSpeed={1.2}
@@ -500,11 +514,11 @@ export function CourtroomScene({
             animationLoop={counselAnimationLoop}
             animationSpeed={counselAnimationSpeed}
             animationBlendDuration={animationBlendDuration}
-            clipPulseEnabled={counselAnimationState === 'seatedIdle'}
+            clipPulseEnabled={false}
             clipPulseMovementSpeedScale={0.32}
             clipPulseMoveDurationRange={[0.9, 1.7]}
             clipPulseRestDurationRange={[1.5, 3.1]}
-            idleMotionEnabled={counselAnimationState === 'seatedIdle'}
+            idleMotionEnabled={false}
             idleMotionAmplitude={0.019}
             idleMotionArmAmplitude={0.028}
             idleMotionSpeed={1.05}

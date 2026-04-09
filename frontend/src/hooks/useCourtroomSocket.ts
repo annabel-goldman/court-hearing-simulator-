@@ -16,6 +16,36 @@ import type {
 
 const WS_BASE = getWsBase()
 
+const extractSpokenQuestion = (text: string): string => {
+  const cleaned = (text ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  if (!cleaned) return ''
+
+  const lines = cleaned
+    .split('\n')
+    .map(line =>
+      line
+        .trim()
+        .replace(/^\s*(?:[-*#]+|\d+\.)\s*/, '')
+        .replace(/\*\*/g, '')
+        .replace(/^QUESTION:\s*/i, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .filter(
+      line =>
+        !/^(analyze the|deconstruct|identify the|formulate|drafting|refining|adopt the persona|role:|context:|goal:|topic:|task:|style:|operating rules|input context|case summary|their argument:)/i.test(
+          line,
+        ),
+    )
+
+  const questionLine = [...lines].reverse().find(line => line.includes('?'))
+  if (questionLine) return questionLine
+
+  const sentence = lines.join(' ').split(/(?<=[.!?])\s+/).filter(Boolean).pop() ?? ''
+  if (!sentence) return cleaned
+  return /[?]$/.test(sentence) ? sentence : `${sentence.replace(/[.!]+$/, '')}?`
+}
+
 interface UseCourtroomSocketOptions {
   sessionId: string
   sessionConfig: SessionConfig | null
@@ -78,6 +108,18 @@ export function useCourtroomSocket(
     const data = message.data ?? {}
     const cb = callbacksRef.current
     switch (message.type) {
+      case 'config_ack':
+        console.log('[CourtroomSocket] Config acknowledged:', data)
+        break
+
+      case 'agenda_set_ack':
+        console.log('[CourtroomSocket] Agenda acknowledged:', data)
+        break
+
+      case 'agents_updated':
+        console.log('[CourtroomSocket] Agents updated:', data)
+        break
+
       case 'phase_update': {
         const newPhase = data.phase as SimulationPhase
         if (newPhase === 'PROCEEDING' || newPhase === 'ADJOURNED') {
@@ -88,8 +130,22 @@ export function useCourtroomSocket(
       }
 
       case 'agent_question':
+        console.log('[CourtroomSocket] Agent question received:', {
+          agent: data.agent_name,
+          selected: data.selected,
+          questionType: data.question_type,
+          hasAudio: Boolean(data.audio),
+        })
+        if (data.selected === false) {
+          console.log('[CourtroomSocket] Ignoring non-selected candidate response')
+          break
+        }
+        if (data.question_type === 'counter') {
+          console.log('[CourtroomSocket] Ignoring counter-argument in courtroom mode')
+          break
+        }
         cb.onJudgeInterrupt?.({
-          question: (data.question as string) ?? '',
+          question: extractSpokenQuestion((data.question as string) ?? ''),
           audio: data.audio as string | undefined,
           audioFormat: (data.audio_format as string) ?? 'opus',
           source: {
@@ -102,8 +158,19 @@ export function useCourtroomSocket(
         break
 
       case 'transcript_update':
+        console.log('[CourtroomSocket] Transcript update received:', {
+          chars: ((data.text as string) ?? '').length,
+          preview: ((data.text as string) ?? '').slice(0, 80),
+        })
         cb.onTranscriptReceived?.((data.text as string) ?? '')
         break
+
+      case 'stt_error': {
+        const messageText = (data.message as string) ?? 'Speech-to-text is unavailable'
+        console.error('[CourtroomSocket] STT error:', messageText)
+        cb.onError?.(new Error(messageText))
+        break
+      }
 
       case 'error':
         cb.onError?.(new Error((data.message as string) ?? 'Unknown error'))
@@ -168,6 +235,12 @@ export function useCourtroomSocket(
     ) => {
       if (configuredOrchestratedRef.current) return
       configuredOrchestratedRef.current = true
+      console.log('[CourtroomSocket] Sending courtroom config:', {
+        agentCount: agents.length,
+        hasBriefSummary: Boolean(briefSummary.trim()),
+        hasOpposingBrief: Boolean(opposingBrief.trim()),
+        agendaItemCount: agendaItems.length,
+      })
       sendMessage('config', {
         agents,
         brief_summary: briefSummary,

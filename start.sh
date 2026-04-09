@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$ROOT_DIR/.run"
 mkdir -p "$LOG_DIR"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$LOG_DIR/uv-cache}"
+mkdir -p "$UV_CACHE_DIR"
 
 log() {
   echo "[start] $*"
@@ -75,4 +77,4 @@ log "Frontend log: $LOG_DIR/frontend.log"
 log "Starting backend (foreground)..."
 
 cd "$ROOT_DIR/backend"
-exec uv run hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload
+uv run python -m hypercorn main:app --bind 0.0.0.0:8000 --worker-class trio --reload 2>&1 | tee "$LOG_DIR/backend.log"

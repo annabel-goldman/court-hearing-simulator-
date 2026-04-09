@@ -47,8 +47,8 @@ class ModelRuntimeConfig:
 # ---------------------------------------------------------------------------
 
 def get_default_model_config() -> ModelRuntimeConfig:
-    api_key   = os.getenv("OPENAI_API_KEY", "")
-    large_url = os.getenv("MODEL_LARGE_URL", os.getenv("OPENAI_BASE_URL", ""))
+    api_key   = os.getenv("OPENAI_API_KEY", os.getenv("OPEN_ROUTER_API_KEY", ""))
+    large_url = os.getenv("MODEL_LARGE_URL", os.getenv("OPENAI_BASE_URL", os.getenv("OPEN_ROUTER_BASE_URL", "")))
     small_url = os.getenv("MODEL_SMALL_URL", large_url)
     tiny_url  = os.getenv("MODEL_TINY_URL",  small_url)
     return ModelRuntimeConfig(

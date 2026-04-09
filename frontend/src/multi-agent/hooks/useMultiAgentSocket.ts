@@ -136,6 +136,12 @@ export function useMultiAgentSocket({
           case 'opponent_response':
             cbs.onOpponentResponse?.(message.data as unknown as OpponentResponse);
             break;
+          case 'stt_error':
+            console.error('[MultiAgentSocket] STT error:', message.data);
+            break;
+          case 'error':
+            console.error('[MultiAgentSocket] Backend error:', message.data);
+            break;
           case 'config_ack':
             console.log('[MultiAgentSocket] Config acknowledged:', message.data);
             break;

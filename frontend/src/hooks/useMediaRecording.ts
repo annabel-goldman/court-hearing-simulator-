@@ -8,7 +8,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   AUDIO_CHUNK_DURATION_MS,
-  RECORDING_INTERVAL_MS,
 } from '../config/simulationConfig'
 import { pickSupportedAudioMimeType } from '../features/media/utils/audioEncoding'
 
@@ -63,6 +62,7 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
   const audioAccumulatorRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<number | null>(null)
   const isInitializedRef = useRef(false)
+  const recorderMimeTypeRef = useRef('audio/webm')
 
   // Initialize media stream on mount (runs once)
   useEffect(() => {
@@ -156,50 +156,47 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
       return
     }
 
-    const startNewRecorder = () => {
-      const audioStream = new MediaStream(mediaStreamRef.current!.getAudioTracks())
-      const mimeType = pickSupportedAudioMimeType(
-        ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
-        'audio/webm'
-      )
-      const recorder = new MediaRecorder(audioStream, { mimeType })
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioAccumulatorRef.current.push(event.data)
-        }
-      }
-
-      recorder.onstop = () => {
-        if (audioAccumulatorRef.current.length > 0) {
-          const blobType = recorder.mimeType || mimeType
-          const completeBlob = new Blob(audioAccumulatorRef.current, { type: blobType })
-          console.log('[useMediaRecording] Audio chunk ready:', completeBlob.size, 'bytes')
-          onAudioChunkRef.current?.(completeBlob)
-          audioAccumulatorRef.current = []
-        }
-      }
-
-      recorder.start()
-      mediaRecorderRef.current = recorder
-
-      // Stop after chunk duration
-      setTimeout(() => {
-        if (recorder.state === 'recording') {
-          recorder.stop()
-        }
-      }, AUDIO_CHUNK_DURATION_MS)
+    if (mediaRecorderRef.current?.state === 'recording') {
+      console.log('[useMediaRecording] Recorder already running')
+      return
     }
 
-    // Start first recording
-    startNewRecorder()
+    const audioStream = new MediaStream(mediaStreamRef.current.getAudioTracks())
+    const mimeType = pickSupportedAudioMimeType(
+      ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'],
+      'audio/webm'
+    )
+    recorderMimeTypeRef.current = mimeType
+
+    const recorder = new MediaRecorder(audioStream, { mimeType })
+    mediaRecorderRef.current = recorder
+    audioAccumulatorRef.current = []
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioAccumulatorRef.current.push(event.data)
+      }
+    }
+
+    recorder.onstop = () => {
+      if (audioAccumulatorRef.current.length > 0) {
+        const blobType = recorder.mimeType || recorderMimeTypeRef.current || mimeType
+        const completeBlob = new Blob(audioAccumulatorRef.current, { type: blobType })
+        console.log('[useMediaRecording] Audio chunk ready:', completeBlob.size, 'bytes')
+        onAudioChunkRef.current?.(completeBlob)
+        audioAccumulatorRef.current = []
+      }
+    }
+
+    recorder.start()
 
     // Set up interval for subsequent recordings
     recordingIntervalRef.current = window.setInterval(() => {
-      if (mediaStreamRef.current) {
-        startNewRecorder()
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop()
+        mediaRecorderRef.current.start()
       }
-    }, RECORDING_INTERVAL_MS)
+    }, AUDIO_CHUNK_DURATION_MS)
 
     setIsRecording(true)
   }, []) // No dependencies - uses refs for callbacks
@@ -218,7 +215,6 @@ export function useMediaRecording(options: UseMediaRecordingOptions = {}): UseMe
     }
     
     setIsRecording(false)
-    audioAccumulatorRef.current = []
   }, [])
 
   // Hard-stop media stream (camera + mic)

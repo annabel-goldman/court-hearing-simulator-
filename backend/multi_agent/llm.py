@@ -26,6 +26,113 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
 from model_router import get_task_client, extract_content, task_extra_body
 
 
+def _normalize_spoken_question(text: str) -> str:
+    """Collapse verbose model output down to a single spoken question."""
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        cleaned = "\n".join(lines[1:-1]).strip() if len(lines) > 2 else cleaned
+
+    def _clean_line(raw_line: str) -> str:
+        line = raw_line.strip().strip('"\'')
+        line = line.replace("**", "").replace("__", "")
+        line = re.sub(r"^\s*(?:[-*#]+|\d+\.)\s*", "", line)
+        line = re.sub(
+            r"^(QUESTION:|Q:|Sure[,.]|Yes[,.]|I would ask:|My question:)\s*",
+            "",
+            line,
+            flags=re.IGNORECASE,
+        )
+        return line.strip()
+
+    def _is_scaffolding(line: str) -> bool:
+        lowered = line.lower().rstrip(":")
+        return lowered.startswith((
+            "analyze the",
+            "deconstruct",
+            "identify the",
+            "formulate",
+            "drafting",
+            "refining",
+            "adopt the persona",
+            "current situation",
+            "role",
+            "context",
+            "goal",
+            "topic",
+            "task",
+            "style",
+            "operating rules",
+            "input context",
+            "case summary",
+            "speaker's argument",
+            "their argument",
+            "internal reasoning",
+            "precedential landscape",
+            "interpretation",
+        ))
+
+    candidate_blocks = []
+    q_match = re.search(r"QUESTION:\s*(.+)", cleaned, re.IGNORECASE | re.DOTALL)
+    if q_match:
+        candidate_blocks.append(q_match.group(1).strip())
+    candidate_blocks.append(cleaned)
+
+    for block in candidate_blocks:
+        question_lines: list[str] = []
+        sentence_candidates: list[str] = []
+        for raw_line in block.splitlines():
+            line = _clean_line(raw_line)
+            if not line or _is_scaffolding(line) or len(line) < 10:
+                continue
+            sentence_candidates.extend(
+                s.strip()
+                for s in re.split(r"(?<=[.!?])\s+", line)
+                if s.strip()
+            )
+            if "?" in line:
+                question_lines.append(line)
+
+        if question_lines:
+            return question_lines[-1]
+
+        interrogative_sentences = [
+            s for s in sentence_candidates
+            if s.lower().startswith((
+                "why ",
+                "how ",
+                "what ",
+                "where ",
+                "when ",
+                "which ",
+                "who ",
+                "is ",
+                "are ",
+                "would ",
+                "should ",
+                "do ",
+                "does ",
+                "did ",
+                "if ",
+            ))
+        ]
+        if interrogative_sentences:
+            candidate = interrogative_sentences[-1].rstrip(".!")
+            return candidate if candidate.endswith("?") else f"{candidate}?"
+
+        if sentence_candidates:
+            candidate = sentence_candidates[-1].rstrip(".!")
+            return candidate if candidate.endswith("?") else f"{candidate}?"
+
+    fallback = _clean_line(cleaned).rstrip(".!")
+    return f"{fallback}?" if fallback and not fallback.endswith("?") else fallback
+
+
 class MultiAgentLLM:
     """
     Handles all LLM interactions for the multi-agent system.
@@ -91,11 +198,6 @@ class MultiAgentLLM:
             logger.info("[MultiAgent LLM] %s raw response (%d chars): %s",
                         agent.name, len(content), content[:300])
 
-            # Remove markdown code blocks if present
-            if content.startswith("```"):
-                lines = content.split("\n")
-                content = "\n".join(lines[1:-1]) if len(lines) > 2 else content
-
             should_ask = False
             question = None
 
@@ -105,7 +207,7 @@ class MultiAgentLLM:
             if ask_match:
                 should_ask = ask_match.group(1).lower() in ('yes', 'true')
                 if q_match:
-                    question = q_match.group(1).strip().strip('"\'')
+                    question = _normalize_spoken_question(q_match.group(1))
                     if question and len(question) < 10:
                         question = None  # likely parsing artifact
 
@@ -127,11 +229,7 @@ class MultiAgentLLM:
                     line = line.strip().strip('"\'')
                     if '?' in line and len(line) > 15:
                         should_ask = True
-                        # Clean common prefixes
-                        question = re.sub(
-                            r'^(QUESTION:|Q:|Sure[,.]|Yes[,.]|I would ask:|My question:)\s*',
-                            '', line, flags=re.IGNORECASE,
-                        ).strip()
+                        question = _normalize_spoken_question(line)
                         break
 
             # Strategy 4: First line says yes/true, grab question from subsequent lines
@@ -142,12 +240,15 @@ class MultiAgentLLM:
                     for line in content.split('\n')[1:]:
                         line = line.strip().strip('"\'')
                         if len(line) > 15:
-                            question = line
+                            question = _normalize_spoken_question(line)
                             break
 
             # Fallback question if model said yes but didn't provide one
             if should_ask and not question:
                 question = "Counsel, could you elaborate on that last point for the court?"
+
+            if question:
+                question = _normalize_spoken_question(question)
 
             return should_ask, question
 

@@ -299,20 +299,6 @@ export default function CourtroomPage() {
       return
     }
 
-    judgeQuestionCountRef.current += 1
-    const shouldPlayReaction = judgeQuestionCountRef.current >= nextJudgeReactionAtRef.current
-    const reactionState = shouldPlayReaction
-      ? JUDGE_REACTION_SEQUENCE[judgeReactionSequenceIndexRef.current % JUDGE_REACTION_SEQUENCE.length]
-      : null
-
-    if (shouldPlayReaction && reactionState) {
-      setAnimationOverride('judge', reactionState)
-      judgeReactionSequenceIndexRef.current += 1
-      judgeReactionCadenceIndexRef.current =
-        (judgeReactionCadenceIndexRef.current + 1) % JUDGE_REACTION_CADENCE.length
-      nextJudgeReactionAtRef.current += JUDGE_REACTION_CADENCE[judgeReactionCadenceIndexRef.current]
-    }
-
     const source = interrupt.source
     const sourceType = source?.type === 'multi_agent' ? 'multi_agent' : 'judge_engine'
     const agentName = sourceType === 'multi_agent'

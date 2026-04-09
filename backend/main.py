@@ -40,7 +40,8 @@ logger = logging.getLogger("court-simulator")
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("Starting Court Simulator Backend...")
-    logger.info("OpenAI API Key configured: %s", "Yes" if os.getenv("OPENAI_API_KEY") else "No")
+    llm_key_present = bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_ROUTER_API_KEY"))
+    logger.info("LLM API Key configured: %s", "Yes" if llm_key_present else "No")
     logger.info("Model routing config:")
     log_model_config()
     await probe_all_tiers()

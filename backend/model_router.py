@@ -68,6 +68,48 @@ class ModelEndpoint:
     api_key: str
 
 
+def _default_llm_api_key() -> str:
+    """Resolve the primary LLM API key with OpenRouter aliases as fallback."""
+    return (
+        os.getenv("OPENAI_API_KEY")
+        or os.getenv("OPEN_ROUTER_API_KEY")
+        or "local"
+    )
+
+
+def _default_llm_base_url() -> str:
+    """Resolve the primary LLM base URL with OpenRouter aliases as fallback."""
+    return (
+        os.getenv("OPENAI_BASE_URL")
+        or os.getenv("OPEN_ROUTER_BASE_URL")
+        or "https://api.openai.com/v1"
+    )
+
+
+def get_llm_config_validation_error() -> str | None:
+    """Return a user-facing configuration error if the primary LLM config is invalid."""
+    api_key = _default_llm_api_key().strip()
+    base_url = _default_llm_base_url().strip().lower()
+
+    is_local = "localhost" in base_url or "127.0.0.1" in base_url
+    if is_local:
+        return None
+
+    if api_key in {"", "local", "dummy"}:
+        return (
+            "LLM routing is configured for a remote provider, but no OPENAI_API_KEY "
+            "or OPEN_ROUTER_API_KEY is set."
+        )
+
+    if "openrouter.ai" in base_url and not api_key.startswith("sk-or-"):
+        return (
+            "LLM routing points at OpenRouter, but the configured API key does not "
+            "look like an OpenRouter key."
+        )
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Resolution logic
 # ---------------------------------------------------------------------------
@@ -76,11 +118,11 @@ def _resolve_tier(tier: ModelTier) -> ModelEndpoint:
     """Resolve environment variables for the given tier, cascading to larger
     tiers when a tier's config is not explicitly set."""
 
-    api_key = os.getenv("OPENAI_API_KEY", "local")
+    api_key = _default_llm_api_key()
 
     # Large tier — the "source of truth" fallback
     large_model = os.getenv("MODEL_LARGE") or os.getenv("LOCAL_MODEL", "gpt-4")
-    large_url   = os.getenv("MODEL_LARGE_URL") or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    large_url   = os.getenv("MODEL_LARGE_URL") or _default_llm_base_url()
 
     if tier == ModelTier.LARGE:
         return ModelEndpoint(model=large_model, base_url=large_url, api_key=api_key)
@@ -125,7 +167,7 @@ def _is_url_reachable(base_url: str) -> bool:
 async def _probe_url(base_url: str) -> bool:
     """Async HTTP probe of a single base URL.  Non-blocking."""
     check_url = base_url.rstrip("/").removesuffix("/v1") + "/v1/models"
-    api_key = os.getenv("OPENAI_API_KEY", "local")
+    api_key = _default_llm_api_key()
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
             r = await client.get(

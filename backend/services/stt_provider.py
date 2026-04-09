@@ -639,6 +639,34 @@ class GladiaLiveProvider(STTProvider):
 _gladia_singleton: "GladiaLiveProvider | None" = None
 
 
+def get_stt_config_validation_error() -> str | None:
+    """Return a user-facing configuration error if STT is misconfigured."""
+    try:
+        from services.media_config import load_stt_config
+
+        cfg = load_stt_config()
+        provider = (cfg.provider or "").lower().strip()
+        api_key = (cfg.api_key or "").strip()
+        base_url = (cfg.base_url or "").strip().lower()
+
+        if provider == "groq":
+            if not api_key:
+                return "Speech-to-text is configured for Groq, but no GROQ_API_KEY or STT_API_KEY is set."
+            if "api.groq.com" in base_url and not api_key.startswith("gsk_"):
+                return "Speech-to-text is configured for Groq, but the configured API key does not look like a Groq key."
+
+        if provider == "openai" and not api_key:
+            return "Speech-to-text is configured for OpenAI, but no OPENAI_API_KEY or STT_API_KEY is set."
+
+        if provider == "gladia" and not api_key:
+            return "Speech-to-text is configured for Gladia, but no GLADIA_API_KEY or STT_API_KEY is set."
+
+        return None
+    except Exception as exc:
+        logger.warning("[STT] Could not validate runtime config: %s", exc)
+        return None
+
+
 def get_stt_provider(provider_name: str | None = None) -> STTProvider:
     """Return an STT provider, applying runtime config from media_config if available."""
     global _gladia_singleton

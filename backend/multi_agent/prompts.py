@@ -54,7 +54,13 @@ You SHOULD interrupt when:
 
 When in doubt, ASK. Judges who stay silent are not doing their job.
 Make your question specific to what was just said.
-Do NOT repeat questions that have already been asked."""
+Do NOT repeat questions that have already been asked.
+
+Your output is machine-parsed. Return ONLY two lines:
+ASK: yes|no
+QUESTION: one concise spoken question
+
+Do not include analysis, bullet points, numbered steps, JSON, or reasoning."""
 
 
 def build_agent_user_prompt(
@@ -117,7 +123,7 @@ RECENT TRANSCRIPT:
 
 Based on the recent transcript, should you ({agent.name}) interrupt with a question now?
 
-You MUST respond in EXACTLY this format (nothing else):
+You MUST respond in EXACTLY this format (nothing else, exactly two lines):
 
 ASK: yes
 QUESTION: Your one-sentence question to the attorney
@@ -129,6 +135,6 @@ QUESTION: The question you are considering (or would ask later)
 
 Always provide both ASK and QUESTION. The QUESTION is the probing question you have in mind
 for the advocate; include it even when ASK is no. Remember: when in doubt, ASK.
+Do not include analysis, reasoning, scratchpad, bullets, numbered outlines, or any text before or after the two required lines.
 
 /no_think"""
-
