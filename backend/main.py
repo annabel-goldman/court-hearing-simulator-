@@ -61,6 +61,17 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Court Simulator API", lifespan=lifespan)
 
+
+@app.get("/healthz")
+async def healthz():
+    """Simple liveness endpoint for Render health checks."""
+    return {
+        "ok": True,
+        "service": os.getenv("RENDER_SERVICE_NAME", "court-hearing-simulator"),
+        "branch": os.getenv("RENDER_GIT_BRANCH", ""),
+        "commit": os.getenv("RENDER_GIT_COMMIT", ""),
+    }
+
 _cors_origins = [
     "http://localhost:3000",
     "http://localhost:5173",

@@ -66,18 +66,6 @@ jobs:
         with:
           path: ./frontend/dist
 
-      - name: Trigger Render backend deploy
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Triggering Render backend deploy..."
-            curl -f -X POST "$RENDER_DEPLOY_HOOK_URL"
-            echo "Backend deploy triggered."
-          else
-            echo "RENDER_DEPLOY_HOOK_URL not set; skipping backend deploy trigger."
-          fi
-
   deploy:
     environment:
       name: github-pages
@@ -88,3 +76,68 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Trigger Render backend deploy for this commit
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set"
+            exit 1
+          fi
+
+          echo "Triggering Render backend deploy for commit $TARGET_SHA..."
+          curl -fsS -X POST "${RENDER_DEPLOY_HOOK_URL}?ref=${TARGET_SHA}"
+          echo
+          echo "Backend deploy triggered."
+
+      - name: Wait for backend health check to match deployed commit
+        env:
+          BACKEND_URL: ${{ secrets.VITE_API_URL }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "VITE_API_URL secret is not set"
+            exit 1
+          fi
+
+          export HEALTH_URL="${BACKEND_URL%/}/healthz"
+          echo "Polling $HEALTH_URL for commit $TARGET_SHA"
+
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          health_url = os.environ["HEALTH_URL"]
+          target_sha = os.environ["TARGET_SHA"]
+          deadline = time.time() + 15 * 60
+          last_error = "no response yet"
+
+          while time.time() < deadline:
+              try:
+                  with urllib.request.urlopen(health_url, timeout=10) as response:
+                      payload = json.loads(response.read().decode("utf-8"))
+                  commit = (payload.get("commit") or "").strip()
+                  ok = bool(payload.get("ok"))
+                  print(f"healthz ok={ok} commit={commit or '<empty>'}")
+                  if ok and commit == target_sha:
+                      print("Backend deploy is live on the expected commit.")
+                      sys.exit(0)
+                  last_error = f"healthy but running commit {commit or '<empty>'}"
+              except Exception as exc:
+                  last_error = str(exc)
+                  print(f"healthz probe failed: {last_error}")
+              time.sleep(10)
+
+          print(f"Timed out waiting for backend deploy: {last_error}", file=sys.stderr)
+          sys.exit(1)
+          PY
