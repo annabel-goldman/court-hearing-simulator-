@@ -346,6 +346,7 @@ TASK_TIER_MAP: dict[str, ModelTier] = {
     "quality_assessment":   ModelTier.SMALL,
     "argument_scoring":     ModelTier.SMALL,
     "opponent_response":    ModelTier.SMALL,
+    "performance_notes":    ModelTier.SMALL,
 
     # LARGE — deep brief analysis (exploitability scoring, one-time setup)
     "issue_extraction":     ModelTier.LARGE,

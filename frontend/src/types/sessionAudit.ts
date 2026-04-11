@@ -26,3 +26,19 @@ export interface SessionAuditPayload {
   questions: SessionQuestionRecord[]
   transcriptSegments: SessionTranscriptRecord[]
 }
+
+export interface PerformanceDimension {
+  score: number
+  note: string
+}
+
+export interface PerformanceNotesResponse {
+  dimensions: {
+    directness: PerformanceDimension
+    legal_anchoring: PerformanceDimension
+    responsiveness_under_pressure: PerformanceDimension
+    argument_development: PerformanceDimension
+    bench_engagement: PerformanceDimension
+  }
+  overall_note: string
+}

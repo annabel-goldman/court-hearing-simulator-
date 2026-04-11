@@ -120,6 +120,78 @@
   font-size: 1rem;
 }
 
+.session-audit-performance--loading {
+  color: #8b6236;
+  font-style: italic;
+}
+
+.session-audit-performance--error {
+  color: #b94a3a;
+}
+
+.session-audit-performance--overall {
+  border-top: 1px solid #d1c5b1;
+  padding-top: 0.85rem;
+  font-style: italic;
+  margin-top: 0.25rem;
+}
+
+.session-audit-scorecard {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.session-audit-scorecard__row {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.48));
+  border: 1px solid #d8d0c2;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.session-audit-scorecard__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.session-audit-scorecard__label {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #27345a;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.session-audit-scorecard__score {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #6b4f35;
+}
+
+.session-audit-scorecard__bar {
+  height: 5px;
+  background: #e4ddd2;
+  border-radius: 3px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+
+.session-audit-scorecard__bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b6236, #c4933a);
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.session-audit-scorecard__note {
+  margin: 0;
+  font-size: 0.93rem;
+  color: #4a3a28;
+  line-height: 1.45;
+}
+
 .session-audit-play-again-btn {
   min-width: 154px;
   min-height: 48px;

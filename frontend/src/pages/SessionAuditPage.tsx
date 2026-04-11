@@ -1,7 +1,8 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import './SessionAuditPage.css'
-import type { SessionAuditPayload } from '../types/sessionAudit'
+import type { SessionAuditPayload, PerformanceNotesResponse } from '../types/sessionAudit'
+import { fetchPerformanceNotes } from '../features/orchestrated/services/performanceService'
 
 const SESSION_AUDIT_STORAGE_KEY = 'courtSessionAudit'
 
@@ -9,34 +10,13 @@ interface SessionAuditLocationState {
   audit?: SessionAuditPayload
 }
 
-function estimateTranscriptWordCount(transcriptSegments: SessionAuditPayload['transcriptSegments']): number {
-  return transcriptSegments.reduce((total, segment) => {
-    const words = segment.text.trim().split(/\s+/).filter(Boolean).length
-    return total + words
-  }, 0)
-}
-
-function buildPerformanceSummary(audit: SessionAuditPayload): string {
-  const totalQuestions = audit.questions.length
-  const uniqueAskers = new Set(
-    audit.questions.map(q => (q.sourceType === 'multi_agent' ? q.agentName : 'Judge Engine'))
-  ).size
-  const wordCount = estimateTranscriptWordCount(audit.transcriptSegments)
-
-  if (totalQuestions === 0) {
-    return 'Performance note: no bench questions were captured this round. Extend your argument depth to prompt more judicial engagement.'
-  }
-
-  if (totalQuestions >= 8 && uniqueAskers >= 2 && wordCount >= 350) {
-    return 'Performance note: strong session. You sustained detailed answers across multiple questioners and kept the argument developed on the record.'
-  }
-
-  if (totalQuestions >= 4 && wordCount >= 180) {
-    return 'Performance note: solid foundation. You engaged with the court, but can improve by tightening answer structure and adding clearer legal anchors.'
-  }
-
-  return 'Performance note: developing. Focus on concise direct answers, then quickly connect each answer back to your core theory of the case.'
-}
+const DIMENSION_LABELS: { key: keyof PerformanceNotesResponse['dimensions']; label: string }[] = [
+  { key: 'directness',                    label: 'Directness' },
+  { key: 'legal_anchoring',               label: 'Legal Anchoring' },
+  { key: 'responsiveness_under_pressure', label: 'Responsiveness Under Pressure' },
+  { key: 'argument_development',          label: 'Argument Development' },
+  { key: 'bench_engagement',              label: 'Bench Engagement' },
+]
 
 function loadStoredAudit(): SessionAuditPayload | null {
   const raw = sessionStorage.getItem(SESSION_AUDIT_STORAGE_KEY)
@@ -55,16 +35,40 @@ export default function SessionAuditPage() {
   const state = location.state as SessionAuditLocationState | null
 
   const auditData = useMemo(() => state?.audit ?? loadStoredAudit(), [state])
-  const performanceSummary = useMemo(
-    () => (auditData ? buildPerformanceSummary(auditData) : ''),
-    [auditData]
-  )
+
+  const [notes, setNotes] = useState<PerformanceNotesResponse | null>(null)
+  const [notesLoading, setNotesLoading] = useState(false)
+  const [notesError, setNotesError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!auditData) {
       navigate('/', { replace: true })
     }
   }, [auditData, navigate])
+
+  useEffect(() => {
+    if (!auditData) return
+    let cancelled = false
+
+    setNotesLoading(true)
+    setNotesError(null)
+
+    fetchPerformanceNotes(auditData)
+      .then((result) => {
+        if (!cancelled) setNotes(result)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setNotesError(err instanceof Error ? err.message : 'Failed to load performance notes.')
+      })
+      .finally(() => {
+        if (!cancelled) setNotesLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [auditData])
 
   const handlePlayAgain = () => {
     sessionStorage.removeItem('courtSessionAudit')
@@ -117,9 +121,53 @@ export default function SessionAuditPage() {
 
         <section className="session-audit-section">
           <h2 className="session-audit-section-title">Your Performance</h2>
-          <p className="session-audit-performance">{performanceSummary}</p>
-        </section>
 
+          {notesLoading && (
+            <p className="session-audit-performance session-audit-performance--loading">
+              Generating performance notes…
+            </p>
+          )}
+
+          {notesError && !notesLoading && (
+            <p className="session-audit-performance session-audit-performance--error">
+              {notesError}
+            </p>
+          )}
+
+          {notes && !notesLoading && (
+            <>
+              <div className="session-audit-scorecard">
+                {DIMENSION_LABELS.map(({ key, label }) => {
+                  const dim = notes.dimensions[key]
+                  return (
+                    <article key={key} className="session-audit-scorecard__row">
+                      <div className="session-audit-scorecard__header">
+                        <span className="session-audit-scorecard__label">{label}</span>
+                        <span className="session-audit-scorecard__score">{dim.score}/10</span>
+                      </div>
+                      <div
+                        className="session-audit-scorecard__bar"
+                        role="meter"
+                        aria-valuenow={dim.score}
+                        aria-valuemin={1}
+                        aria-valuemax={10}
+                      >
+                        <div
+                          className="session-audit-scorecard__bar-fill"
+                          style={{ width: `${dim.score * 10}%` }}
+                        />
+                      </div>
+                      <p className="session-audit-scorecard__note">{dim.note}</p>
+                    </article>
+                  )
+                })}
+              </div>
+              <p className="session-audit-performance session-audit-performance--overall">
+                {notes.overall_note}
+              </p>
+            </>
+          )}
+        </section>
       </div>
     </div>
   )
