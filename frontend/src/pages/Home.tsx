@@ -6,7 +6,13 @@ import { getAssetUrl } from '../config/assetUrls'
 import { extractPdfText } from '../features/pdf/utils/extractPdfText'
 import { loadMultiAgentProfiles } from '../features/orchestrated/services/multiAgentService'
 import { requestProjectedTimelineStream } from '../features/orchestrated/services/timelineService'
+import { buildAgendaItemsFromPredictions } from '../utils/buildAgendaItems'
+import type { RawDonePayload } from '../utils/buildAgendaItems'
 import type { Agent } from '../multi-agent/types'
+
+import demoPredictedTopicSets from '../data/harvard-demo/predicted-topic-sets.json'
+import appellantBriefRaw from '../data/harvard-demo/appellant-brief.txt?raw'
+import respondentBriefRaw from '../data/harvard-demo/respondent-brief.txt?raw'
 
 interface UploadedFile {
   name: string
@@ -15,6 +21,7 @@ interface UploadedFile {
 
 type HomeStage = 'landing' | 'desk'
 type IntakePhase = 'idle' | 'launching' | 'analyzing'
+type IntakeMode = 'live' | 'demo'
 
 const PREPARING_MESSAGE = 'Preparing your session…'
 
@@ -33,6 +40,8 @@ const DEFAULT_USER_PARTY_ROLE = 'appellant'
 const DEFAULT_JUDGE_AVATAR_DIFFICULTY: JudgeAvatarDifficulty = 'medium'
 const LANDING_TO_DESK_TRANSITION_MS = 760
 const DESK_ENTER_TRANSITION_MS = 420
+const DEMO_FAKE_ANALYSIS_MS = 5000
+const DEMO_UPLOAD_DELAY_MS = 600
 
 const SESSION_LENGTH_OPTIONS = [60, 120, 180, 300, 600, 900] as const
 const TEAM_MEMBERS = [
@@ -49,6 +58,7 @@ export default function Home() {
   const location = useLocation()
 
   const [stage, setStage] = useState<HomeStage>('landing')
+  const [intakeMode, setIntakeMode] = useState<IntakeMode>('live')
   const [intakePhase, setIntakePhase] = useState<IntakePhase>('idle')
   const [loadingStatus, setLoadingStatus] = useState('')
   const [volumeLevel, setVolumeLevel] = useState(0.72)
@@ -71,6 +81,7 @@ export default function Home() {
   const [judgeAgentsLoading, setJudgeAgentsLoading] = useState(false)
   const [judgeAgentsLoadError, setJudgeAgentsLoadError] = useState('')
   const [enabledJudgeAgentIds, setEnabledJudgeAgentIds] = useState<string[]>([])
+  const [isEnteringDemo, setIsEnteringDemo] = useState(false)
 
   const landingIntroBackgroundStyle = {
     backgroundImage: `url(${LANDING_INTRO_BACKGROUND_SRC})`,
@@ -90,6 +101,7 @@ export default function Home() {
   const landingExitTimerRef = useRef<number | null>(null)
   const deskEnterTimerRef = useRef<number | null>(null)
   const intakeLocked = intakePhase !== 'idle'
+  const isDemoMode = intakeMode === 'demo'
 
   useEffect(() => {
     const state = location.state as { returnToWelcome?: boolean } | null
@@ -373,12 +385,26 @@ export default function Home() {
     }
   }, [stage, judgeAgents.length, judgeAgentsLoadError])
 
+  const resetUploadedFiles = () => {
+    setFileA(null)
+    setFileB(null)
+    setLoadingA(false)
+    setLoadingB(false)
+    setDragOverA(false)
+    setDragOverB(false)
+    setError('')
+    setLoadingStatus('')
+    setIntakePhase('idle')
+    if (inputRefA.current) inputRefA.current.value = ''
+    if (inputRefB.current) inputRefB.current.value = ''
+  }
+
   const handleFileUpload = async (
     file: File,
     setFile: (f: UploadedFile | null) => void,
     setLoadingState: (l: boolean) => void
   ) => {
-    if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+    if (!isDemoMode && !file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
       setError('Please upload a PDF file')
       return
     }
@@ -387,8 +413,13 @@ export default function Home() {
     setError('')
 
     try {
-      const text = await extractPdfText(file)
-      setFile({ name: file.name, text })
+      if (isDemoMode) {
+        await new Promise((resolve) => window.setTimeout(resolve, DEMO_UPLOAD_DELAY_MS))
+        setFile({ name: file.name, text: '' })
+      } else {
+        const text = await extractPdfText(file)
+        setFile({ name: file.name, text })
+      }
       playUploadSound()
     } catch (err) {
       setError(`Failed to read PDF: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -425,25 +456,26 @@ export default function Home() {
     }
   }
 
-  const buildSessionConfig = async () => {
-    if (!fileA || !fileB) {
+  const buildBaseSessionConfig = (materials: Array<{ name: string; text: string; role: string }>) => ({
+    proceedingType: 'demo' as const,
+    userRole: 'attorney' as const,
+    materials,
+    useMultiAgentJudge: true,
+    sessionDurationSeconds: sessionDuration,
+    enabledJudgeAgentIds,
+    judgeAvatarDifficulty: DEFAULT_JUDGE_AVATAR_DIFFICULTY,
+    userPartyRole: DEFAULT_USER_PARTY_ROLE,
+  })
+
+  const buildLiveSessionConfig = async () => {
+    if (!fileA?.text || !fileB?.text) {
       throw new Error('Both briefs are required')
     }
 
-
-      const baseConfig = {
-        proceedingType: 'demo' as const,
-        userRole: 'attorney' as const,
-        materials: [
-          { name: fileA.name, text: fileA.text, role: 'appellant' },
-          { name: fileB.name, text: fileB.text, role: 'respondent' },
-        ],
-        useMultiAgentJudge: true,
-        sessionDurationSeconds: sessionDuration,
-        enabledJudgeAgentIds,
-        judgeAvatarDifficulty: DEFAULT_JUDGE_AVATAR_DIFFICULTY,
-        userPartyRole: DEFAULT_USER_PARTY_ROLE,
-      }
+    const baseConfig = buildBaseSessionConfig([
+      { name: fileA.name, text: fileA.text, role: 'appellant' },
+      { name: fileB.name, text: fileB.text, role: 'respondent' },
+    ])
 
     try {
       const agendaData = await generateOrchestratedAgenda(fileA.text, fileB.text, setLoadingStatus)
@@ -457,6 +489,44 @@ export default function Home() {
     } catch (summaryError) {
       console.warn('Session config build failed, using fallback:', summaryError)
       return { ...baseConfig }
+    }
+  }
+
+  const loadPreanalyzedDemoAgenda = async (onStatus?: (msg: string) => void) => {
+    const phaseKeys = ['extracting', 'agendas', 'refinement', 'mcts'] as const
+    const perPhaseMs = DEMO_FAKE_ANALYSIS_MS / phaseKeys.length
+
+    for (const phase of phaseKeys) {
+      onStatus?.(PHASE_LABELS[phase] ?? '')
+      await new Promise((resolve) => window.setTimeout(resolve, perPhaseMs))
+    }
+
+    const rawDone = demoPredictedTopicSets as RawDonePayload
+    const agendaItems = buildAgendaItemsFromPredictions(rawDone)
+
+    return {
+      predictedTopicSets: rawDone,
+      case_summary: rawDone.case_summary as string | undefined,
+      agendaItems,
+    }
+  }
+
+  const buildDemoSessionConfig = async () => {
+    if (!fileA || !fileB) {
+      throw new Error('Both files are required')
+    }
+
+    const agendaData = await loadPreanalyzedDemoAgenda(setLoadingStatus)
+    const baseConfig = buildBaseSessionConfig([
+      { name: fileA.name, text: appellantBriefRaw, role: 'appellant' },
+      { name: fileB.name, text: respondentBriefRaw, role: 'respondent' },
+    ])
+
+    return {
+      ...baseConfig,
+      judicialSummary: agendaData.case_summary,
+      predictedTopicSets: agendaData.predictedTopicSets,
+      agendaItems: agendaData.agendaItems,
     }
   }
 
@@ -517,21 +587,7 @@ export default function Home() {
 
       if (!rawDone) return null
 
-      const predictions = (rawDone.predictions as Array<{ prediction_id: number; lens: string; rationale: string; topics: Array<{ title: string; description?: string }> }> ?? []).filter(
-        (p) => (p.topics?.length ?? 0) > 0 && p.rationale !== 'Parse error.'
-      )
-
-      const agendaItems: SessionAgendaItem[] = predictions.map((p) => ({
-        id: String(p.prediction_id),
-        lens: p.lens,
-        rationale: p.rationale,
-        topics: p.topics.map((t, i) => ({
-          order: i,
-          title: t.title,
-          description: t.description ?? '',
-        })),
-        agentId: null,
-      }))
+      const agendaItems = buildAgendaItemsFromPredictions(rawDone as RawDonePayload)
 
       return {
         predictedTopicSets: rawDone,
@@ -545,8 +601,8 @@ export default function Home() {
   }
 
   const enterCourtroom = async () => {
-    if (!fileA?.text || !fileB?.text) {
-      setError('Please upload both briefs before entering the courtroom')
+    if (!fileA || !fileB) {
+      setError(isDemoMode ? 'Please upload both files before entering the courtroom' : 'Please upload both briefs before entering the courtroom')
       return
     }
 
@@ -555,7 +611,7 @@ export default function Home() {
     setIntakePhase('launching')
 
     try {
-      const sessionPromise = buildSessionConfig()
+      const sessionPromise = isDemoMode ? buildDemoSessionConfig() : buildLiveSessionConfig()
       playBriefSendWhoosh()
 
       await new Promise((resolve) => window.setTimeout(resolve, 900))
@@ -563,10 +619,10 @@ export default function Home() {
 
       const [sessionConfig] = await Promise.all([
         sessionPromise,
-        new Promise((resolve) => window.setTimeout(resolve, 2200)),
+        new Promise((resolve) => window.setTimeout(resolve, isDemoMode ? 0 : 2200)),
       ])
 
-      await preloadCourtroomGlbAssets((loaded, total) => {
+      await preloadCourtroomGlbAssets(DEFAULT_JUDGE_AVATAR_DIFFICULTY, (loaded, total) => {
         if (loaded >= total) {
           setLoadingStatus('Finalizing courtroom…')
           return
@@ -588,11 +644,7 @@ export default function Home() {
   const clearAll = () => {
     if (intakePhase !== 'idle') return
 
-    setFileA(null)
-    setFileB(null)
-    setError('')
-    if (inputRefA.current) inputRefA.current.value = ''
-    if (inputRefB.current) inputRefB.current.value = ''
+    resetUploadedFiles()
   }
 
   const removeFile = (which: 'a' | 'b') => {
@@ -811,8 +863,13 @@ export default function Home() {
     </div>
   ) : null
 
-  const enterDeskStage = async () => {
+  const enterDeskStage = async (mode: IntakeMode) => {
     if (stage === 'desk' || landingExitActive) return
+    if (mode === 'demo') {
+      setIsEnteringDemo(true)
+    }
+    setIntakeMode(mode)
+    resetUploadedFiles()
     await unlockAudio()
     playBriefSendWhoosh()
     setVolumePopoverOpen(false)
@@ -826,6 +883,7 @@ export default function Home() {
       stopBackgroundMusic()
       setStage('desk')
       setLandingExitActive(false)
+      setIsEnteringDemo(false)
       landingExitTimerRef.current = null
     }, LANDING_TO_DESK_TRANSITION_MS)
 
@@ -876,9 +934,17 @@ export default function Home() {
             <button
               type="button"
               className="landing-single-start-btn landing-intro-start-btn"
-              onClick={enterDeskStage}
+              onClick={() => enterDeskStage('live')}
             >
               prepare for moot court
+            </button>
+            <button
+              type="button"
+              className="landing-demo-btn"
+              onClick={() => enterDeskStage('demo')}
+              disabled={isEnteringDemo}
+            >
+              {isEnteringDemo ? 'Loading demo…' : 'demo mode'}
             </button>
           </div>
         </div>
@@ -1077,7 +1143,7 @@ export default function Home() {
                       <input
                         ref={inputRefA}
                         type="file"
-                        accept=".pdf,application/pdf"
+                        accept={isDemoMode ? undefined : '.pdf,application/pdf'}
                         onChange={(e) => {
                           const file = e.target.files?.[0]
                           if (file) handleFileUpload(file, setFileA, setLoadingA)
@@ -1127,7 +1193,7 @@ export default function Home() {
                       <input
                         ref={inputRefB}
                         type="file"
-                        accept=".pdf,application/pdf"
+                        accept={isDemoMode ? undefined : '.pdf,application/pdf'}
                         onChange={(e) => {
                           const file = e.target.files?.[0]
                           if (file) handleFileUpload(file, setFileB, setLoadingB)

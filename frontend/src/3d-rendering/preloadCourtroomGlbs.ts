@@ -6,17 +6,12 @@ import {
   FURNITURE_GLB_SETTINGS,
   JUDGE_AVATAR_ASSETS_BY_DIFFICULTY,
 } from './scenePresets'
+import type { JudgeAvatarDifficulty } from './types'
 
 const PRELOAD_TIMEOUT_MS = 120_000
 const PRELOAD_POLL_INTERVAL_MS = 120
 
-const COURTROOM_GLB_ASSET_URLS = Array.from(new Set([
-  ...Object.values(FURNITURE_GLB_SETTINGS).map((asset) => asset.url),
-  ...Object.values(AVATAR_GLB_ASSETS.counsel),
-  ...Object.values(JUDGE_AVATAR_ASSETS_BY_DIFFICULTY).flatMap((assetLibrary) => Object.values(assetLibrary)),
-]))
-
-let preloadCourtroomGlbsPromise: Promise<void> | null = null
+const preloadCourtroomGlbsPromises = new Map<JudgeAvatarDifficulty, Promise<void>>()
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return (
@@ -27,48 +22,84 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   )
 }
 
-function isAssetResolved(assetUrl: string): boolean {
-  const cached = peek([GLTFLoader, assetUrl])
-  return cached !== undefined && !isPromiseLike(cached)
+type AssetStatus = 'pending' | 'resolved' | 'failed'
+
+function getCourtroomGlbAssetUrls(judgeDifficulty: JudgeAvatarDifficulty): string[] {
+  return Array.from(new Set([
+    ...Object.values(FURNITURE_GLB_SETTINGS).map((asset) => asset.url),
+    ...Object.values(AVATAR_GLB_ASSETS.counsel),
+    ...Object.values(JUDGE_AVATAR_ASSETS_BY_DIFFICULTY[judgeDifficulty] ?? JUDGE_AVATAR_ASSETS_BY_DIFFICULTY.medium),
+  ]))
+}
+
+function getAssetStatus(assetUrl: string): AssetStatus {
+  try {
+    const cached = peek([GLTFLoader, assetUrl])
+    if (cached === undefined || isPromiseLike(cached)) {
+      return 'pending'
+    }
+    return 'resolved'
+  } catch {
+    return 'failed'
+  }
 }
 
 export function preloadCourtroomGlbAssets(
+  judgeDifficulty: JudgeAvatarDifficulty = 'medium',
   onProgress?: (loaded: number, total: number) => void
 ): Promise<void> {
-  if (preloadCourtroomGlbsPromise) return preloadCourtroomGlbsPromise
+  const existingPromise = preloadCourtroomGlbsPromises.get(judgeDifficulty)
+  if (existingPromise) return existingPromise
 
-  preloadCourtroomGlbsPromise = (async () => {
-    for (const assetUrl of COURTROOM_GLB_ASSET_URLS) {
+  const assetUrls = getCourtroomGlbAssetUrls(judgeDifficulty)
+
+  const preloadPromise = (async () => {
+    for (const assetUrl of assetUrls) {
       useGLTF.preload(assetUrl)
     }
 
-    const totalAssets = COURTROOM_GLB_ASSET_URLS.length
+    const totalAssets = assetUrls.length
     const startedAt = Date.now()
-    let previousLoadedCount = -1
+    let previousSettledCount = -1
 
     while (true) {
-      const loadedCount = COURTROOM_GLB_ASSET_URLS.reduce(
-        (count, assetUrl) => count + (isAssetResolved(assetUrl) ? 1 : 0),
-        0
-      )
+      let failedCount = 0
+      const settledCount = assetUrls.reduce((count, assetUrl) => {
+        const status = getAssetStatus(assetUrl)
+        if (status === 'failed') failedCount += 1
+        return count + (status === 'pending' ? 0 : 1)
+      }, 0)
 
-      if (loadedCount !== previousLoadedCount) {
-        previousLoadedCount = loadedCount
-        onProgress?.(loadedCount, totalAssets)
+      if (settledCount !== previousSettledCount) {
+        previousSettledCount = settledCount
+        onProgress?.(settledCount, totalAssets)
       }
 
-      if (loadedCount >= totalAssets) return
+      if (settledCount >= totalAssets) {
+        if (failedCount > 0) {
+          console.warn(
+            `[preloadCourtroomGlbAssets] ${failedCount} asset(s) failed to preload for judge difficulty "${judgeDifficulty}".`
+          )
+        }
+        return
+      }
 
       if (Date.now() - startedAt > PRELOAD_TIMEOUT_MS) {
-        throw new Error(`Timed out while loading courtroom models (${loadedCount}/${totalAssets})`)
+        console.warn(
+          `[preloadCourtroomGlbAssets] Timed out while loading courtroom models (${settledCount}/${totalAssets}) for judge difficulty "${judgeDifficulty}". Continuing without waiting for the remaining assets.`
+        )
+        onProgress?.(totalAssets, totalAssets)
+        return
       }
 
       await new Promise((resolve) => setTimeout(resolve, PRELOAD_POLL_INTERVAL_MS))
     }
   })()
 
-  return preloadCourtroomGlbsPromise.catch((error) => {
-    preloadCourtroomGlbsPromise = null
+  preloadCourtroomGlbsPromises.set(judgeDifficulty, preloadPromise)
+
+  return preloadPromise.catch((error) => {
+    preloadCourtroomGlbsPromises.delete(judgeDifficulty)
     throw error
   })
 }

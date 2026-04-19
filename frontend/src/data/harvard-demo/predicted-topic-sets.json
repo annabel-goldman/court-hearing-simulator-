@@ -1,0 +1,823 @@
+{
+  "case_summary": "This case concerns whether 18 U.S.C. § 922(g)(5)(A), which prohibits unlawful noncitizens from possessing firearms, violates the Second Amendment. The petitioner (United States) argues that unlawful noncitizens are not part of 'the people' protected by the Second Amendment and that the historical tradition of firearms regulation supports disarming those unlawfully present. The respondent argues that 'the people' encompasses all persons with sufficient connections to the United States, including unlawful noncitizens, and that no historical tradition justifies a categorical ban on their firearm possession.",
+  "key_legal_issues": [
+    "Whether unlawful noncitizens are part of 'the people' protected by the Second Amendment",
+    "Whether 18 U.S.C. § 922(g)(5)(A) is consistent with the historical tradition of firearms regulation under the Bruen framework",
+    "Whether the 'sufficient connections' test from United States v. Verdugo-Urquidez controls the definition of 'the people' across constitutional provisions",
+    "Whether historical analogs support categorical disarmament of unlawful noncitizens",
+    "Whether the government's interest in public safety justifies restricting Second Amendment rights based on immigration status"
+  ],
+  "predictions": [
+    {
+      "prediction_id": 1,
+      "lens": "Precedent & Stare Decisis",
+      "rationale": "A judge using this lens would focus on binding precedents and whether the case requires overruling or distinguishing them, given the circuit split and conflicting interpretations of key cases.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Heller's scope on 'the people'",
+          "description": "Probe respondent on why Heller's discussion of 'the people' did not overrule or limit Verdugo-Urquidez's definition for the Second Amendment.",
+          "target": "respondent"
+        },
+        {
+          "order": 2,
+          "title": "Verdugo-Urquidez's controlling weight",
+          "description": "Probe petitioner on why Verdugo-Urquidez's definition of 'the people' is dicta and not binding, despite its direct holding on the Fourth Amendment's 'the people' clause.",
+          "target": "petitioner"
+        }
+      ]
+    },
+    {
+      "prediction_id": 2,
+      "lens": "Agency Deference & Administrative Law",
+      "rationale": "A judge applying this lens would examine whether the statute's application to unlawful noncitizens reflects a permissible agency interpretation within delegated authority, focusing on the adequacy of the agency's historical reasoning and record.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Statutory ambiguity on 'the people'",
+          "description": "Is the term 'the people' in the Second Amendment ambiguous as applied to unlawful noncitizens, requiring agency interpretation under Chevron step one?",
+          "target": "both"
+        },
+        {
+          "order": 2,
+          "title": "Reasonableness of agency view",
+          "description": "If ambiguous, is the agency's interpretation that unlawful noncitizens are not 'the people' a reasonable construction of the statute?",
+          "target": "petitioner"
+        }
+      ]
+    },
+    {
+      "prediction_id": 3,
+      "lens": "Weakest Links in Each Party's Argument",
+      "rationale": "A judge using this lens would focus on the core definitional clash over 'the people' and the methodological dispute over historical analogies, as these are the foundational vulnerabilities each side must defend.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Historical Analog Requirement",
+          "description": "Stress-test the respondent's insistence on a precise historical analog for disarming unlawful noncitizens, asking whether the Court's categorical approach to historical tradition permits abstract principles like disarming law-violators or those lacking allegiance.",
+          "target": "respondent"
+        },
+        {
+          "order": 2,
+          "title": "Categorical vs. Individualized Analysis",
+          "description": "Probe whether the Second Amendment's historical tradition test allows for categorical disarmament of groups like unlawful noncitizens, or if it requires consideration of individual circumstances as the respondent contends.",
+          "target": "respondent"
+        }
+      ]
+    },
+    {
+      "prediction_id": 4,
+      "lens": "Weakest Links in Each Party's Argument",
+      "rationale": "A judge using this lens would focus on the core definitional clash over 'the people' and the methodological dispute over historical analogies, as these are the foundational vulnerabilities each side must defend.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Citizens-Only Theory Vulnerability",
+          "description": "Probe the petitioner's claim that only citizens are 'the people' by pressing on historical counterexamples of noncitizens holding rights and the practical consequences of excluding millions of residents from the Second Amendment.",
+          "target": "petitioner"
+        },
+        {
+          "order": 2,
+          "title": "Defining 'the people'",
+          "description": "How would a ruling equating 'the people' with citizens affect the constitutional rights of noncitizens in other contexts, such as due process or free speech, and what would be the practical institutional impact on courts and agencies required to make citizenship determinations?",
+          "target": "both"
+        }
+      ]
+    },
+    {
+      "prediction_id": 5,
+      "lens": "Policy Consequences & Practical Impact",
+      "rationale": "A judge using this lens seeks to understand the tangible, real-world effects of the ruling beyond abstract constitutional interpretation, focusing on how the decision will shape regulatory frameworks, institutional operations, and practical consequences for society.",
+      "topics": [
+        {
+          "order": 1,
+          "title": "Defining 'the people'",
+          "description": "How would a ruling equating 'the people' with citizens affect the constitutional rights of noncitizens in other contexts, such as due process or free speech, and what would be the practical institutional impact on courts and agencies required to make citizenship determinations?",
+          "target": "both"
+        },
+        {
+          "order": 2,
+          "title": "Citizens-Only Theory Vulnerability",
+          "description": "Probe the petitioner's claim that only citizens are 'the people' by pressing on historical counterexamples of noncitizens holding rights and the practical consequences of excluding millions of residents from the Second Amendment.",
+          "target": "petitioner"
+        }
+      ]
+    }
+  ],
+  "total_predictions": 5,
+  "mcts_tree": {
+    "nodes": [
+      {
+        "id": 0,
+        "label": "",
+        "visits": 800,
+        "avg_value": 0.414,
+        "depth": 0
+      },
+      {
+        "id": 18,
+        "label": "Citizens-Only Theory Vulnerability",
+        "visits": 29,
+        "avg_value": 0.489,
+        "depth": 1
+      },
+      {
+        "id": 41,
+        "label": "Reasonableness of agency view",
+        "visits": 1,
+        "avg_value": 0.502,
+        "depth": 2
+      },
+      {
+        "id": 74,
+        "label": "Statutory ambiguity on 'the people'",
+        "visits": 1,
+        "avg_value": 0.529,
+        "depth": 2
+      },
+      {
+        "id": 105,
+        "label": "Heller's scope on 'the people'",
+        "visits": 1,
+        "avg_value": 0.473,
+        "depth": 2
+      },
+      {
+        "id": 137,
+        "label": "Precedent defining 'the people'",
+        "visits": 1,
+        "avg_value": 0.484,
+        "depth": 2
+      },
+      {
+        "id": 170,
+        "label": "Delegation of rights-defining authority",
+        "visits": 1,
+        "avg_value": 0.493,
+        "depth": 2
+      },
+      {
+        "id": 198,
+        "label": "Agency historical analysis adequacy",
+        "visits": 1,
+        "avg_value": 0.505,
+        "depth": 2
+      },
+      {
+        "id": 26,
+        "label": "Defining 'the people'",
+        "visits": 29,
+        "avg_value": 0.488,
+        "depth": 1
+      },
+      {
+        "id": 42,
+        "label": "Heller's scope on 'the people'",
+        "visits": 1,
+        "avg_value": 0.426,
+        "depth": 2
+      },
+      {
+        "id": 77,
+        "label": "State law conflicts",
+        "visits": 1,
+        "avg_value": 0.532,
+        "depth": 2
+      },
+      {
+        "id": 107,
+        "label": "Immigration policy deference limits",
+        "visits": 1,
+        "avg_value": 0.477,
+        "depth": 2
+      },
+      {
+        "id": 140,
+        "label": "Judicial administration burdens",
+        "visits": 1,
+        "avg_value": 0.636,
+        "depth": 2
+      },
+      {
+        "id": 165,
+        "label": "Precedent defining 'the people'",
+        "visits": 1,
+        "avg_value": 0.658,
+        "depth": 2
+      },
+      {
+        "id": 186,
+        "label": "International norm implications",
+        "visits": 1,
+        "avg_value": 0.543,
+        "depth": 2
+      },
+      {
+        "id": 8,
+        "label": "Precedent Tension: Verdugo-Urquidez",
+        "visits": 27,
+        "avg_value": 0.467,
+        "depth": 1
+      },
+      {
+        "id": 49,
+        "label": "Gun commerce impacts",
+        "visits": 1,
+        "avg_value": 0.537,
+        "depth": 2
+      },
+      {
+        "id": 73,
+        "label": "Noncitizen rights precedents",
+        "visits": 1,
+        "avg_value": 0.316,
+        "depth": 2
+      },
+      {
+        "id": 112,
+        "label": "Historical tradition test application",
+        "visits": 1,
+        "avg_value": 0.438,
+        "depth": 2
+      },
+      {
+        "id": 146,
+        "label": "Overruling precedent consequences",
+        "visits": 1,
+        "avg_value": 0.612,
+        "depth": 2
+      },
+      {
+        "id": 171,
+        "label": "Reasonableness of agency view",
+        "visits": 1,
+        "avg_value": 0.474,
+        "depth": 2
+      },
+      {
+        "id": 201,
+        "label": "Verdugo-Urquidez's controlling weight",
+        "visits": 1,
+        "avg_value": 0.623,
+        "depth": 2
+      },
+      {
+        "id": 29,
+        "label": "Judicial administration burdens",
+        "visits": 27,
+        "avg_value": 0.468,
+        "depth": 1
+      },
+      {
+        "id": 48,
+        "label": "Textual relationship to immigration law",
+        "visits": 1,
+        "avg_value": 0.397,
+        "depth": 2
+      },
+      {
+        "id": 81,
+        "label": "Reasonableness of agency view",
+        "visits": 1,
+        "avg_value": 0.461,
+        "depth": 2
+      },
+      {
+        "id": 111,
+        "label": "Administering status-based bans",
+        "visits": 1,
+        "avg_value": 0.645,
+        "depth": 2
+      },
+      {
+        "id": 138,
+        "label": "Plain meaning of statutory scheme",
+        "visits": 1,
+        "avg_value": 0.34,
+        "depth": 2
+      },
+      {
+        "id": 176,
+        "label": "Definition of 'unlawfully present'",
+        "visits": 1,
+        "avg_value": 0.429,
+        "depth": 2
+      },
+      {
+        "id": 206,
+        "label": "Precedent for noncitizen rights",
+        "visits": 1,
+        "avg_value": 0.559,
+        "depth": 2
+      },
+      {
+        "id": 12,
+        "label": "Practical Implications of Rulings",
+        "visits": 26,
+        "avg_value": 0.454,
+        "depth": 1
+      },
+      {
+        "id": 45,
+        "label": "Defining 'the people'",
+        "visits": 1,
+        "avg_value": 0.529,
+        "depth": 2
+      },
+      {
+        "id": 72,
+        "label": "Overruling precedent consequences",
+        "visits": 1,
+        "avg_value": 0.484,
+        "depth": 2
+      },
+      {
+        "id": 106,
+        "label": "Historical tradition test application",
+        "visits": 1,
+        "avg_value": 0.402,
+        "depth": 2
+      },
+      {
+        "id": 142,
+        "label": "Precedent Tension: Verdugo-Urquidez",
+        "visits": 1,
+        "avg_value": 0.602,
+        "depth": 2
+      },
+      {
+        "id": 169,
+        "label": "Reasonableness of agency view",
+        "visits": 1,
+        "avg_value": 0.417,
+        "depth": 2
+      },
+      {
+        "id": 200,
+        "label": "Lawful Status Prerequisite",
+        "visits": 1,
+        "avg_value": 0.526,
+        "depth": 2
+      },
+      {
+        "id": 3,
+        "label": "Lawful Status Prerequisite",
+        "visits": 25,
+        "avg_value": 0.442,
+        "depth": 1
+      },
+      {
+        "id": 63,
+        "label": "Categorical vs. Individualized Analysis",
+        "visits": 1,
+        "avg_value": 0.529,
+        "depth": 2
+      },
+      {
+        "id": 86,
+        "label": "Meaning of 'the people'",
+        "visits": 1,
+        "avg_value": 0.32,
+        "depth": 2
+      },
+      {
+        "id": 123,
+        "label": "Historical Analog Requirement",
+        "visits": 1,
+        "avg_value": 0.523,
+        "depth": 2
+      },
+      {
+        "id": 150,
+        "label": "Circuit split existence",
+        "visits": 1,
+        "avg_value": 0.34,
+        "depth": 2
+      },
+      {
+        "id": 188,
+        "label": "Gun commerce impacts",
+        "visits": 1,
+        "avg_value": 0.536,
+        "depth": 2
+      },
+      {
+        "id": 217,
+        "label": "Overruling precedent consequences",
+        "visits": 1,
+        "avg_value": 0.475,
+        "depth": 2
+      }
+    ],
+    "edges": [
+      {
+        "source": 0,
+        "target": 18
+      },
+      {
+        "source": 18,
+        "target": 41
+      },
+      {
+        "source": 18,
+        "target": 74
+      },
+      {
+        "source": 18,
+        "target": 105
+      },
+      {
+        "source": 18,
+        "target": 137
+      },
+      {
+        "source": 18,
+        "target": 170
+      },
+      {
+        "source": 18,
+        "target": 198
+      },
+      {
+        "source": 0,
+        "target": 26
+      },
+      {
+        "source": 26,
+        "target": 42
+      },
+      {
+        "source": 26,
+        "target": 77
+      },
+      {
+        "source": 26,
+        "target": 107
+      },
+      {
+        "source": 26,
+        "target": 140
+      },
+      {
+        "source": 26,
+        "target": 165
+      },
+      {
+        "source": 26,
+        "target": 186
+      },
+      {
+        "source": 0,
+        "target": 8
+      },
+      {
+        "source": 8,
+        "target": 49
+      },
+      {
+        "source": 8,
+        "target": 73
+      },
+      {
+        "source": 8,
+        "target": 112
+      },
+      {
+        "source": 8,
+        "target": 146
+      },
+      {
+        "source": 8,
+        "target": 171
+      },
+      {
+        "source": 8,
+        "target": 201
+      },
+      {
+        "source": 0,
+        "target": 29
+      },
+      {
+        "source": 29,
+        "target": 48
+      },
+      {
+        "source": 29,
+        "target": 81
+      },
+      {
+        "source": 29,
+        "target": 111
+      },
+      {
+        "source": 29,
+        "target": 138
+      },
+      {
+        "source": 29,
+        "target": 176
+      },
+      {
+        "source": 29,
+        "target": 206
+      },
+      {
+        "source": 0,
+        "target": 12
+      },
+      {
+        "source": 12,
+        "target": 45
+      },
+      {
+        "source": 12,
+        "target": 72
+      },
+      {
+        "source": 12,
+        "target": 106
+      },
+      {
+        "source": 12,
+        "target": 142
+      },
+      {
+        "source": 12,
+        "target": 169
+      },
+      {
+        "source": 12,
+        "target": 200
+      },
+      {
+        "source": 0,
+        "target": 3
+      },
+      {
+        "source": 3,
+        "target": 63
+      },
+      {
+        "source": 3,
+        "target": 86
+      },
+      {
+        "source": 3,
+        "target": 123
+      },
+      {
+        "source": 3,
+        "target": 150
+      },
+      {
+        "source": 3,
+        "target": 188
+      },
+      {
+        "source": 3,
+        "target": 217
+      }
+    ]
+  },
+  "full_topic_pool": [
+    {
+      "title": "Meaning of 'the people'",
+      "description": "What is the plain, contemporary meaning of 'the people' in the Second Amendment, and does it unambiguously exclude noncitizens?",
+      "target": "both",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Statutory scope of \u00a7 922(g)(5)(A)",
+      "description": "Does the text of 18 U.S.C. \u00a7 922(g)(5)(A) plainly apply to all noncitizens 'unlawfully present,' or is it ambiguous?",
+      "target": "petitioner",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Definition of 'unlawfully present'",
+      "description": "What is the ordinary meaning of 'unlawfully present' in the Immigration and Nationality Act, and does it clearly cover Doe's status?",
+      "target": "respondent",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Textual relationship to immigration law",
+      "description": "Does the plain text of \u00a7 922(g)(5)(A) conflict with or incorporate definitions from federal immigration statutes?",
+      "target": "petitioner",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Workability of 'sufficient connections'",
+      "description": "Is the phrase 'sufficient connections' a clear textual standard from Verdugo-Urquidez, or is it inherently vague?",
+      "target": "respondent",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Plain meaning of statutory scheme",
+      "description": "Considering the text of \u00a7 922(g)(5)(A) alongside related provisions like \u00a7 922(d)(5)(A), what is the most natural reading?",
+      "target": "both",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Ambiguity resolution against government",
+      "description": "If the text of \u00a7 922(g)(5)(A) is ambiguous regarding noncitizens, does the rule of lenity or constitutional avoidance apply?",
+      "target": "respondent",
+      "lens": "Statutory Text & Plain Meaning",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Verdugo-Urquidez's controlling weight",
+      "description": "Probe petitioner on why Verdugo-Urquidez's definition of 'the people' is dicta and not binding, despite its direct holding on the Fourth Amendment's 'the people' clause.",
+      "target": "petitioner",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Heller's scope on 'the people'",
+      "description": "Probe respondent on why Heller's discussion of 'the people' did not overrule or limit Verdugo-Urquidez's definition for the Second Amendment.",
+      "target": "respondent",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Precedent defining 'the people'",
+      "description": "Ask both parties to reconcile their interpretations with the circuit's prior decisions defining 'the people' in other constitutional contexts.",
+      "target": "both",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Historical tradition test application",
+      "description": "Probe both parties on how Bruen's historical tradition test applies when a precedent like Verdugo-Urquidez defines the class of rights-holders.",
+      "target": "both",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Circuit split existence",
+      "description": "Ask petitioner to concede whether a circuit split exists on whether noncitizens unlawfully present are 'the people' under the Second Amendment.",
+      "target": "petitioner",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Noncitizen rights precedents",
+      "description": "Probe respondent on how cases like Bridges v. Wixon, which recognize noncitizens' constitutional rights, interact with a citizenship requirement.",
+      "target": "respondent",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Overruling precedent consequences",
+      "description": "Ask petitioner to address the stare decisis implications of overruling or distinguishing Verdugo-Urquidez's core holding on 'the people.'",
+      "target": "petitioner",
+      "lens": "Precedent & Stare Decisis",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Statutory ambiguity on 'the people'",
+      "description": "Is the term 'the people' in the Second Amendment ambiguous as applied to unlawful noncitizens, requiring agency interpretation under Chevron step one?",
+      "target": "both",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Reasonableness of agency view",
+      "description": "If ambiguous, is the agency's interpretation that unlawful noncitizens are not 'the people' a reasonable construction of the statute?",
+      "target": "petitioner",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Agency historical analysis adequacy",
+      "description": "Did the agency adequately consider founding-era historical evidence in concluding that unlawful noncitizens may be disarmed, and is the record sufficient?",
+      "target": "both",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Arbitrary classification without exceptions",
+      "description": "Is the agency's blanket prohibition on unlawful noncitizens possessing firearms arbitrary and capricious for failing to consider individual circumstances or ties to the U.S.?",
+      "target": "respondent",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Delegation of rights-defining authority",
+      "description": "Did Congress properly delegate to the agency the authority to define the scope of Second Amendment rights, or does that raise constitutional concerns?",
+      "target": "petitioner",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Immigration policy deference limits",
+      "description": "To what extent should the court defer to the agency's immigration policy judgment in disarming a class of noncitizens, given the fundamental nature of the right?",
+      "target": "petitioner",
+      "lens": "Agency Deference & Administrative Law",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Citizens-Only Theory Vulnerability",
+      "description": "Probe the petitioner's claim that only citizens are 'the people' by pressing on historical counterexamples of noncitizens holding rights and the practical consequences of excluding millions of residents from the Second Amendment.",
+      "target": "petitioner",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Historical Analog Requirement",
+      "description": "Stress-test the respondent's insistence on a precise historical analog for disarming unlawful noncitizens, asking whether the Court's categorical approach to historical tradition permits abstract principles like disarming law-violators or those lacking allegiance.",
+      "target": "respondent",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Sufficient Connections Test",
+      "description": "Examine the viability of the 'sufficient connections' standard the respondent advocates and the petitioner rejects, questioning how it operates for unlawful entrants and whether it creates an unworkable, subjective inquiry.",
+      "target": "both",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Lawful Status Prerequisite",
+      "description": "Challenge the petitioner's alternative argument that lawful status is a necessary component of 'sufficient connections,' testing the historical and precedential support for tying constitutional rights to immigration status.",
+      "target": "petitioner",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Categorical vs. Individualized Analysis",
+      "description": "Probe whether the Second Amendment's historical tradition test allows for categorical disarmament of groups like unlawful noncitizens, or if it requires consideration of individual circumstances as the respondent contends.",
+      "target": "respondent",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Practical Implications of Rulings",
+      "description": "Question both sides on the real-world consequences of their tests: whether the petitioner's rule would affect lawful permanent residents, and whether the respondent's rule would limit the government's ability to disarm other dangerous categories.",
+      "target": "both",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Precedent Tension: Verdugo-Urquidez",
+      "description": "Address the central tension between the petitioner's reading of 'the people' and the Court's statement in Verdugo-Urquidez that the term refers to a 'class of persons' with sufficient connections, asking which reading controls.",
+      "target": "both",
+      "lens": "Weakest Links in Each Party's Argument",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Defining 'the people'",
+      "description": "How would a ruling equating 'the people' with citizens affect the constitutional rights of noncitizens in other contexts, such as due process or free speech, and what would be the practical institutional impact on courts and agencies required to make citizenship determinations?",
+      "target": "both",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Administering status-based bans",
+      "description": "If the Court upholds \u00a7 922(g)(5)(A), what specific administrative mechanisms would the ATF and background check system need to reliably verify an individual's unlawful presence status, and what would be the operational burden and error rate?",
+      "target": "petitioner",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "State law conflicts",
+      "description": "If the Court rules that unlawful noncitizens have Second Amendment rights, how would that interact with state laws that prohibit firearm possession by anyone not lawfully present, and would this create an unmanageable patchwork of conflicting regulations?",
+      "target": "respondent",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Gun commerce impacts",
+      "description": "What would be the practical effect on federally licensed firearms dealers and the commercial market if they were required to assess a buyer's 'sufficient connections' to the country or immigration status beyond the existing background check system?",
+      "target": "both",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Precedent for noncitizen rights",
+      "description": "Would a citizens-only holding for the Second Amendment logically extend to limit other fundamental rights for noncitizens, such as access to education or protection from unreasonable searches, and what would be the societal consequence?",
+      "target": "petitioner",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "Judicial administration burdens",
+      "description": "If the Court requires an individualized assessment of a noncitizen's 'connections' to the United States, how would courts manage the resulting flood of litigation over status, and what resources would be diverted from other cases?",
+      "target": "respondent",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    },
+    {
+      "title": "International norm implications",
+      "description": "How would a ruling that permanently disarms a class of residents based on immigration status be viewed under international human rights norms, and what practical diplomatic or treaty-based consequences might follow?",
+      "target": "both",
+      "lens": "Policy Consequences & Practical Impact",
+      "exploitability": 0.5
+    }
+  ]
+}
